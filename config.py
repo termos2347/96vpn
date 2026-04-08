@@ -1,10 +1,12 @@
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
-    raise ValueError("Не найден BOT_TOKEN в окружении. Укажите его в файле .env")
+    raise ValueError("BOT_TOKEN не найден в .env файле")
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL не найден в .env файле")
