@@ -17,7 +17,8 @@ async def get_or_create_user(user_id: int, username: str = None):
             await session.commit()
         return user
 
-async def set_subscription(user_id: int, days: int):
+# === VPN подписка ===
+async def set_vpn_subscription(user_id: int, days: int):
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))
         user = result.scalar_one_or_none()
@@ -26,21 +27,48 @@ async def set_subscription(user_id: int, days: int):
             session.add(user)
             await session.flush()
         new_end = datetime.now() + timedelta(days=days)
-        user.subscription_end = new_end
+        user.vpn_subscription_end = new_end
         await session.commit()
-        print(f"[DB] Subscription set for {user_id}: {new_end}")
         return True
 
-async def is_subscription_active(user_id: int) -> bool:
+async def is_vpn_active(user_id: int) -> bool:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))
         user = result.scalar_one_or_none()
-        if user and user.subscription_end:
-            return user.subscription_end > datetime.now()
+        if user and user.vpn_subscription_end:
+            return user.vpn_subscription_end > datetime.now()
         return False
 
-async def get_subscription_end(user_id: int):
+async def get_vpn_end(user_id: int):
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))
         user = result.scalar_one_or_none()
-        return user.subscription_end if user else None
+        return user.vpn_subscription_end if user else None
+
+# === Bypass (обход) подписка ===
+async def set_bypass_subscription(user_id: int, days: int):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(user_id=user_id)
+            session.add(user)
+            await session.flush()
+        new_end = datetime.now() + timedelta(days=days)
+        user.bypass_subscription_end = new_end
+        await session.commit()
+        return True
+
+async def is_bypass_active(user_id: int) -> bool:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if user and user.bypass_subscription_end:
+            return user.bypass_subscription_end > datetime.now()
+        return False
+
+async def get_bypass_end(user_id: int):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        return user.bypass_subscription_end if user else None
