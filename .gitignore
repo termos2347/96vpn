@@ -1,0 +1,15 @@
+# Секретные данные
+.env
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Виртуальное окружение
+venv/
+env/
+.env/
+
+# Файлы IDE
+.vscode/
+.idea/
