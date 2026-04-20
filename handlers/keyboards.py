@@ -1,11 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from .callbacks import (
-    VPNCurrencyCallback, VPNPeriodCallback,
-    BypassCurrencyCallback, BypassPeriodCallback,
-    BackCallback
-)
 
-# ---------- Вспомогательная функция для символа валюты ----------
 def currency_symbol(currency: str) -> str:
     if currency == "rub":
         return "₽"
@@ -15,7 +9,6 @@ def currency_symbol(currency: str) -> str:
         return "₿"
     return ""
 
-# ---------- Главное меню (ReplyKeyboard) ----------
 def main_keyboard() -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text="🚀 Подключить VPN"), KeyboardButton(text="🛡️ Подключить обход")],
@@ -24,68 +17,43 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-# ---------- Инлайн клавиатуры для VPN ----------
 def vpn_currency_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🇷🇺 Рубли (₽)", callback_data=VPNCurrencyCallback(currency="rub").pack())],
-        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=VPNCurrencyCallback(currency="stars").pack())],
-        [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data=VPNCurrencyCallback(currency="usdt").pack())]
+        [InlineKeyboardButton(text="🇷🇺 Рубли (₽)", callback_data="vpn_currency_rub")],
+        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="vpn_currency_stars")],
+        [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data="vpn_currency_usdt")],
     ])
 
 def vpn_period_keyboard(currency: str) -> InlineKeyboardMarkup:
-    prices = {
-        "rub": {"1m": 300, "3m": 800, "6m": 1400},
-        "stars": {"1m": 150, "3m": 400, "6m": 700},
-        "usdt": {"1m": 3.5, "3m": 9.0, "6m": 16.0}
-    }
-    price_data = prices[currency]
+    from config import VPN_PRICES
+    prices = VPN_PRICES[currency]
     sym = currency_symbol(currency)
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"1 месяц — {price_data['1m']} {sym}",
-            callback_data=VPNPeriodCallback(period="1m", currency=currency).pack()
-        )],
-        [InlineKeyboardButton(
-            text=f"3 месяца — {price_data['3m']} {sym}",
-            callback_data=VPNPeriodCallback(period="3m", currency=currency).pack()
-        )],
-        [InlineKeyboardButton(
-            text=f"6 месяцев — {price_data['6m']} {sym}",
-            callback_data=VPNPeriodCallback(period="6m", currency=currency).pack()
-        )],
-        [InlineKeyboardButton(
-            text="🔙 Назад",
-            callback_data=BackCallback(target="vpn_currency").pack()
-        )]
-    ])
+    buttons = []
+    for period, price in prices.items():
+        text = f"{period_to_text(period)} — {price} {sym}"
+        cb = f"vpn_{period}_{currency}"
+        buttons.append([InlineKeyboardButton(text=text, callback_data=cb)])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="vpn_back_to_currency")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# ---------- Инлайн клавиатуры для обхода (Bypass) ----------
 def bypass_currency_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🇷🇺 Рубли (₽)", callback_data=BypassCurrencyCallback(currency="rub").pack())],
-        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data=BypassCurrencyCallback(currency="stars").pack())],
-        [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data=BypassCurrencyCallback(currency="usdt").pack())]
+        [InlineKeyboardButton(text="🇷🇺 Рубли (₽)", callback_data="bypass_currency_rub")],
+        [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="bypass_currency_stars")],
+        [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data="bypass_currency_usdt")],
     ])
 
 def bypass_period_keyboard(currency: str) -> InlineKeyboardMarkup:
-    prices = {
-        "rub": {"1m": 150, "3m": 400},
-        "stars": {"1m": 75, "3m": 200},
-        "usdt": {"1m": 2.0, "3m": 4.5}
-    }
-    price_data = prices[currency]
+    from config import BYPASS_PRICES
+    prices = BYPASS_PRICES[currency]
     sym = currency_symbol(currency)
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"1 месяц — {price_data['1m']} {sym}",
-            callback_data=BypassPeriodCallback(period="1m", currency=currency).pack()
-        )],
-        [InlineKeyboardButton(
-            text=f"3 месяца — {price_data['3m']} {sym}",
-            callback_data=BypassPeriodCallback(period="3m", currency=currency).pack()
-        )],
-        [InlineKeyboardButton(
-            text="🔙 Назад",
-            callback_data=BackCallback(target="bypass_currency").pack()
-        )]
-    ])
+    buttons = []
+    for period, price in prices.items():
+        text = f"{period_to_text(period)} — {price} {sym}"
+        cb = f"bypass_{period}_{currency}"
+        buttons.append([InlineKeyboardButton(text=text, callback_data=cb)])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="bypass_back_to_currency")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def period_to_text(period: str) -> str:
+    return {"1m": "1 месяц", "3m": "3 месяца", "6m": "6 месяцев"}.get(period, period)
