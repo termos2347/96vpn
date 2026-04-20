@@ -9,7 +9,6 @@ async def connect_vpn(message: types.Message):
     user_id = message.from_user.id
     active = await is_vpn_active(user_id)
     end = await get_vpn_end(user_id)
-    await message.answer(f"Debug VPN: end={end}, now={datetime.now()}, active={active}")
     if active:
         await message.answer(
             "✅ Ваша VPN подписка активна!\n"
@@ -28,7 +27,6 @@ async def connect_bypass(message: types.Message):
     user_id = message.from_user.id
     active = await is_bypass_active(user_id)
     end = await get_bypass_end(user_id)
-    await message.answer(f"Debug Bypass: end={end}, now={datetime.now()}, active={active}")
     if active:
         await message.answer(
             "✅ Ваша подписка на обход блокировок активна!\n"

@@ -4,9 +4,9 @@ from .models import Base
 
 engine = create_async_engine(
     DATABASE_URL,
-    echo=True,
+    echo=False,
     pool_pre_ping=True,   # Проверяет соединение перед отправкой запроса
-    pool_recycle=300,      # Пересоздаёт соединение каждые 5 минут
+    pool_recycle=600,      # Пересоздаёт соединение каждые 5 минут
     pool_size=5,
     max_overflow=10
 )

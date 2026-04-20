@@ -10,3 +10,5 @@ if not TOKEN:
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL не найден в .env файле")
+
+PROXY_URL = os.getenv("PROXY_URL")  # Может быть None
