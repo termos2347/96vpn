@@ -1,14 +1,16 @@
 from aiogram import Router, F, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery
-from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active
+from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
 from .keyboards import (
     vpn_currency_keyboard, vpn_period_keyboard,
     bypass_currency_keyboard, bypass_period_keyboard
 )
 from config import VPN_PRICES, BYPASS_PRICES
+from services.vpn_provider import XUIVPNProvider
 
 router = Router()
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
+vpn_provider = XUIVPNProvider()  # создаём один раз при импорте
 
 # ---------- VPN ----------
 @router.message(F.text == "💳 Оплатить VPN")
@@ -51,15 +53,38 @@ async def vpn_process_payment(callback: types.CallbackQuery):
             start_parameter="vpn_subscription",
         )
         await callback.answer()
+        return
+
+    # Для рублей и USDT – имитация оплаты
+    await set_vpn_subscription(user_id, days)
+
+    # Создаём клиента в 3x-ui
+    email = f"user_{user_id}@96vpn.bot"
+    client_uuid = await vpn_provider.create_client(email)
+    if client_uuid:
+        await set_vpn_client_id(user_id, client_uuid)
+        config = await vpn_provider.get_client_config(client_uuid)
+        if config:
+            await callback.message.edit_text(
+                f"✅ VPN подписка на {days} дней активирована!\n"
+                f"Оплата: {period} через {currency.upper()}\n\n"
+                f"Ваш конфиг для подключения:\n`{config}`",
+                parse_mode="Markdown"
+            )
+        else:
+            await callback.message.edit_text(
+                f"✅ VPN подписка на {days} дней активирована!\n"
+                f"Оплата: {period} через {currency.upper()}\n\n"
+                f"⚠️ Не удалось сгенерировать конфиг автоматически.\n"
+                f"Пожалуйста, нажмите 🚀 Подключить VPN позже или обратитесь в поддержку."
+            )
     else:
-        # имитация для рубля и usdt
-        await set_vpn_subscription(user_id, days)
         await callback.message.edit_text(
             f"✅ VPN подписка на {days} дней активирована!\n"
-            f"Оплата: {period} через {currency.upper()}\n"
-            f"Теперь вы можете подключиться в разделе 🚀 Подключить VPN"
+            f"Оплата: {period} через {currency.upper()}\n\n"
+            f"⚠️ Не удалось создать ключ. Попробуйте позже или обратитесь в поддержку."
         )
-        await callback.answer()
+    await callback.answer()
 
 # ---------- Bypass ----------
 @router.message(F.text == "💰 Оплатить обход")

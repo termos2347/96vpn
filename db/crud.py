@@ -166,3 +166,27 @@ async def get_bypass_end(user_id: int):
         except Exception as e:
             logger.error(f"Error in get_bypass_end: {e}", exc_info=True)
             return None
+        
+async def set_vpn_client_id(user_id: int, client_id: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await session.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
+            if user:
+                user.vpn_client_id = client_id
+                await session.commit()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error in set_vpn_client_id: {e}", exc_info=True)
+            return False
+
+async def get_vpn_client_id(user_id: int) -> str | None:
+    async with AsyncSessionLocal() as session:
+        try:
+            result = await session.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
+            return user.vpn_client_id if user else None
+        except Exception as e:
+            logger.error(f"Error in get_vpn_client_id: {e}", exc_info=True)
+            return None

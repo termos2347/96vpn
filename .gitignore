@@ -13,3 +13,7 @@ env/
 # Файлы IDE
 .vscode/
 .idea/
+
+test_async_api.py
+test_manual_api.py
+test_provider.py
