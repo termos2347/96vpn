@@ -3,11 +3,9 @@ from .common import router as common_router
 from .subscription import router as subscription_router
 from .payment import router as payment_router
 from .proxy import router as proxy_router
-from .admin import router as admin_router
 
 router = Router()
 router.include_router(common_router)
 router.include_router(subscription_router)
 router.include_router(payment_router)
 router.include_router(proxy_router)
-router.include_router(admin_router)

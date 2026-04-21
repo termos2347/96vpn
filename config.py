@@ -13,8 +13,6 @@ if not DATABASE_URL:
 
 PROXY_URL = os.getenv("PROXY_URL")
 
-ADMIN_IDS = list(map(int, os.getenv("ADMIN_IDS", "").split(","))) if os.getenv("ADMIN_IDS") else []
-
 # ---------- Цены на подписки ----------
 # VPN: ключ - валюта, значение - словарь {период: цена}
 VPN_PRICES = {
