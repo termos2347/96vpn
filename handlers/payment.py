@@ -1,3 +1,4 @@
+from asyncio.log import logger
 from aiogram import Router, F, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
@@ -7,6 +8,10 @@ from .keyboards import (
 )
 from config import VPN_PRICES, BYPASS_PRICES
 from services.vpn_provider import XUIVPNProvider
+import logging
+
+logger = logging.getLogger(__name__)
+vpn_provider = XUIVPNProvider()
 
 router = Router()
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
@@ -55,34 +60,35 @@ async def vpn_process_payment(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    # Для рублей и USDT – имитация оплаты
+    # Для рублей и USDT – имитация успешной оплаты
     await set_vpn_subscription(user_id, days)
 
-    # Создаём клиента в 3x-ui
     email = f"user_{user_id}@96vpn.bot"
-    client_uuid = await vpn_provider.create_client(email)
-    if client_uuid:
-        await set_vpn_client_id(user_id, client_uuid)
-        config = await vpn_provider.get_client_config(client_uuid)
-        if config:
-            await callback.message.edit_text(
-                f"✅ VPN подписка на {days} дней активирована!\n"
-                f"Оплата: {period} через {currency.upper()}\n\n"
-                f"Ваш конфиг для подключения:\n`{config}`",
-                parse_mode="Markdown"
-            )
-        else:
-            await callback.message.edit_text(
-                f"✅ VPN подписка на {days} дней активирована!\n"
-                f"Оплата: {period} через {currency.upper()}\n\n"
-                f"⚠️ Не удалось сгенерировать конфиг автоматически.\n"
-                f"Пожалуйста, нажмите 🚀 Подключить VPN позже или обратитесь в поддержку."
-            )
+    
+    # Пытаемся создать нового клиента
+    client_data = await vpn_provider.create_client(email)
+    if not client_data:
+        # Если клиент уже существует (дубликат email) – ищем его
+        client_data = await vpn_provider.get_client_by_email(email)
+        if client_data:
+            logger.info(f"Найден существующий клиент {email} с subId {client_data['subId']}")
+    
+    if client_data:
+        sub_id = client_data["subId"]
+        await set_vpn_client_id(user_id, sub_id)
+        link = vpn_provider.get_subscription_link(sub_id)
+        await callback.message.edit_text(
+            f"✅ VPN подписка на {days} дней активирована!\n"
+            f"Оплата: {period} через {currency.upper()}\n\n"
+            f"🔗 Ссылка для подключения:\n`{link}`",
+            parse_mode="Markdown"
+        )
     else:
         await callback.message.edit_text(
             f"✅ VPN подписка на {days} дней активирована!\n"
             f"Оплата: {period} через {currency.upper()}\n\n"
-            f"⚠️ Не удалось создать ключ. Попробуйте позже или обратитесь в поддержку."
+            f"⚠️ Не удалось создать или найти ключ автоматически.\n"
+            f"Пожалуйста, нажмите 🚀 Подключить VPN позже или обратитесь в поддержку."
         )
     await callback.answer()
 

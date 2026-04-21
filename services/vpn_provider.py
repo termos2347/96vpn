@@ -1,6 +1,6 @@
 import os
-import json
 import uuid
+import json
 import logging
 import aiohttp
 from dotenv import load_dotenv
@@ -14,13 +14,13 @@ class XUIVPNProvider:
         self.username = os.getenv("XUI_USERNAME")
         self.password = os.getenv("XUI_PASSWORD")
         self.inbound_id = int(os.getenv("XUI_INBOUND_ID", "1"))
+        self.sub_port = int(os.getenv("XUI_SUB_PORT", "2096"))
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"}
         self.session: aiohttp.ClientSession | None = None
         self._server_address = self._extract_host(self.base_url)
 
     @staticmethod
     def _extract_host(url: str) -> str:
-        # Из https://185.5.75.235:53983/... получаем 185.5.75.235
         if not url:
             return ""
         parts = url.split("://")[1].split("/")[0].split(":")[0]
@@ -40,21 +40,23 @@ class XUIVPNProvider:
         url = f"{self.base_url}/login"
         payload = {"username": self.username, "password": self.password}
         try:
-            async with session.post(url, data=payload, headers={"Referer": f"{self.base_url}/"}) as resp:
+            async with session.post(url, data=payload) as resp:
                 data = await resp.json()
                 return data.get("success", False)
         except Exception as e:
             logger.error(f"Ошибка входа в 3x-ui: {e}")
             return False
 
-    async def create_client(self, email: str) -> str | None:
-        """Создаёт клиента, возвращает UUID или None"""
+    async def create_client(self, email: str) -> dict | None:
+        """Создаёт клиента, возвращает {'uuid': ..., 'subId': ...}"""
         if not await self.login():
             logger.error("Не удалось войти в панель 3x-ui")
             return None
 
         session = await self._get_session()
         client_uuid = str(uuid.uuid4())
+        sub_id = str(uuid.uuid4()).replace('-', '')[:16]
+
         settings = {
             "clients": [{
                 "id": client_uuid,
@@ -65,7 +67,7 @@ class XUIVPNProvider:
                 "expiryTime": 0,
                 "enable": True,
                 "tgId": "",
-                "subId": ""
+                "subId": sub_id
             }]
         }
         payload = {
@@ -77,12 +79,11 @@ class XUIVPNProvider:
             async with session.post(url, data=payload, headers=self.headers) as resp:
                 data = await resp.json()
                 if data.get("success"):
-                    logger.info(f"Клиент {email} создан с UUID {client_uuid}")
-                    return client_uuid
+                    logger.info(f"Клиент {email} создан с UUID {client_uuid} и subId {sub_id}")
+                    return {"uuid": client_uuid, "subId": sub_id}
                 elif "Duplicate email" in data.get("msg", ""):
                     logger.warning(f"Email {email} уже существует")
-                    # Можно попытаться найти существующий UUID и вернуть его
-                    return await self._get_existing_client_uuid(email)
+                    return None
                 else:
                     logger.error(f"Ошибка создания клиента: {data.get('msg')}")
                     return None
@@ -90,32 +91,44 @@ class XUIVPNProvider:
             logger.error(f"Исключение при создании клиента: {e}")
             return None
 
-    async def _get_existing_client_uuid(self, email: str) -> str | None:
-        """Ищет UUID клиента по email в текущем inbound"""
+    async def get_client_by_email(self, email: str) -> dict | None:
+        """Ищет клиента по email, возвращает {'uuid': ..., 'subId': ...} или None"""
+        if not await self.login():
+            logger.error("Не удалось войти в панель для поиска клиента")
+            return None
         session = await self._get_session()
         url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
         try:
-            async with session.post(url) as resp:
+            async with session.get(url, headers=self.headers) as resp:
+                if resp.status != 200:
+                    logger.error(f"Ошибка получения inbound при поиске клиента: {resp.status}")
+                    return None
                 data = await resp.json()
-                inbound = data.get("obj", {})
-                if inbound:
-                    settings = json.loads(inbound.get("settings", "{}"))
-                    for client in settings.get("clients", []):
-                        if client.get("email") == email:
-                            return client.get("id")
+                inbound = data.get("obj")
+                if not inbound:
+                    logger.error("Inbound не найден в ответе API")
+                    return None
+                settings = json.loads(inbound.get("settings", "{}"))
+                for client in settings.get("clients", []):
+                    if client.get("email") == email:
+                        sub_id = client.get("subId") or client.get("id")[:16]
+                        logger.info(f"Найден клиент {email} с subId {sub_id}")
+                        return {"uuid": client.get("id"), "subId": sub_id}
         except Exception as e:
-            logger.error(f"Ошибка поиска существующего клиента: {e}")
+            logger.error(f"Ошибка поиска клиента по email: {e}")
         return None
 
+    def get_subscription_link(self, sub_id: str) -> str:
+        """Возвращает ссылку подписки"""
+        return f"https://{self._server_address}:{self.sub_port}/sub/{sub_id}"
+
     async def revoke_client(self, client_uuid: str) -> bool:
-        """Удаляет клиента по UUID"""
         if not await self.login():
             return False
         session = await self._get_session()
-        # Получаем текущие настройки
         url_get = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
         try:
-            async with session.post(url_get) as resp:
+            async with session.get(url_get, headers=self.headers) as resp:
                 data = await resp.json()
                 inbound = data.get("obj", {})
                 if not inbound:
@@ -124,46 +137,16 @@ class XUIVPNProvider:
                 clients = settings.get("clients", [])
                 new_clients = [c for c in clients if c.get("id") != client_uuid]
                 if len(new_clients) == len(clients):
-                    return False  # клиент не найден
+                    return False
                 settings["clients"] = new_clients
-                payload = {
-                    "id": self.inbound_id,
-                    "settings": json.dumps(settings)
-                }
+                payload = {"id": self.inbound_id, "settings": json.dumps(settings)}
                 url_update = f"{self.base_url}/panel/api/inbounds/update/{self.inbound_id}"
-                async with session.post(url_update, data=payload) as resp_update:
+                async with session.post(url_update, data=payload, headers=self.headers) as resp_update:
                     result = await resp_update.json()
                     return result.get("success", False)
         except Exception as e:
             logger.error(f"Ошибка удаления клиента: {e}")
             return False
-
-    async def get_client_config(self, client_uuid: str) -> str | None:
-        """Генерирует VLESS-ссылку на основе параметров inbound из .env."""
-        # Загружаем параметры из окружения с fallback-значениями
-        port = int(os.getenv("XUI_INBOUND_PORT", "443"))
-        network = os.getenv("XUI_INBOUND_NETWORK", "tcp")
-        security = os.getenv("XUI_INBOUND_SECURITY", "reality")
-        public_key = os.getenv("XUI_REALITY_PUBLIC_KEY", "")
-        short_id = os.getenv("XUI_REALITY_SHORT_ID", "")
-        server_name = os.getenv("XUI_REALITY_SERVER_NAME", "")
-        flow = os.getenv("XUI_FLOW", "xtls-rprx-vision")
-
-        # Проверяем обязательные параметры
-        if not all([public_key, short_id, server_name]):
-            logger.error("Отсутствуют параметры Reality в .env. Конфиг не может быть сгенерирован.")
-            return None
-
-        # IP сервера извлекается из BASE_URL
-        remark = f"96VPN-{client_uuid[:8]}"
-        config = (
-            f"vless://{client_uuid}@{self._server_address}:{port}"
-            f"?type={network}&security={security}"
-            f"&pbk={public_key}&sid={short_id}&sni={server_name}"
-            f"&flow={flow}#{remark}"
-        )
-        logger.info(f"Сгенерирован конфиг для клиента {client_uuid}")
-        return config
 
     async def close(self):
         if self.session and not self.session.closed:
