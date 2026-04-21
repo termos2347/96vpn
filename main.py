@@ -6,6 +6,7 @@ from aiohttp import ClientTimeout, TCPConnector, ClientSession
 from config import TOKEN, PROXY_URL
 from handlers import router
 from handlers.common import setup_bot_commands
+from services.scheduler import start_scheduler
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -39,6 +40,7 @@ async def main():
     bot = Bot(token=TOKEN, session=session)
     dp = Dispatcher()
     
+    await start_scheduler(bot)
     await setup_bot_commands(bot)
     dp.include_router(router)
     
