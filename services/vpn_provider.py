@@ -67,7 +67,8 @@ class XUIVPNProvider:
                 "expiryTime": 0,
                 "enable": True,
                 "tgId": "",
-                "subId": sub_id
+                "subId": sub_id,
+                "flow": "xtls-rprx-vision"   # <-- добавить эту строку
             }]
         }
         payload = {
@@ -120,7 +121,7 @@ class XUIVPNProvider:
 
     def get_subscription_link(self, sub_id: str) -> str:
         """Возвращает ссылку подписки"""
-        return f"https://{self._server_address}:{self.sub_port}/sub/{sub_id}"
+        return f"http://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
         if not await self.login():
