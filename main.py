@@ -7,9 +7,12 @@ from config import TOKEN, PROXY_URL
 from handlers import router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
+from db.base import init_db  # <-- новый импорт
 
 async def main():
     logging.basicConfig(level=logging.INFO)
+    
+    await init_db()
     
     session = None
     if PROXY_URL:
