@@ -49,7 +49,7 @@ async def send_expiry_reminders(bot):
     while True:
         try:
             async with AsyncSessionLocal() as session:
-                now = datetime.now()
+                now = datetime.utcnow()
                 # Выбираем всех, у кого подписка ещё активна и есть ключ
                 result = await session.execute(
                     select(User).where(

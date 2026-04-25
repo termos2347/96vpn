@@ -124,30 +124,40 @@ class XUIVPNProvider:
         return f"http://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
+        """Безопасное удаление клиента по UUID через прямой эндпоинт (перебор вариантов)."""
         if not await self.login():
             return False
+
         session = await self._get_session()
-        url_get = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
-        try:
-            async with session.get(url_get, headers=self.headers) as resp:
-                data = await resp.json()
-                inbound = data.get("obj", {})
-                if not inbound:
-                    return False
-                settings = json.loads(inbound.get("settings", "{}"))
-                clients = settings.get("clients", [])
-                new_clients = [c for c in clients if c.get("id") != client_uuid]
-                if len(new_clients) == len(clients):
-                    return False
-                settings["clients"] = new_clients
-                payload = {"id": self.inbound_id, "settings": json.dumps(settings)}
-                url_update = f"{self.base_url}/panel/api/inbounds/update/{self.inbound_id}"
-                async with session.post(url_update, data=payload, headers=self.headers) as resp_update:
-                    result = await resp_update.json()
-                    return result.get("success", False)
-        except Exception as e:
-            logger.error(f"Ошибка удаления клиента: {e}")
-            return False
+        # Возможные пути для разных версий 3x-ui
+        del_endpoints = [
+            f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
+            f"{self.base_url}/panel/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
+            f"{self.base_url}/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
+            f"{self.base_url}/panel/api/inbounds/delClient/{client_uuid}",
+            f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
+        ]
+
+        for url in del_endpoints:
+            try:
+                async with session.post(url, headers=self.headers) as resp:
+                    # Некоторые версии возвращают 200 с json, даже при ошибке
+                    if resp.status == 200:
+                        try:
+                            data = await resp.json(content_type=None)
+                            if data.get("success"):
+                                logger.info(f"Клиент {client_uuid} удалён через {url}")
+                                return True
+                            else:
+                                logger.debug(f"Попытка удаления по {url} вернула success=False: {data.get('msg')}")
+                        except:
+                            logger.debug(f"Ответ от {url} не содержит валидный JSON")
+            except Exception as e:
+                logger.debug(f"Ошибка при попытке удаления по {url}: {e}")
+                continue
+
+        logger.error(f"Не удалось удалить клиента {client_uuid} ни через один известный эндпоинт")
+        return False
 
     async def close(self):
         if self.session and not self.session.closed:

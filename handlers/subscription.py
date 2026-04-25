@@ -27,7 +27,7 @@ async def connect_vpn(message: types.Message):
     if client_data:
         sub_id = client_data["subId"]
         # Сохраняем актуальный subId в БД
-        await set_vpn_client_id(user_id, sub_id)
+        await set_vpn_client_id(user_id, client_data["uuid"])
         link = vpn_provider.get_subscription_link(sub_id)
         await message.answer(
             f"✅ Ваша VPN подписка активна!\n🔗 Ссылка для подключения:\n`{link}`",

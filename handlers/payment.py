@@ -75,7 +75,7 @@ async def vpn_process_payment(callback: types.CallbackQuery):
     
     if client_data:
         sub_id = client_data["subId"]
-        await set_vpn_client_id(user_id, sub_id)
+        await set_vpn_client_id(user_id, client_data["uuid"])
         link = vpn_provider.get_subscription_link(sub_id)
         await callback.message.edit_text(
             f"✅ VPN подписка на {days} дней активирована!\n"
