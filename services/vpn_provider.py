@@ -4,17 +4,18 @@ import json
 import logging
 import aiohttp
 from dotenv import load_dotenv
+from config import XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 class XUIVPNProvider:
     def __init__(self):
-        self.base_url = os.getenv("XUI_BASE_URL", "").rstrip('/')
-        self.username = os.getenv("XUI_USERNAME")
-        self.password = os.getenv("XUI_PASSWORD")
-        self.inbound_id = int(os.getenv("XUI_INBOUND_ID", "1"))
-        self.sub_port = int(os.getenv("XUI_SUB_PORT", "2096"))
+        self.base_url = XUI_BASE_URL.rstrip('/')
+        self.username = XUI_USERNAME
+        self.password = XUI_PASSWORD
+        self.inbound_id = XUI_INBOUND_ID
+        self.sub_port = XUI_SUB_PORT
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"}
         self.session: aiohttp.ClientSession | None = None
         self._server_address = self._extract_host(self.base_url)
@@ -160,5 +161,10 @@ class XUIVPNProvider:
         return False
 
     async def close(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+    async def close(self):
+        """Закрывает сессию aiohttp."""
         if self.session and not self.session.closed:
             await self.session.close()

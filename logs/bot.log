@@ -1,0 +1,16 @@
+2026-04-26 09:30:49 - main - INFO - Starting VPN bot...
+2026-04-26 09:30:51 - main - INFO - Database initialized successfully
+2026-04-26 09:30:52 - main - INFO - Using HTTP proxy with custom timeouts: http://127.0.0.1:10809
+2026-04-26 09:30:52 - services.scheduler - INFO - Фоновые задачи проверки подписок и напоминаний запущены
+2026-04-26 09:30:52 - main - INFO - Bot started successfully
+2026-04-26 09:30:52 - aiogram.dispatcher - INFO - Start polling
+2026-04-26 09:30:52 - aiogram.dispatcher - INFO - Run polling for bot @VPN_96_bot id=8671515608 - '96vpn'
+2026-04-26 09:37:15 - __main__ - INFO - Starting VPN bot...
+2026-04-26 09:37:18 - __main__ - INFO - Database initialized successfully
+2026-04-26 09:37:18 - __main__ - INFO - Using HTTP proxy with custom timeouts: http://127.0.0.1:10809
+2026-04-26 09:37:18 - services.scheduler - INFO - Фоновые задачи проверки подписок и напоминаний запущены
+2026-04-26 09:37:18 - __main__ - INFO - Bot started successfully
+2026-04-26 09:37:18 - aiogram.dispatcher - INFO - Start polling
+2026-04-26 09:37:19 - aiogram.dispatcher - INFO - Run polling for bot @VPN_96_bot id=8671515608 - '96vpn'
+2026-04-26 09:37:42 - aiogram.event - INFO - Update id=314733031 is handled. Duration 379 ms by bot id=8671515608
+2026-04-26 09:37:46 - aiogram.event - INFO - Update id=314733032 is handled. Duration 1409 ms by bot id=8671515608
