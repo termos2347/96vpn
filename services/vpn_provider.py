@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import logging
+import asyncio
 import aiohttp
 from dotenv import load_dotenv
 from config import XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT
@@ -10,6 +11,12 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class XUIVPNProvider:
+    """Провайдер для интеграции с панелью управления 3x-ui."""
+    
+    MAX_RETRIES = 3
+    RETRY_DELAY = 1  # секунды
+    REQUEST_TIMEOUT = 10  # секунды
+    
     def __init__(self):
         self.base_url = XUI_BASE_URL.rstrip('/')
         self.username = XUI_USERNAME
@@ -19,42 +26,95 @@ class XUIVPNProvider:
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"}
         self.session: aiohttp.ClientSession | None = None
         self._server_address = self._extract_host(self.base_url)
+        self._is_authenticated = False
 
     @staticmethod
     def _extract_host(url: str) -> str:
+        """Извлекает хост из URL."""
         if not url:
             return ""
-        parts = url.split("://")[1].split("/")[0].split(":")[0]
-        return parts
+        try:
+            parts = url.split("://")[1].split("/")[0].split(":")[0]
+            return parts
+        except (IndexError, AttributeError):
+            logger.error(f"Failed to extract host from URL: {url}")
+            return ""
 
     async def _get_session(self) -> aiohttp.ClientSession:
+        """Получает или создаёт aiohttp сессию."""
         if self.session is None or self.session.closed:
             connector = aiohttp.TCPConnector(ssl=False, limit=100)
+            timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
             self.session = aiohttp.ClientSession(
                 connector=connector,
-                cookie_jar=aiohttp.CookieJar(unsafe=True)
+                cookie_jar=aiohttp.CookieJar(unsafe=True),
+                timeout=timeout
             )
         return self.session
 
-    async def login(self) -> bool:
+    async def _retry_request(self, method: str, url: str, **kwargs) -> dict | None:
+        """Выполняет HTTP запрос с retry логикой."""
         session = await self._get_session()
+        
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                method_func = getattr(session, method.lower())
+                async with method_func(url, **kwargs) as resp:
+                    if resp.status == 200:
+                        try:
+                            return await resp.json()
+                        except:
+                            logger.warning(f"Failed to parse JSON response from {url}")
+                            return None
+                    elif resp.status == 401:
+                        # Ошибка аутентификации - пересоединяемся
+                        self._is_authenticated = False
+                        logger.warning(f"Authentication failed for {url}")
+                        return None
+                    else:
+                        logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Timeout on {url}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+            except aiohttp.ClientError as e:
+                logger.warning(f"Client error on {url}: {e}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+            except Exception as e:
+                logger.error(f"Unexpected error on {url}: {e}")
+            
+            # Ждём перед следующей попыткой (экспоненциальная задержка)
+            if attempt < self.MAX_RETRIES - 1:
+                delay = self.RETRY_DELAY * (2 ** attempt)
+                await asyncio.sleep(delay)
+        
+        logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
+        return None
+
+    async def login(self) -> bool:
+        """Аутентифицируется на панели 3x-ui."""
+        if self._is_authenticated:
+            return True
+        
         url = f"{self.base_url}/login"
         payload = {"username": self.username, "password": self.password}
+        
         try:
-            async with session.post(url, data=payload) as resp:
-                data = await resp.json()
-                return data.get("success", False)
+            result = await self._retry_request("POST", url, data=payload)
+            if result and result.get("success"):
+                self._is_authenticated = True
+                logger.info("Successfully authenticated with 3x-ui panel")
+                return True
+            else:
+                logger.error(f"Authentication failed: {result.get('msg') if result else 'No response'}")
+                return False
         except Exception as e:
-            logger.error(f"Ошибка входа в 3x-ui: {e}")
+            logger.error(f"Login exception: {e}")
             return False
 
     async def create_client(self, email: str) -> dict | None:
-        """Создаёт клиента, возвращает {'uuid': ..., 'subId': ...}"""
+        """Создаёт клиента на панели 3x-ui."""
         if not await self.login():
-            logger.error("Не удалось войти в панель 3x-ui")
+            logger.error("Cannot create client: not authenticated")
             return None
 
-        session = await self._get_session()
         client_uuid = str(uuid.uuid4())
         sub_id = str(uuid.uuid4()).replace('-', '')[:16]
 
@@ -69,102 +129,97 @@ class XUIVPNProvider:
                 "enable": True,
                 "tgId": "",
                 "subId": sub_id,
-                "flow": "xtls-rprx-vision"   # <-- добавить эту строку
+                "flow": "xtls-rprx-vision"
             }]
         }
+        
         payload = {
             "id": self.inbound_id,
             "settings": json.dumps(settings)
         }
         url = f"{self.base_url}/panel/api/inbounds/addClient"
+        
         try:
-            async with session.post(url, data=payload, headers=self.headers) as resp:
-                data = await resp.json()
-                if data.get("success"):
-                    logger.info(f"Клиент {email} создан с UUID {client_uuid} и subId {sub_id}")
-                    return {"uuid": client_uuid, "subId": sub_id}
-                elif "Duplicate email" in data.get("msg", ""):
-                    logger.warning(f"Email {email} уже существует")
-                    return None
-                else:
-                    logger.error(f"Ошибка создания клиента: {data.get('msg')}")
-                    return None
+            result = await self._retry_request("POST", url, data=payload, headers=self.headers)
+            if result and result.get("success"):
+                logger.info(f"Client {email} created with UUID {client_uuid}")
+                return {"uuid": client_uuid, "subId": sub_id}
+            elif result and "Duplicate" in result.get("msg", ""):
+                logger.warning(f"Email {email} already exists on panel")
+                return None
+            else:
+                logger.error(f"Failed to create client: {result.get('msg') if result else 'No response'}")
+                return None
         except Exception as e:
-            logger.error(f"Исключение при создании клиента: {e}")
+            logger.error(f"Exception creating client: {e}")
             return None
 
     async def get_client_by_email(self, email: str) -> dict | None:
-        """Ищет клиента по email, возвращает {'uuid': ..., 'subId': ...} или None"""
+        """Ищет клиента по email на панели 3x-ui."""
         if not await self.login():
-            logger.error("Не удалось войти в панель для поиска клиента")
+            logger.error("Cannot search client: not authenticated")
             return None
-        session = await self._get_session()
+
         url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
+        
         try:
-            async with session.get(url, headers=self.headers) as resp:
-                if resp.status != 200:
-                    logger.error(f"Ошибка получения inbound при поиске клиента: {resp.status}")
-                    return None
-                data = await resp.json()
-                inbound = data.get("obj")
-                if not inbound:
-                    logger.error("Inbound не найден в ответе API")
-                    return None
-                settings = json.loads(inbound.get("settings", "{}"))
-                for client in settings.get("clients", []):
-                    if client.get("email") == email:
-                        sub_id = client.get("subId") or client.get("id")[:16]
-                        logger.info(f"Найден клиент {email} с subId {sub_id}")
-                        return {"uuid": client.get("id"), "subId": sub_id}
+            result = await self._retry_request("GET", url, headers=self.headers)
+            if not result:
+                return None
+            
+            inbound = result.get("obj")
+            if not inbound:
+                logger.error("Inbound not found in API response")
+                return None
+            
+            settings = json.loads(inbound.get("settings", "{}"))
+            for client in settings.get("clients", []):
+                if client.get("email") == email:
+                    return {
+                        "uuid": client.get("id"),
+                        "subId": client.get("subId", client.get("id")[:16])
+                    }
+            
+            logger.debug(f"Client with email {email} not found")
+            return None
         except Exception as e:
-            logger.error(f"Ошибка поиска клиента по email: {e}")
-        return None
+            logger.error(f"Exception searching client: {e}")
+            return None
 
     def get_subscription_link(self, sub_id: str) -> str:
-        """Возвращает ссылку подписки"""
+        """Генерирует ссылку подписки для клиента."""
+        if not self._server_address or not sub_id:
+            logger.error("Invalid server address or sub_id")
+            return ""
         return f"http://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
-        """Безопасное удаление клиента по UUID через прямой эндпоинт (перебор вариантов)."""
+        """Удаляет клиента с панели 3x-ui."""
         if not await self.login():
+            logger.error("Cannot revoke client: not authenticated")
             return False
 
-        session = await self._get_session()
-        # Возможные пути для разных версий 3x-ui
+        # Пытаемся разные эндпоинты (разные версии 3x-ui имеют разные URL)
         del_endpoints = [
             f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
             f"{self.base_url}/panel/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
-            f"{self.base_url}/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
-            f"{self.base_url}/panel/api/inbounds/delClient/{client_uuid}",
-            f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
         ]
 
         for url in del_endpoints:
             try:
-                async with session.post(url, headers=self.headers) as resp:
-                    # Некоторые версии возвращают 200 с json, даже при ошибке
-                    if resp.status == 200:
-                        try:
-                            data = await resp.json(content_type=None)
-                            if data.get("success"):
-                                logger.info(f"Клиент {client_uuid} удалён через {url}")
-                                return True
-                            else:
-                                logger.debug(f"Попытка удаления по {url} вернула success=False: {data.get('msg')}")
-                        except:
-                            logger.debug(f"Ответ от {url} не содержит валидный JSON")
+                result = await self._retry_request("POST", url, headers=self.headers)
+                if result and result.get("success"):
+                    logger.info(f"Client {client_uuid} revoked successfully")
+                    return True
             except Exception as e:
-                logger.debug(f"Ошибка при попытке удаления по {url}: {e}")
+                logger.debug(f"Failed endpoint {url}: {e}")
                 continue
 
-        logger.error(f"Не удалось удалить клиента {client_uuid} ни через один известный эндпоинт")
+        logger.error(f"Failed to revoke client {client_uuid}")
         return False
 
     async def close(self):
+        """Закрывает aiohttp сессию."""
         if self.session and not self.session.closed:
             await self.session.close()
-
-    async def close(self):
-        """Закрывает сессию aiohttp."""
-        if self.session and not self.session.closed:
-            await self.session.close()
+            logger.info("XUI provider session closed")

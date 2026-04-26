@@ -1,4 +1,4 @@
-from asyncio.log import logger
+import logging
 from aiogram import Router, F, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
@@ -8,46 +8,131 @@ from .keyboards import (
 )
 from config import VPN_PRICES, BYPASS_PRICES
 from services.vpn_provider import XUIVPNProvider
-import logging
+from utils.decorators import rate_limit
+from utils.validators import validate_user_id, validate_currency, validate_days, ValidationError
 
 logger = logging.getLogger(__name__)
 vpn_provider = XUIVPNProvider()
 
 router = Router()
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
-vpn_provider = XUIVPNProvider()  # создаём один раз при импорте
 
-# ---------- VPN ----------
+# ---------- VPN Payment Handlers ----------
+
 @router.message(F.text == "💳 Оплатить VPN")
+@rate_limit(max_per_minute=10)
 async def pay_vpn(message: types.Message):
-    await message.answer("💎 Выберите валюту для оплаты VPN:", reply_markup=vpn_currency_keyboard())
+    """Показывает выбор валют для оплаты VPN."""
+    try:
+        validate_user_id(message.from_user.id)
+        await message.answer("💎 Выберите валюту для оплаты VPN:", reply_markup=vpn_currency_keyboard())
+    except ValidationError as e:
+        logger.warning(f"Validation error in pay_vpn: {e}")
+        await message.answer("❌ Ошибка валидации. Попробуйте позже.")
 
 @router.callback_query(F.data.startswith("vpn_currency_"))
+@rate_limit(max_per_minute=10)
 async def vpn_choose_period(callback: types.CallbackQuery):
-    currency = callback.data.split("_")[-1]
-    await callback.message.edit_text(
-        "📅 Выберите период подписки:",
-        reply_markup=vpn_period_keyboard(currency)
-    )
-    await callback.answer()
+    """Показывает выбор периода подписки."""
+    try:
+        validate_user_id(callback.from_user.id)
+        currency = callback.data.split("_")[-1]
+        validate_currency(currency)
+        
+        await callback.message.edit_text(
+            "📅 Выберите период подписки:",
+            reply_markup=vpn_period_keyboard(currency)
+        )
+        await callback.answer()
+    except ValidationError as e:
+        logger.warning(f"Validation error in vpn_choose_period: {e}")
+        await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
 
 @router.callback_query(F.data == "vpn_back_to_currency")
+@rate_limit(max_per_minute=10)
 async def vpn_back_to_currency(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "💎 Выберите валюту для оплаты VPN:",
-        reply_markup=vpn_currency_keyboard()
-    )
-    await callback.answer()
+    """Возврат к выбору валюты."""
+    try:
+        validate_user_id(callback.from_user.id)
+        await callback.message.edit_text(
+            "💎 Выберите валюту для оплаты VPN:",
+            reply_markup=vpn_currency_keyboard()
+        )
+        await callback.answer()
+    except ValidationError as e:
+        logger.warning(f"Validation error in vpn_back_to_currency: {e}")
+        await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
 
 @router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|stars|usdt)$"))
+@rate_limit(max_per_minute=5)
 async def vpn_process_payment(callback: types.CallbackQuery):
+    """Обрабатывает платёж за VPN подписку."""
     data = callback.data
     _, period, currency = data.split("_")
-    days = PERIOD_DAYS[period]
     user_id = callback.from_user.id
-
-    if currency == "stars":
-        price = VPN_PRICES["stars"][period]
+    
+    try:
+        # Валидируем входные данные
+        validate_user_id(user_id)
+        validate_currency(currency)
+        validate_days(PERIOD_DAYS[period])
+        
+        days = PERIOD_DAYS[period]
+        price = VPN_PRICES[currency][period]
+        
+        logger.info(f"Processing VPN payment for user {user_id}: {period} {currency} ({price})")
+        
+        if currency == "stars":
+            # Telegram Stars платёж
+            await callback.message.answer_invoice(
+                title="VPN Подписка",
+                description=f"Доступ к VPN на {days} дней",
+                payload=f"vpn_{period}_{user_id}",
+                provider_token="",
+                currency="XTR",
+                prices=[LabeledPrice(label="VPN Подписка", amount=int(price))],
+                start_parameter="vpn_subscription",
+            )
+            await callback.answer()
+            return
+        
+        # Для рублей и USDT – имитация успешной оплаты
+        await set_vpn_subscription(user_id, days)
+        
+        email = f"user_{user_id}@96vpn.bot"
+        
+        # Создаём клиента на 3x-ui
+        client_data = await vpn_provider.create_client(email)
+        if not client_data:
+            client_data = await vpn_provider.get_client_by_email(email)
+            if client_data:
+                logger.info(f"Found existing client for {email}")
+        
+        if client_data:
+            sub_id = client_data["subId"]
+            await set_vpn_client_id(user_id, client_data["uuid"])
+            link = vpn_provider.get_subscription_link(sub_id)
+            await callback.message.edit_text(
+                f"✅ VPN подписка активирована на {days} дней!\n\n"
+                f"🔗 Ссылка для подключения:\n`{link}`",
+                parse_mode="Markdown"
+            )
+            logger.info(f"VPN subscription activated for user {user_id}")
+        else:
+            await callback.message.edit_text(
+                "⚠️ Подписка активирована, но не удалось создать ключ.\n"
+                "Попробуйте позже или обратитесь в поддержку."
+            )
+            logger.error(f"Failed to create VPN client for user {user_id}")
+        
+        await callback.answer()
+        
+    except ValidationError as e:
+        logger.warning(f"Validation error in vpn_process_payment: {e}")
+        await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
+    except Exception as e:
+        logger.error(f"Exception in vpn_process_payment: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при обработке платежа", show_alert=True)
         await callback.message.answer_invoice(
             title="VPN Подписка",
             description=f"Доступ к VPN на {days} дней",
