@@ -1,5 +1,10 @@
+import os
 from pydantic_settings import BaseSettings
 from typing import Optional
+from dotenv import load_dotenv
+
+# Загружаем .env, чтобы переменные были доступны
+load_dotenv()
 
 class WebSettings(BaseSettings):
     # FastAPI
@@ -31,5 +36,6 @@ class WebSettings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"   # ← Разрешаем игнорировать лишние переменные из .env
 
 settings = WebSettings()

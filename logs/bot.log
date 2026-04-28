@@ -13,4 +13,2157 @@
 2026-04-26 09:37:18 - aiogram.dispatcher - INFO - Start polling
 2026-04-26 09:37:19 - aiogram.dispatcher - INFO - Run polling for bot @VPN_96_bot id=8671515608 - '96vpn'
 2026-04-26 09:37:42 - aiogram.event - INFO - Update id=314733031 is handled. Duration 379 ms by bot id=8671515608
-2026-04-26 09:37:46 - aiogram.event - INFO - Update id=314733032 is handled. Duration 1409 ms by bot id=8671515608
+2026-04-26 09:37:46 - aiogram.event - INFO - Update id=314733032 is handled. Duration 1409 ms by bot id=86715156082026-04-28 17:50:07 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:50:07 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'sslmode'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'sslmode'
+2026-04-28 17:51:32 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:51:32 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'sslmode'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'sslmode'
+2026-04-28 17:52:38 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:52:38 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'channel_binding'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'channel_binding'
+2026-04-28 17:53:11 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:53:11 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'channel_binding'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'channel_binding'
+2026-04-28 17:54:43 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:54:43 - __main__ - ERROR - Failed to initialize database: `sslmode` parameter must be one of: disable, allow, prefer, require, verify-ca, verify-full
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<22 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1209, in _connect
+    addrs, params, config = _parse_connect_arguments(**kwargs)
+                            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 893, in _parse_connect_arguments
+    addrs, params = _parse_connect_dsn_and_args(
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dsn=dsn, host=host, port=port, user=user,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        krbsrvname=krbsrvname, gsslib=gsslib,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        service=service, servicefile=servicefile)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 685, in _parse_connect_dsn_and_args
+    raise exceptions.ClientConfigurationError(
+        '`sslmode` parameter must be one of: {}'.format(modes)
+    ) from None
+asyncpg.exceptions._base.ClientConfigurationError: `sslmode` parameter must be one of: disable, allow, prefer, require, verify-ca, verify-full
+2026-04-28 17:59:00 - __main__ - INFO - Starting VPN bot...
+2026-04-28 17:59:00 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'sslmode'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 61, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'sslmode'
+2026-04-28 18:04:37 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:04:37 - __main__ - ERROR - Failed to initialize database: connect() got an unexpected keyword argument 'sslmode'
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 74, in init_db
+    async with engine.begin() as conn:
+               ~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\AppData\Local\Programs\Python\Python314\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 1068, in begin
+    async with conn:
+               ^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\base.py", line 121, in __aenter__
+    return await self.start(is_ctxmanager=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 275, in start
+    await greenlet_spawn(self.sync_engine.connect)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 190, in greenlet_spawn
+    result = context.switch(*args, **kwargs)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3293, in connect
+    return self._connection_cls(self)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 143, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3317, in raw_connection
+    return self.pool.connect()
+           ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 448, in connect
+    return _ConnectionFairy._checkout(self)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1272, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 175, in _do_get
+    return self._create_connection()
+           ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 389, in _create_connection
+    return _ConnectionRecord(self)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 667, in connect
+    return dialect.connect(*cargs_tup, **cparams)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 630, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)  # type: ignore[no-any-return]  # NOQA: E501
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 955, in connect
+    await_only(creator_fn(*arg, **kw)),
+               ~~~~~~~~~~^^^^^^^^^^^^
+TypeError: connect() got an unexpected keyword argument 'sslmode'
+2026-04-28 18:05:16 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:05:25 - __main__ - INFO - Database initialized successfully
+2026-04-28 18:05:25 - services.scheduler - INFO - Фоновые задачи проверки подписок и напоминаний запущены
+2026-04-28 18:05:27 - services.scheduler - ERROR - Ошибка в фоновой задаче проверки подписок: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+[SQL: SELECT users.id, users.user_id, users.email, users.username, users.hashed_password, users.source, users.vpn_subscription_end, users.bypass_subscription_end, users.vpn_client_id, users.is_active, users.expiry_date, users.yookassa_payment_id, users.yookassa_customer_id, users.payment_method_id, users.last_reminder_sent, users.created_at, users.updated_at 
+FROM users 
+WHERE users.vpn_subscription_end < $1::TIMESTAMP WITHOUT TIME ZONE AND users.vpn_client_id IS NOT NULL]
+[parameters: (datetime.datetime(2026, 4, 28, 18, 5, 25, 588608),)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 526, in _prepare_and_execute
+    prepared_stmt, attributes = await adapt_connection._prepare(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        operation, self._invalidate_schema_cache_asof
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 773, in _prepare
+    prepared_stmt = await self._connection.prepare(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        operation, name=self._prepared_statement_name_func()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 638, in prepare
+    return await self._prepare(
+           ^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 657, in _prepare
+    stmt = await self._get_statement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 443, in _get_statement
+    statement = await self._protocol.prepare(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
+asyncpg.exceptions.UndefinedColumnError: column users.email does not exist
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\services\scheduler.py", line 31, in check_expired_subscriptions
+    result = await session.execute(
+             ^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 449, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2351, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2249, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self,
+        ^^^^^
+    ...<4 lines>...
+        conn,
+        ^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\context.py", line 306, in orm_execute_statement
+    result = conn.execute(
+        statement, params or {}, execution_options=execution_options
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+[SQL: SELECT users.id, users.user_id, users.email, users.username, users.hashed_password, users.source, users.vpn_subscription_end, users.bypass_subscription_end, users.vpn_client_id, users.is_active, users.expiry_date, users.yookassa_payment_id, users.yookassa_customer_id, users.payment_method_id, users.last_reminder_sent, users.created_at, users.updated_at 
+FROM users 
+WHERE users.vpn_subscription_end < $1::TIMESTAMP WITHOUT TIME ZONE AND users.vpn_client_id IS NOT NULL]
+[parameters: (datetime.datetime(2026, 4, 28, 18, 5, 25, 588608),)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:05:27 - services.scheduler - ERROR - Ошибка в задаче напоминаний: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+[SQL: SELECT users.id, users.user_id, users.email, users.username, users.hashed_password, users.source, users.vpn_subscription_end, users.bypass_subscription_end, users.vpn_client_id, users.is_active, users.expiry_date, users.yookassa_payment_id, users.yookassa_customer_id, users.payment_method_id, users.last_reminder_sent, users.created_at, users.updated_at 
+FROM users 
+WHERE users.vpn_subscription_end > $1::TIMESTAMP WITHOUT TIME ZONE AND users.vpn_client_id IS NOT NULL]
+[parameters: (datetime.datetime(2026, 4, 28, 15, 5, 25, 589157),)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 526, in _prepare_and_execute
+    prepared_stmt, attributes = await adapt_connection._prepare(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        operation, self._invalidate_schema_cache_asof
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 773, in _prepare
+    prepared_stmt = await self._connection.prepare(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        operation, name=self._prepared_statement_name_func()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 638, in prepare
+    return await self._prepare(
+           ^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 657, in _prepare
+    stmt = await self._get_statement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\connection.py", line 443, in _get_statement
+    statement = await self._protocol.prepare(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "asyncpg/protocol/protocol.pyx", line 165, in prepare
+asyncpg.exceptions.UndefinedColumnError: column users.email does not exist
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\services\scheduler.py", line 80, in send_expiry_reminders
+    result = await session.execute(
+             ^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 449, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2351, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2249, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self,
+        ^^^^^
+    ...<4 lines>...
+        conn,
+        ^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\orm\context.py", line 306, in orm_execute_statement
+    result = conn.execute(
+        statement, params or {}, execution_options=execution_options
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column users.email does not exist
+[SQL: SELECT users.id, users.user_id, users.email, users.username, users.hashed_password, users.source, users.vpn_subscription_end, users.bypass_subscription_end, users.vpn_client_id, users.is_active, users.expiry_date, users.yookassa_payment_id, users.yookassa_customer_id, users.payment_method_id, users.last_reminder_sent, users.created_at, users.updated_at 
+FROM users 
+WHERE users.vpn_subscription_end > $1::TIMESTAMP WITHOUT TIME ZONE AND users.vpn_client_id IS NOT NULL]
+[parameters: (datetime.datetime(2026, 4, 28, 15, 5, 25, 589157),)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:05:27 - __main__ - INFO - Bot started successfully
+2026-04-28 18:05:27 - aiogram.dispatcher - INFO - Start polling
+2026-04-28 18:05:27 - aiogram.dispatcher - INFO - Run polling for bot @VPN_96_bot id=8671515608 - '96vpn'
+2026-04-28 18:07:23 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:23 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:23 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-04-28 18:07:23 - aiogram.dispatcher - WARNING - Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8671515608)
+2026-04-28 18:07:24 - root - INFO - Shutdown complete.
+2026-04-28 18:07:32 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:32 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:32 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-04-28 18:07:32 - aiogram.dispatcher - WARNING - Sleep for 1.398127 seconds and try again... (tryings = 1, bot id = 8671515608)
+2026-04-28 18:07:33 - root - INFO - Shutdown complete.
+2026-04-28 18:07:33 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:33 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:33 - root - INFO - Shutdown complete.
+2026-04-28 18:07:36 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:36 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:36 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
+2026-04-28 18:07:36 - aiogram.dispatcher - WARNING - Sleep for 1.973321 seconds and try again... (tryings = 2, bot id = 8671515608)
+2026-04-28 18:07:36 - root - INFO - Shutdown complete.
+2026-04-28 18:07:36 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:36 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:36 - root - INFO - Shutdown complete.
+2026-04-28 18:07:36 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:36 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:36 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:37 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:37 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:37 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:38 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:38 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:38 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:39 - root - INFO - Received signal 2, shutting down...
+2026-04-28 18:07:39 - root - INFO - Starting graceful shutdown...
+2026-04-28 18:07:39 - root - INFO - Shutdown complete.
+2026-04-28 18:07:40 - aiogram.dispatcher - ERROR - Failed to fetch updates - TelegramNetworkError: HTTP Client says - ClientConnectionError: Connector is closed.
+2026-04-28 18:07:40 - aiogram.dispatcher - WARNING - Sleep for 2.673406 seconds and try again... (tryings = 3, bot id = 8671515608)
+2026-04-28 18:08:10 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:08:14 - __main__ - ERROR - Failed to initialize database: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 550, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 177, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 268, in __bind_execute
+    data, status, _ = await self.__do_execute(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda protocol: protocol.bind_execute(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            self._state, args, '', limit, True, timeout))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 257, in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 205, in bind_execute
+asyncpg.exceptions.DuplicateTableError: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 75, in init_db
+    await conn.run_sync(Base.metadata.create_all)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 888, in run_sync
+    return await greenlet_spawn(
+           ^^^^^^^^^^^^^^^^^^^^^
+        fn, self._proxied, *arg, _require_await=False, **kw
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5931, in create_all
+    bind._run_ddl_visitor(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        ddl.SchemaGenerator, self, checkfirst=checkfirst, tables=tables
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2467, in _run_ddl_visitor
+    ).traverse_single(element)
+      ~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 984, in visit_metadata
+    self.traverse_single(
+    ~~~~~~~~~~~~~~~~~~~~^
+        table,
+        ^^^^^^
+    ...<2 lines>...
+        _is_metadata_operation=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+        dialect,
+    ...<4 lines>...
+        compiled,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:10:45 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:10:50 - __main__ - ERROR - Failed to initialize database: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 550, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 177, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 268, in __bind_execute
+    data, status, _ = await self.__do_execute(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda protocol: protocol.bind_execute(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            self._state, args, '', limit, True, timeout))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 257, in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 205, in bind_execute
+asyncpg.exceptions.DuplicateTableError: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 75, in init_db
+    await conn.run_sync(Base.metadata.create_all)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 888, in run_sync
+    return await greenlet_spawn(
+           ^^^^^^^^^^^^^^^^^^^^^
+        fn, self._proxied, *arg, _require_await=False, **kw
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5931, in create_all
+    bind._run_ddl_visitor(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        ddl.SchemaGenerator, self, checkfirst=checkfirst, tables=tables
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2467, in _run_ddl_visitor
+    ).traverse_single(element)
+      ~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 984, in visit_metadata
+    self.traverse_single(
+    ~~~~~~~~~~~~~~~~~~~~^
+        table,
+        ^^^^^^
+    ...<2 lines>...
+        _is_metadata_operation=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+        dialect,
+    ...<4 lines>...
+        compiled,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:11:14 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:11:25 - __main__ - ERROR - Failed to initialize database: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 550, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 177, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 268, in __bind_execute
+    data, status, _ = await self.__do_execute(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda protocol: protocol.bind_execute(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            self._state, args, '', limit, True, timeout))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 257, in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 205, in bind_execute
+asyncpg.exceptions.DuplicateTableError: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 75, in init_db
+    await conn.run_sync(Base.metadata.create_all)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 888, in run_sync
+    return await greenlet_spawn(
+           ^^^^^^^^^^^^^^^^^^^^^
+        fn, self._proxied, *arg, _require_await=False, **kw
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5931, in create_all
+    bind._run_ddl_visitor(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        ddl.SchemaGenerator, self, checkfirst=checkfirst, tables=tables
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2467, in _run_ddl_visitor
+    ).traverse_single(element)
+      ~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 984, in visit_metadata
+    self.traverse_single(
+    ~~~~~~~~~~~~~~~~~~~~^
+        table,
+        ^^^^^^
+    ...<2 lines>...
+        _is_metadata_operation=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+        dialect,
+    ...<4 lines>...
+        compiled,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:12:44 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:12:51 - __main__ - ERROR - Failed to initialize database: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 550, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 177, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 268, in __bind_execute
+    data, status, _ = await self.__do_execute(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda protocol: protocol.bind_execute(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            self._state, args, '', limit, True, timeout))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 257, in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 205, in bind_execute
+asyncpg.exceptions.DuplicateTableError: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 75, in init_db
+    await conn.run_sync(Base.metadata.create_all)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 888, in run_sync
+    return await greenlet_spawn(
+           ^^^^^^^^^^^^^^^^^^^^^
+        fn, self._proxied, *arg, _require_await=False, **kw
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5931, in create_all
+    bind._run_ddl_visitor(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        ddl.SchemaGenerator, self, checkfirst=checkfirst, tables=tables
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2467, in _run_ddl_visitor
+    ).traverse_single(element)
+      ~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 984, in visit_metadata
+    self.traverse_single(
+    ~~~~~~~~~~~~~~~~~~~~^
+        table,
+        ^^^^^^
+    ...<2 lines>...
+        _is_metadata_operation=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+        dialect,
+    ...<4 lines>...
+        compiled,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:19:04 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:19:18 - __main__ - ERROR - Failed to initialize database: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 550, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 177, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 268, in __bind_execute
+    data, status, _ = await self.__do_execute(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda protocol: protocol.bind_execute(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            self._state, args, '', limit, True, timeout))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\asyncpg\prepared_stmt.py", line 257, in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "asyncpg/protocol/protocol.pyx", line 205, in bind_execute
+asyncpg.exceptions.DuplicateTableError: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.ProgrammingError: <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\curlyx\Documents\Repository\96vpn\main.py", line 23, in main
+    await init_db()
+  File "c:\Users\curlyx\Documents\Repository\96vpn\db\base.py", line 75, in init_db
+    await conn.run_sync(Base.metadata.create_all)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\engine.py", line 888, in run_sync
+    return await greenlet_spawn(
+           ^^^^^^^^^^^^^^^^^^^^^
+        fn, self._proxied, *arg, _require_await=False, **kw
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\schema.py", line 5931, in create_all
+    bind._run_ddl_visitor(
+    ~~~~~~~~~~~~~~~~~~~~~^
+        ddl.SchemaGenerator, self, checkfirst=checkfirst, tables=tables
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2467, in _run_ddl_visitor
+    ).traverse_single(element)
+      ~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 984, in visit_metadata
+    self.traverse_single(
+    ~~~~~~~~~~~~~~~~~~~~^
+        table,
+        ^^^^^^
+    ...<2 lines>...
+        _is_metadata_operation=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1026, in visit_table
+    self.traverse_single(index, create_ok=True)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\visitors.py", line 661, in traverse_single
+    return meth(obj, **kw)
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 1063, in visit_index
+    CreateIndex(index)._invoke_with(self.connection)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 321, in _invoke_with
+    return bind.execute(self)
+           ~~~~~~~~~~~~^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\sql\ddl.py", line 187, in _execute_on_connection
+    return connection._execute_ddl(
+           ~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, execution_options
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1530, in _execute_ddl
+    ret = self._execute_context(
+        dialect,
+    ...<4 lines>...
+        compiled,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, parameters
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 585, in execute
+    self._adapt_connection.await_(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self._prepare_and_execute(operation, parameters)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 563, in _prepare_and_execute
+    self._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 513, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 797, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.DuplicateTableError'>: relation "ix_users_email" already exists
+[SQL: CREATE INDEX ix_users_email ON users (email)]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-04-28 18:30:40 - __main__ - INFO - Starting VPN bot...
+2026-04-28 18:30:52 - __main__ - INFO - Database initialized successfully
+2026-04-28 18:30:52 - services.scheduler - INFO - Фоновые задачи проверки подписок и напоминаний запущены
+2026-04-28 18:30:54 - __main__ - INFO - Bot started successfully
+2026-04-28 18:30:54 - aiogram.dispatcher - INFO - Start polling
+2026-04-28 18:30:54 - aiogram.dispatcher - INFO - Run polling for bot @VPN_96_bot id=8671515608 - '96vpn'
+2026-04-28 18:31:07 - handlers.common - INFO - User 1890072347 (@curlys_96) started the bot
+2026-04-28 18:31:08 - aiogram.event - INFO - Update id=314733033 is handled. Duration 3660 ms by bot id=8671515608
+2026-04-28 18:31:16 - handlers.subscription - INFO - User 1890072347 tried to connect without active subscription
+2026-04-28 18:31:16 - aiogram.event - INFO - Update id=314733034 is handled. Duration 1215 ms by bot id=8671515608
+2026-04-28 18:31:18 - aiogram.event - INFO - Update id=314733035 is handled. Duration 161 ms by bot id=8671515608
+2026-04-28 18:31:19 - aiogram.event - INFO - Update id=314733036 is handled. Duration 366 ms by bot id=8671515608
+2026-04-28 18:31:20 - handlers.payment - INFO - Processing VPN payment for user 1890072347: 1m rub (300)
+2026-04-28 18:31:21 - db.crud - INFO - VPN subscription extended for user 1890072347 by 30 days, new end: 2026-05-28 18:31:21.084152
+2026-04-28 18:31:21 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 1/3
+2026-04-28 18:31:22 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 2/3
+2026-04-28 18:31:24 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 3/3
+2026-04-28 18:31:24 - services.vpn_provider - ERROR - Failed to POST /login after 3 attempts
+2026-04-28 18:31:24 - services.vpn_provider - ERROR - Authentication failed: No response
+2026-04-28 18:31:24 - services.vpn_provider - ERROR - Cannot create client: not authenticated
+2026-04-28 18:31:24 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 1/3
+2026-04-28 18:31:25 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 2/3
+2026-04-28 18:31:27 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 3/3
+2026-04-28 18:31:27 - services.vpn_provider - ERROR - Failed to POST /login after 3 attempts
+2026-04-28 18:31:27 - services.vpn_provider - ERROR - Authentication failed: No response
+2026-04-28 18:31:27 - services.vpn_provider - ERROR - Cannot search client: not authenticated
+2026-04-28 18:31:27 - handlers.payment - ERROR - Failed to create VPN client for user 1890072347
+2026-04-28 18:31:29 - db.crud - INFO - VPN subscription extended for user 1890072347 by 30 days, new end: 2026-06-27 18:31:21.084152
+2026-04-28 18:31:29 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 1/3
+2026-04-28 18:31:30 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 2/3
+2026-04-28 18:31:32 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 3/3
+2026-04-28 18:31:32 - services.vpn_provider - ERROR - Failed to POST /login after 3 attempts
+2026-04-28 18:31:32 - services.vpn_provider - ERROR - Authentication failed: No response
+2026-04-28 18:31:32 - services.vpn_provider - ERROR - Cannot create client: not authenticated
+2026-04-28 18:31:32 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 1/3
+2026-04-28 18:31:33 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 2/3
+2026-04-28 18:31:35 - services.vpn_provider - WARNING - Client error on /login: /login, attempt 3/3
+2026-04-28 18:31:35 - services.vpn_provider - ERROR - Failed to POST /login after 3 attempts
+2026-04-28 18:31:35 - services.vpn_provider - ERROR - Authentication failed: No response
+2026-04-28 18:31:35 - services.vpn_provider - ERROR - Cannot search client: not authenticated
+2026-04-28 18:31:36 - aiogram.event - INFO - Update id=314733037 is not handled. Duration 16054 ms by bot id=8671515608
+2026-04-28 18:31:36 - aiogram.event - ERROR - Cause exception while process update id=314733037 by bot id=8671515608
+TelegramBadRequest: Telegram server says - Bad Request: query is too old and response timeout expired or query ID is invalid
+Traceback (most recent call last):
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 320, in _process_update
+    response = await self.feed_update(bot, update, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 164, in feed_update
+    response = await self.update.wrap_outer_middleware(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\middlewares\error.py", line 27, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\middlewares\user_context.py", line 58, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\fsm\middleware.py", line 43, in __call__
+    return await handler(event, data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\event\telegram.py", line 126, in trigger
+    return await wrapped_inner(event, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\event\handler.py", line 71, in call
+    return await wrapped()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\dispatcher.py", line 283, in _listen_update
+    return await self.propagate_event(update_type=update_type, event=event, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 163, in propagate_event
+    return await observer.wrap_outer_middleware(_wrapped, event=event, data=kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 155, in _wrapped
+    return await self._propagate_event(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 191, in _propagate_event
+    response = await router.propagate_event(update_type=update_type, event=event, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 163, in propagate_event
+    return await observer.wrap_outer_middleware(_wrapped, event=event, data=kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 155, in _wrapped
+    return await self._propagate_event(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 191, in _propagate_event
+    response = await router.propagate_event(update_type=update_type, event=event, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 163, in propagate_event
+    return await observer.wrap_outer_middleware(_wrapped, event=event, data=kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 155, in _wrapped
+    return await self._propagate_event(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\router.py", line 183, in _propagate_event
+    response = await observer.trigger(event, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\event\telegram.py", line 126, in trigger
+    return await wrapped_inner(event, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\dispatcher\event\handler.py", line 71, in call
+    return await wrapped()
+           ^^^^^^^^^^^^^^^
+  File "c:\Users\curlyx\Documents\Repository\96vpn\utils\decorators.py", line 62, in wrapper
+    return await func(message_or_callback, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\curlyx\Documents\Repository\96vpn\handlers\payment.py", line 178, in vpn_process_payment
+    await callback.answer()
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\methods\base.py", line 82, in emit
+    return await bot(self)
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\client\bot.py", line 493, in __call__
+    return await self.session(self, method, timeout=request_timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\client\session\base.py", line 259, in __call__
+    return cast(TelegramType, await middleware(bot, method))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\client\session\aiohttp.py", line 177, in make_request
+    response = self.check_response(
+        bot=bot,
+    ...<2 lines>...
+        content=raw_result,
+    )
+  File "C:\Users\curlyx\Documents\Repository\96vpn\.venv\Lib\site-packages\aiogram\client\session\base.py", line 121, in check_response
+    raise TelegramBadRequest(method=method, message=description)
+aiogram.exceptions.TelegramBadRequest: Telegram server says - Bad Request: query is too old and response timeout expired or query ID is invalid
+2026-04-28 18:31:44 - aiogram.event - INFO - Update id=314733038 is handled. Duration 2165 ms by bot id=8671515608

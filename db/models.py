@@ -33,8 +33,3 @@ class User(Base):
     last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    __table_args__ = (
-        Index('ix_users_email', 'email'),
-        Index('ix_users_user_id', 'user_id'),
-    )
