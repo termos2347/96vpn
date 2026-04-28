@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ site_name }} - Личный кабинет{% endblock %}
+
+{% block content %}
+<main class="min-h-screen px-6 py-20">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-4xl font-bold mb-8 gradient-text">Личный кабинет</h1>
+        
+        <div class="grid md:grid-cols-2 gap-8">
+            <!-- Профиль -->
+            <div class="glass-effect p-6 rounded-lg neon-glow">
+                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center">
+                    <i class="fas fa-user text-purple-400"></i> Профиль
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <p class="text-sm text-gray-400">Email</p>
+                        <p class="text-lg font-bold">{{ user.email }}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-400">Имя пользователя</p>
+                        <p class="text-lg font-bold">{{ user.username }}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-400">Дата регистрации</p>
+                        <p class="text-lg font-bold">{{ user.created_at.strftime('%d.%m.%Y') }}</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Статус подписки -->
+            <div class="glass-effect p-6 rounded-lg neon-glow">
+                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center">
+                    <i class="fas fa-certificate text-yellow-400"></i> Подписка
+                </h2>
+                
+                {% if is_active %}
+                    <div class="bg-green-500 bg-opacity-10 border border-green-500 rounded p-4 mb-4">
+                        <p class="text-green-400 font-bold flex gap-2 items-center">
+                            <i class="fas fa-check-circle"></i> Подписка активна
+                        </p>
+                    </div>
+                    {% if days_remaining %}
+                        <div class="space-y-4">
+                            <div>
+                                <p class="text-sm text-gray-400">Осталось дней</p>
+                                <p class="text-4xl font-bold gradient-text">{{ days_remaining }}</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-400">Дата окончания</p>
+                                <p class="text-lg font-bold">{{ expiry_date.strftime('%d.%m.%Y') }}</p>
+                            </div>
+                            <a href="#" onclick="renewSubscription()" class="button-primary text-white px-6 py-2 rounded inline-block font-bold">
+                                Продлить подписку
+                            </a>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <div class="bg-red-500 bg-opacity-10 border border-red-500 rounded p-4 mb-4">
+                        <p class="text-red-400 font-bold flex gap-2 items-center">
+                            <i class="fas fa-exclamation-circle"></i> Подписка истекла
+                        </p>
+                    </div>
+                    <p class="text-gray-400 mb-4">Ваша подписка больше не активна. Пожалуйста, продлите её, чтобы продолжить использовать сервис.</p>
+                    <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-3 rounded inline-block font-bold text-lg">
+                        Оформить подписку
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Быстрые ссылки -->
+        <div class="mt-8 grid md:grid-cols-2 gap-8">
+            <a href="/prompts" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition">
+                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center">
+                    <i class="fas fa-lightbulb text-yellow-400"></i> Обзор промптов
+                </h3>
+                <p class="text-gray-400">Просмотрите всю базу профессиональных промптов</p>
+            </a>
+            
+            <a href="/legal/terms" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition">
+                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center">
+                    <i class="fas fa-file-alt text-blue-400"></i> Договор
+                </h3>
+                <p class="text-gray-400">Прочитайте условия использования сервиса</p>
+            </a>
+        </div>
+    </div>
+</main>
+
+<script>
+function renewSubscription() {
+    const userId = new URLSearchParams(window.location.search).get('user_id') || 'user_id';
+    window.location.href = `/pay-choice?user_id={{ user.id }}`;
+}
+</script>
+{% endblock %}

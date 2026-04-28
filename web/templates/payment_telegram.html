@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Оплата - {{ site_name }}{% endblock %}
+
+{% block content %}
+<main class="min-h-screen flex items-center justify-center px-6">
+    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow">
+        <h1 class="text-3xl font-bold mb-2 text-center gradient-text">Оформление подписки</h1>
+        <p class="text-center text-gray-400 mb-8">Аккаунт Telegram: <span class="text-white font-bold">{{ tg_id }}</span></p>
+        
+        <div class="space-y-4 mb-8">
+            <!-- Месячный план -->
+            <div class="glass-effect p-6 rounded-lg border-2 border-purple-500 border-opacity-30 hover:border-purple-500 cursor-pointer transition" onclick="selectPlan('monthly', {{ monthly_price }})">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-bold">Месячная подписка</h3>
+                    <input type="radio" name="plan" value="monthly" id="monthly">
+                </div>
+                <p class="text-2xl font-bold gradient-text">{{ monthly_price }}₽</p>
+                <p class="text-sm text-gray-400">/месяц</p>
+            </div>
+            
+            <!-- Квартальный план -->
+            <div class="glass-effect p-6 rounded-lg border-2 border-yellow-500 border-opacity-30 hover:border-yellow-500 cursor-pointer transition relative" onclick="selectPlan('quarterly', {{ quarterly_price }})">
+                <div class="absolute -top-3 right-4 bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-3 py-1 rounded-full text-xs font-bold">
+                    Популярный
+                </div>
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xl font-bold">Квартальная подписка</h3>
+                    <input type="radio" name="plan" value="quarterly" id="quarterly">
+                </div>
+                <p class="text-2xl font-bold gradient-text">{{ quarterly_price }}₽</p>
+                <p class="text-sm text-gray-400">/3 месяца</p>
+                <p class="text-xs text-green-400 mt-2"><i class="fas fa-tag"></i> Экономия 180₽</p>
+            </div>
+        </div>
+        
+        <div id="selectedPlanInfo" class="glass-effect p-4 rounded mb-6 bg-black bg-opacity-40 hidden">
+            <p class="text-sm text-gray-400">К оплате:</p>
+            <p class="text-3xl font-bold gradient-text" id="amountToPayDisplay">0₽</p>
+        </div>
+        
+        <button id="payButton" class="button-primary text-white w-full py-3 rounded-lg font-bold text-lg" disabled onclick="proceed()">
+            Выбрать тариф
+        </button>
+        
+        <p class="text-center text-xs text-gray-400 mt-4">
+            Нажимая на кнопку, вы соглашаетесь с <a href="/legal/terms" class="text-purple-400 hover:text-purple-300">условиями</a>
+        </p>
+    </div>
+</main>
+
+<script>
+let selectedPlan = null;
+let selectedAmount = null;
+
+function selectPlan(plan, amount) {
+    selectedPlan = plan;
+    selectedAmount = amount;
+    
+    document.getElementById('monthly').checked = plan === 'monthly';
+    document.getElementById('quarterly').checked = plan === 'quarterly';
+    
+    document.getElementById('selectedPlanInfo').classList.remove('hidden');
+    document.getElementById('amountToPayDisplay').textContent = amount + '₽';
+    
+    const button = document.getElementById('payButton');
+    button.disabled = false;
+    button.textContent = `Оплатить ${amount}₽ через ЮKassa`;
+}
+
+async function proceed() {
+    if (!selectedPlan) return;
+    
+    try {
+        // Создаём платёж
+        const response = await fetch(`/api/payment/activate/0/{{ tg_id }}?plan=${selectedPlan}`, {
+            method: 'POST'
+        });
+        
+        if (!response.ok) {
+            alert('Ошибка при создании платежа');
+            return;
+        }
+        
+        const data = await response.json();
+        
+        if (data.confirmation_url) {
+            window.location.href = data.confirmation_url;
+        } else {
+            alert('Ошибка: URL платежа не получен');
+        }
+    } catch (error) {
+        alert('Ошибка: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

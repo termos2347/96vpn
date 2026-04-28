@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}{{ prompt.title }} - {{ site_name }}{% endblock %}
+
+{% block content %}
+<main class="min-h-screen px-6 py-20">
+    <div class="max-w-4xl mx-auto">
+        <a href="/prompts" class="text-purple-400 hover:text-purple-300 mb-8 inline-flex gap-2 items-center">
+            <i class="fas fa-arrow-left"></i> Вернуться к промптам
+        </a>
+        
+        <div class="glass-effect p-8 rounded-lg neon-glow">
+            <div class="mb-8">
+                <span class="inline-block bg-purple-500 bg-opacity-30 px-4 py-2 rounded-full text-purple-300 mb-4">{{ prompt.category }}</span>
+                <h1 class="text-4xl font-bold mb-4">{{ prompt.title }}</h1>
+                <p class="text-xl text-gray-400">{{ prompt.description }}</p>
+            </div>
+            
+            <!-- Статистика -->
+            <div class="grid md:grid-cols-3 gap-4 mb-8 pb-8 border-b border-purple-500 border-opacity-20">
+                <div>
+                    <p class="text-gray-400 text-sm">Использовано</p>
+                    <p class="text-2xl font-bold">{{ prompt.usage_count }}+</p>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Рейтинг</p>
+                    <div class="flex gap-1 items-center">
+                        <span class="text-2xl font-bold">{{ prompt.rating }}</span>
+                        <span class="text-yellow-400">
+                            {% for i in range(5) %}
+                                <i class="fas fa-star"></i>
+                            {% endfor %}
+                        </span>
+                    </div>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">Обновлено</p>
+                    <p class="text-2xl font-bold">на этой неделе</p>
+                </div>
+            </div>
+            
+            <!-- Содержание промпта -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold mb-4">Содержание промпта</h2>
+                <div class="bg-black bg-opacity-40 rounded-lg p-6 border border-purple-500 border-opacity-20 font-mono text-sm leading-relaxed">
+                    <p class="text-gray-300">
+                        Вы - опытный {{ prompt.title | lower }}.
+                        <br><br>
+                        Задача: Выполнять работу профессионально и эффективно, используя лучшие практики.
+                        <br><br>
+                        Требования:
+                        <br>- Качество выше всего
+                        <br>- Оригинальность контента
+                        <br>- Учитывать целевую аудиторию
+                        <br>- Быть готовым к итерациям
+                        <br><br>
+                        Начнём!
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Примеры использования -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold mb-4">Примеры использования</h2>
+                <div class="space-y-4">
+                    <div class="glass-effect p-4 rounded">
+                        <p class="text-sm text-gray-400 mb-2">Пример входных данных:</p>
+                        <p class="text-gray-200">Создай контент для [ниша], целевая аудитория [описание]</p>
+                    </div>
+                    <div class="glass-effect p-4 rounded">
+                        <p class="text-sm text-gray-400 mb-2">Ожидаемый результат:</p>
+                        <p class="text-gray-200">Высокачественный контент, оптимизированный под SEO и целевую аудиторию</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Действия -->
+            <div class="flex gap-4">
+                <button onclick="copyToClipboard()" class="button-primary text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center">
+                    <i class="fas fa-copy"></i> Копировать промпт
+                </button>
+                <button onclick="downloadPrompt()" class="glass-effect text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center hover:bg-white hover:bg-opacity-10 transition">
+                    <i class="fas fa-download"></i> Скачать
+                </button>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+function copyToClipboard() {
+    const text = `Вы - опытный {{ prompt.title | lower }}.
+    
+Задача: Выполнять работу профессионально и эффективно, используя лучшие практики.
+
+Требования:
+- Качество выше всего
+- Оригинальность контента
+- Учитывать целевую аудиторию
+- Быть готовым к итерациям
+
+Начнём!`;
+    
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Промпт скопирован в буфер обмена!');
+    });
+}
+
+function downloadPrompt() {
+    const text = `{{ prompt.title }}
+{{ prompt.description }}
+
+КАТЕГОРИЯ: {{ prompt.category }}
+ИСПОЛЬЗОВАНО: {{ prompt.usage_count }}+
+РЕЙТИНГ: {{ prompt.rating }}
+
+---
+
+Вы - опытный {{ prompt.title | lower }}.
+
+Задача: Выполнять работу профессионально и эффективно, используя лучшие практики.
+
+Требования:
+- Качество выше всего
+- Оригинальность контента
+- Учитывать целевую аудиторию
+- Быть готовым к итерациям
+
+Начнём!`;
+    
+    const element = document.createElement('a');
+    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+    element.setAttribute('download', '{{ prompt.title }}.txt');
+    element.style.display = 'none';
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+}
+</script>
+{% endblock %}

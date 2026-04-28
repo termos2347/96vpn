@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}{{ site_name }} - Регистрация{% endblock %}
+
+{% block content %}
+<main class="min-h-screen flex items-center justify-center px-6">
+    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow">
+        <h1 class="text-3xl font-bold mb-2 text-center gradient-text">Регистрация</h1>
+        <p class="text-center text-gray-400 mb-8">Создайте аккаунт и получите доступ к промптам</p>
+        
+        <form id="registerForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-bold mb-2">Email</label>
+                <input type="email" name="email" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="your@email.com">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-bold mb-2">Имя пользователя (опционально)</label>
+                <input type="text" name="username" class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="username">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-bold mb-2">Пароль</label>
+                <input type="password" name="password" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="••••••••">
+            </div>
+            
+            <div>
+                <label class="block text-sm font-bold mb-2">Подтвердите пароль</label>
+                <input type="password" name="password_confirm" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="••••••••">
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <input type="checkbox" id="terms" required>
+                <label for="terms" class="text-sm text-gray-400">
+                    Я согласен с <a href="/legal/terms" class="text-purple-400 hover:text-purple-300">условиями использования</a>
+                </label>
+            </div>
+            
+            <button type="submit" class="button-primary text-white w-full py-2 rounded-lg font-bold">
+                Зарегистрироваться
+            </button>
+            
+            <div id="message" class="text-center text-sm mt-4"></div>
+        </form>
+        
+        <p class="text-center text-gray-400 mt-6">
+            Уже есть аккаунт? <a href="/login" class="text-purple-400 hover:text-purple-300">Войти</a>
+        </p>
+    </div>
+</main>
+
+<script>
+document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const email = document.querySelector('input[name="email"]').value;
+    const username = document.querySelector('input[name="username"]').value;
+    const password = document.querySelector('input[name="password"]').value;
+    const passwordConfirm = document.querySelector('input[name="password_confirm"]').value;
+    
+    if (password !== passwordConfirm) {
+        document.getElementById('message').innerHTML = '<span class="text-red-400">Пароли не совпадают</span>';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email, username, password, source: 'web'})
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('message').innerHTML = '<span class="text-green-400">Регистрация успешна! Перенаправляем...</span>';
+            setTimeout(() => window.location.href = `/pay-choice?user_id=${data.id}`, 2000);
+        } else {
+            document.getElementById('message').innerHTML = `<span class="text-red-400">${data.detail}</span>`;
+        }
+    } catch (error) {
+        document.getElementById('message').innerHTML = '<span class="text-red-400">Ошибка при регистрации</span>';
+    }
+});
+</script>
+{% endblock %}

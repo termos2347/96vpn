@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ site_name }}{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .button-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: all 0.3s ease;
+        }
+        
+        .button-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .neon-glow {
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="glass-effect sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-brain text-2xl gradient-text"></i>
+                <h1 class="text-2xl font-bold gradient-text">{{ site_name }}</h1>
+            </div>
+            <div class="flex gap-6 items-center">
+                <a href="/" class="hover:text-purple-400 transition">Главная</a>
+                <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
+                <a href="/dashboard" class="hover:text-purple-400 transition">Кабинет</a>
+                <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    {% block content %}{% endblock %}
+
+    <!-- Footer -->
+    <footer class="glass-effect mt-20 border-t border-purple-500 border-opacity-20">
+        <div class="max-w-7xl mx-auto px-6 py-8">
+            <div class="grid md:grid-cols-4 gap-8 mb-8">
+                <div>
+                    <h3 class="font-bold mb-4 gradient-text">{{ site_name }}</h3>
+                    <p class="text-sm text-gray-400">Профессиональная база промптов для AI-инженеров</p>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Продукт</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="/prompts" class="hover:text-purple-400">Промпты</a></li>
+                        <li><a href="#pricing" class="hover:text-purple-400">Тарифы</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Компания</h4>
+                    <ul class="space-y-2 text-sm text-gray-400">
+                        <li><a href="/legal/terms" class="hover:text-purple-400">Оферта</a></li>
+                        <li><a href="/legal/privacy" class="hover:text-purple-400">Политика</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Контакты</h4>
+                    <p class="text-sm text-gray-400">
+                        Email: <a href="mailto:support@neuroprompt.ai" class="text-purple-400">support@neuroprompt.ai</a>
+                    </p>
+                </div>
+            </div>
+            <div class="border-t border-purple-500 border-opacity-20 pt-8 text-center text-sm text-gray-500">
+                <p>&copy; 2024 {{ site_name }}. Все права защищены.</p>
+            </div>
+        </div>
+    </footer>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
