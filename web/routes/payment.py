@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from web.schemas.schemas import PaymentResponse, SubscriptionInfo
 from web.services.payment import yookassa_service
 from web.services.auth import SubscriptionService
-from web.config import settings
+from config import settings
 from db.base import get_db
 from sqlalchemy import select
 from db.models import User

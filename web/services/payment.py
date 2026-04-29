@@ -5,7 +5,7 @@ from yookassa import Configuration, Payment
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from db.models import User
-from web.config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 

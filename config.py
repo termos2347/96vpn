@@ -1,40 +1,75 @@
 import os
+from typing import Optional
+from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
+# Загружаем .env, чтобы переменные были доступны
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден в .env файле")
+class Settings(BaseSettings):
+    # Telegram Bot
+    BOT_TOKEN: str
+    
+    # Proxy
+    PROXY_URL: Optional[str] = None
+    
+    # XUI
+    XUI_BASE_URL: Optional[str] = None
+    XUI_USERNAME: Optional[str] = None
+    XUI_PASSWORD: Optional[str] = None
+    XUI_INBOUND_ID: Optional[int] = None
+    XUI_SUB_PORT: Optional[int] = None
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL не найден в .env файле")
+    # FastAPI / Web
+    APP_NAME: str = "NeuroPrompt Premium"
+    DEBUG: bool = False
+    
+    # Database
+    DATABASE_URL: str = "sqlite:///./test.db"
+    
+    # JWT
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    # Yookassa
+    YOOKASSA_SHOP_ID: str
+    YOOKASSA_API_KEY: str
+    YOOKASSA_RETURN_URL: str = "http://localhost:8000/dashboard"
+    
+    # Application
+    SITE_URL: str = "http://localhost:8000"
+    ADMIN_EMAIL: str
+    
+    # Subscription
+    MONTHLY_PRICE: float = 290.0
+    QUARTERLY_PRICE: float = 790.0
+    SUBSCRIPTION_DAYS: int = 30
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+        extra = "ignore"
 
-PROXY_URL = os.getenv("PROXY_URL")
+settings = Settings()
 
-# Валидация XUI настроек (опциональные для веб-приложения)
-XUI_BASE_URL = os.getenv("XUI_BASE_URL")
-XUI_USERNAME = os.getenv("XUI_USERNAME")
-XUI_PASSWORD = os.getenv("XUI_PASSWORD")
-XUI_INBOUND_ID = os.getenv("XUI_INBOUND_ID")
-XUI_SUB_PORT = os.getenv("XUI_SUB_PORT")
+# Для обратной совместимости с существующим кодом бота
+TOKEN = settings.BOT_TOKEN
+DATABASE_URL = settings.DATABASE_URL
+PROXY_URL = settings.PROXY_URL
+
+XUI_BASE_URL = settings.XUI_BASE_URL
+XUI_USERNAME = settings.XUI_USERNAME
+XUI_PASSWORD = settings.XUI_PASSWORD
+XUI_INBOUND_ID = settings.XUI_INBOUND_ID
+XUI_SUB_PORT = settings.XUI_SUB_PORT
 
 # Проверяем, что все XUI переменные либо все заполнены, либо все пусты
 xui_vars = [XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT]
-xui_filled_count = sum(1 for v in xui_vars if v)
+xui_filled_count = sum(1 for v in xui_vars if v is not None and str(v).strip())
 
-# Если некоторые заполнены, но не все - это ошибка
 if 0 < xui_filled_count < 5:
     raise ValueError("Все переменные XUI должны быть заполнены вместе или оставлены пустыми")
-
-# Конвертируем в числа только если заполнены
-if all(xui_vars):
-    try:
-        XUI_INBOUND_ID = int(XUI_INBOUND_ID)
-        XUI_SUB_PORT = int(XUI_SUB_PORT)
-    except ValueError:
-        raise ValueError("XUI_INBOUND_ID и XUI_SUB_PORT должны быть числами")
 
 # ---------- Цены на подписки ----------
 # VPN: ключ - валюта, значение - словарь {период: цена}

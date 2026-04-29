@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from db.base import get_db
 from sqlalchemy import select
 from db.models import User
-from web.config import settings
+from config import settings
 from web.services.auth import PromptService, SubscriptionService
 from datetime import datetime
 
@@ -89,7 +89,7 @@ async def prompts_page(request: Request, current_user: dict = Depends(get_curren
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
 async def payment_telegram(request: Request, tg_id: int, db: Session = Depends(get_db)):
     """Упрощённая страница оплаты для Telegram"""
-    from web.config import settings
+    from config import settings
     
     template = jinja_env.get_template("payment_telegram.html")
     return template.render(

@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from web.routes import web, auth, payment, prompts
-from web.config import settings
+from config import settings
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)

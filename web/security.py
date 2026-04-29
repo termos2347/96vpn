@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from db.models import User
 from db.base import get_db
-from web.config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer()

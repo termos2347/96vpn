@@ -7,9 +7,12 @@ class Base(DeclarativeBase):
     pass
 
 class User(Base):
+    __mapper_args__ = {"eager_defaults": True}
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, index=True, nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -33,3 +36,10 @@ class User(Base):
     last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Client(Base):
+    __tablename__ = "clients"
+    client_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
