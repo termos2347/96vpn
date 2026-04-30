@@ -6,28 +6,31 @@
 <main class="min-h-screen px-6 py-20">
     <div class="max-w-6xl mx-auto">
         <h1 class="text-4xl font-bold mb-4 gradient-text">База профессиональных промптов</h1>
-        <p class="text-gray-400 mb-12">Выберите промпт для просмотра полного содержимого и использования</p>
+        <p class="text-gray-400 mb-12">Выберите промпт для просмотра его полного содержимого и использования. Используйте доступные фильтры для упрощения поиска!</p>
         
         <!-- Фильтры -->
         <div class="glass-effect p-4 rounded-lg mb-8 flex gap-4 flex-wrap">
             <input type="text" id="searchInput" placeholder="Поиск промптов..." class="bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white flex-1 focus:outline-none focus:border-purple-500">
             <select id="categoryFilter" class="bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500">
                 <option value="">Все категории</option>
-                <option value="Контент-маркетинг">Контент-маркетинг</option>
-                <option value="Аналитика">Аналитика</option>
-                <option value="Создание контента">Создание контента</option>
-                <option value="Реклама">Реклама</option>
-                <option value="Email маркетинг">Email маркетинг</option>
-                <option value="Видео">Видео</option>
-                <option value="AI Арт">AI Арт</option>
-                <option value="Веб-дизайн">Веб-дизайн</option>
-                <option value="Автоматизация">Автоматизация</option>
-                <option value="Стратегия">Стратегия</option>
+                {% for category in categories %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
             </select>
         </div>
         
-        <!-- Сетка промптов -->
-        <div id="promptsGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- Сетка категорий -->
+        <div id="categoriesGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {% for category in categories %}
+            <div class="glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToCategory('{{ category }}')">
+                <h3 class="text-xl font-bold">{{ category }}</h3>
+                <p class="text-gray-400 text-sm">Выберите промпты из этой категории.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Сетка промптов (скрыта по умолчанию) -->
+        <div id="promptsGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6" style="display: none;">
             {% for prompt in prompts %}
             <div class="glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToPrompt({{ prompt.id }})">
                 <div class="mb-4">
@@ -50,6 +53,7 @@
 
 <script>
 const prompts = {{ prompts | tojson }};
+const categories = {{ categories | tojson }};
 
 document.getElementById('searchInput').addEventListener('input', filterPrompts);
 document.getElementById('categoryFilter').addEventListener('change', filterPrompts);
@@ -82,6 +86,10 @@ function filterPrompts() {
             </div>
         </div>
     `).join('');
+}
+
+function goToCategory(category) {
+    window.location.href = `/prompts?category=${category}`;
 }
 
 function goToPrompt(promptId) {

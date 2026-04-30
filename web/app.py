@@ -1,14 +1,24 @@
 import logging
+from pathlib import Path
+
 from fastapi import FastAPI, staticfiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
+
 from web.routes import web, auth, payment, prompts
 from config import settings
+from db.base import init_sync_db
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Инициализация таблиц базы данных (синхронно)
+try:
+    init_sync_db()
+    logger.info("Database tables initialized")
+except Exception as e:
+    logger.error(f"Database initialization error: {e}")
 
 # Инициализация FastAPI приложения
 app = FastAPI(
@@ -26,7 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Включаем статические файлы
+# Статические файлы
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", staticfiles.StaticFiles(directory=str(static_dir)), name="static")

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, String, DateTime, Boolean, Index
+from sqlalchemy import BigInteger, String, DateTime, Boolean
 from datetime import datetime
 from typing import Optional
 
@@ -7,24 +7,23 @@ class Base(DeclarativeBase):
     pass
 
 class User(Base):
-    __mapper_args__ = {"eager_defaults": True}
     __tablename__ = "users"
+    __mapper_args__ = {"eager_defaults": True}
+    
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, index=True, nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
-    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
     username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(20), default="bot")  # "bot" или "web"
     
-    # VPN подписка
+    # VPN подписка (для бота)
     vpn_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     bypass_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     vpn_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # NeuroPrompt подписка
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)   # теперь по умолчанию False, пока не оплачено
     expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     # Платежи Yookassa

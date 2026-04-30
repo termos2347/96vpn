@@ -4,37 +4,42 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from web.schemas.schemas import PromptCard
 from web.services.auth import PromptService, SubscriptionService
+from web.security import get_current_user_optional
 from db.base import get_db
-from sqlalchemy import select
 from db.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
 @router.get("/all", response_model=list[PromptCard])
-async def get_all_prompts(user_id: int = None, db: Session = Depends(get_db)):
-    """Получить все доступные промпты"""
-    if user_id:
-        stmt = select(User).where(User.id == user_id)
-        user = db.execute(stmt).scalars().first()
-        
-        if not user or not user.is_active:
-            raise HTTPException(status_code=403, detail="Active subscription required")
+async def get_all_prompts(current_user: User = Depends(get_current_user_optional)):
+    """Получить все доступные промпты (только для авторизованных с активной подпиской)"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="Active subscription required")
     
-    return PromptService.get_all_prompts()
+    prompts = PromptService.get_all_prompts()
+    # Преобразуем в модель Pydantic (если нужно)
+    return prompts
 
-@router.get("/{prompt_id}", response_model=PromptCard)
-async def get_prompt(prompt_id: int, user_id: int = None, db: Session = Depends(get_db)):
-    """Получить промпт по ID"""
-    if user_id:
-        stmt = select(User).where(User.id == user_id)
-        user = db.execute(stmt).scalars().first()
-        
-        if not user or not user.is_active:
-            raise HTTPException(status_code=403, detail="Active subscription required")
+@router.get("/categories", response_model=list[str])
+async def get_categories():
+    """Получить список категорий (доступно без авторизации)"""
+    return PromptService.get_categories()
+
+@router.get("/{prompt_id}")
+async def get_prompt(
+    prompt_id: int,
+    current_user: User = Depends(get_current_user_optional)
+):
+    """Получить промпт по ID (только для авторизованных с активной подпиской)"""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not current_user.is_active:
+        raise HTTPException(status_code=403, detail="Active subscription required")
     
     prompt = PromptService.get_prompt_by_id(prompt_id)
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
-    
     return prompt

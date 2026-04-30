@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from db.models import User
 from config import settings
+from web.services.auth import SubscriptionService
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,7 @@ class YookassaService:
     ) -> Optional[Dict[str, Any]]:
         """Создаёт платёж в Yookassa"""
         try:
-            stmt = select(User).where(User.id == user_id)
-            user = db.execute(stmt).scalars().first()
+            user = db.execute(select(User).where(User.id == user_id)).scalars().first()
             if not user:
                 logger.error(f"User {user_id} not found")
                 return None
@@ -56,12 +56,11 @@ class YookassaService:
             
             payment = Payment.create(payment_data, idempotency_key=f"payment_{user_id}_{datetime.utcnow().timestamp()}")
             
-            # Сохраняем payment_id в БД
+            # Сохраняем payment_id в БД (добавим поле, если его нет – надо добавить в модель User)
             user.yookassa_payment_id = payment.id
             db.commit()
             
             logger.info(f"Payment created: {payment.id} for user {user_id}, amount: {amount}")
-            
             return {
                 "payment_id": payment.id,
                 "status": payment.status,
@@ -73,7 +72,6 @@ class YookassaService:
             return None
     
     async def get_payment_status(self, payment_id: str) -> Optional[str]:
-        """Получает статус платежа"""
         try:
             payment = Payment.find_one(payment_id)
             return payment.status
@@ -81,12 +79,8 @@ class YookassaService:
             logger.error(f"Error getting payment status: {e}")
             return None
     
-    async def process_webhook(
-        self,
-        webhook_data: Dict[str, Any],
-        db: Session
-    ) -> bool:
-        """Обрабатывает webhook от Yookassa"""
+    async def process_webhook(self, webhook_data: Dict[str, Any], db: Session) -> bool:
+        """Обрабатывает успешный платёж и активирует подписку"""
         try:
             if webhook_data.get("event") != "payment.succeeded":
                 logger.info(f"Skipping webhook event: {webhook_data.get('event')}")
@@ -94,15 +88,12 @@ class YookassaService:
             
             payment = webhook_data.get("object", {})
             payment_id = payment.get("id")
-            
             if not payment_id:
                 logger.error("Payment ID not found in webhook")
                 return False
             
             # Ищем пользователя по payment_id
-            stmt = select(User).where(User.yookassa_payment_id == payment_id)
-            user = db.execute(stmt).scalars().first()
-            
+            user = db.execute(select(User).where(User.yookassa_payment_id == payment_id)).scalars().first()
             if not user:
                 logger.warning(f"User not found for payment {payment_id}")
                 return False
@@ -110,12 +101,9 @@ class YookassaService:
             # Извлекаем информацию о плане из метаданных
             metadata = payment.get("metadata", {})
             plan = metadata.get("plan", "monthly")
-            
-            # Определяем количество дней подписки
             days = 90 if plan == "quarterly" else 30
             
-            # Активируем подписку
-            from web.services.auth import SubscriptionService
+            # Активируем подписку через сервис
             await SubscriptionService.renew_subscription(db, user, days)
             
             logger.info(f"Subscription activated for user {user.id} after payment {payment_id}")

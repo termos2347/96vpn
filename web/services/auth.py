@@ -1,3 +1,4 @@
+# web/services/auth.py
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -5,229 +6,148 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from passlib.context import CryptContext
 from db.models import User
+from config import settings
+from passlib.context import CryptContext
 
 logger = logging.getLogger(__name__)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 
 class AuthService:
-    @staticmethod
-    def hash_password(password: str) -> str:
-        return pwd_context.hash(password)
+    """Сервис аутентификации и управления пользователями"""
     
     @staticmethod
-    def verify_password(plain_password: str, hashed_password: str) -> bool:
-        return pwd_context.verify(plain_password, hashed_password)
-    
-    @staticmethod
-    async def create_user(
-        db: Session,
-        email: str,
-        password: str,
-        username: Optional[str] = None,
-        source: str = "web"
-    ) -> Optional[User]:
-        try:
-            # Проверяем, существует ли пользователь
-            stmt = select(User).where(User.email == email)
-            existing_user = db.execute(stmt).scalars().first()
-            if existing_user:
-                logger.warning(f"User with email {email} already exists")
-                return None
-            
-            hashed_password = AuthService.hash_password(password)
-            user = User(
-                email=email,
-                hashed_password=hashed_password,
-                username=username or email.split("@")[0],
-                source=source,
-                is_active=False,  # Будет активирован после первого платежа
-                created_at=datetime.utcnow()
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            return user
-        except Exception as e:
-            logger.error(f"Error creating user: {e}")
-            db.rollback()
+    async def create_user(db: Session, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[User]:
+        """Создать нового пользователя"""
+        # Проверка существования email
+        stmt = select(User).where(User.email == email)
+        existing = db.execute(stmt).scalars().first()
+        if existing:
+            logger.warning(f"User with email {email} already exists")
             return None
+        
+        # Хеширование пароля
+        hashed = pwd_context.hash(password)
+        
+        # Создание пользователя (подписка неактивна)
+        user = User(
+            email=email,
+            username=username,
+            hashed_password=hashed,
+            source=source,
+            is_active=False,
+            expiry_date=None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Created user {user.id} with email {email}")
+        return user
     
     @staticmethod
     async def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-        try:
-            stmt = select(User).where(User.email == email)
-            user = db.execute(stmt).scalars().first()
-            if not user or not AuthService.verify_password(password, user.hashed_password or ""):
-                return None
-            return user
-        except Exception as e:
-            logger.error(f"Error authenticating user: {e}")
+        """Аутентификация пользователя по email и паролю"""
+        stmt = select(User).where(User.email == email)
+        user = db.execute(stmt).scalars().first()
+        if not user:
             return None
+        if not user.hashed_password:
+            return None
+        if not pwd_context.verify(password, user.hashed_password):
+            return None
+        return user
     
     @staticmethod
-    async def get_user_by_email(db: Session, email: str) -> Optional[User]:
-        try:
-            stmt = select(User).where(User.email == email)
-            return db.execute(stmt).scalars().first()
-        except Exception as e:
-            logger.error(f"Error getting user: {e}")
-            return None
+    async def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+        stmt = select(User).where(User.id == user_id)
+        return db.execute(stmt).scalars().first()
     
     @staticmethod
-    async def get_user_by_telegram_id(db: Session, telegram_id: int) -> Optional[User]:
-        try:
-            stmt = select(User).where(User.user_id == telegram_id)
-            return db.execute(stmt).scalars().first()
-        except Exception as e:
-            logger.error(f"Error getting user by telegram_id: {e}")
-            return None
+    async def get_user_by_telegram(db: Session, telegram_id: int) -> Optional[User]:
+        stmt = select(User).where(User.user_id == telegram_id)
+        return db.execute(stmt).scalars().first()
+
 
 class SubscriptionService:
-    @staticmethod
-    async def activate_subscription(
-        db: Session,
-        user: User,
-        days: int = 30
-    ) -> bool:
-        try:
-            now = datetime.utcnow()
-            expiry_date = now + timedelta(days=days)
-            
-            user.is_active = True
-            user.expiry_date = expiry_date
-            user.updated_at = now
-            
-            db.commit()
-            db.refresh(user)
-            logger.info(f"Subscription activated for user {user.id} until {expiry_date}")
-            return True
-        except Exception as e:
-            logger.error(f"Error activating subscription: {e}")
-            db.rollback()
-            return False
+    """Управление подписками"""
     
     @staticmethod
-    async def renew_subscription(
-        db: Session,
-        user: User,
-        days: int = 30
-    ) -> bool:
-        try:
-            now = datetime.utcnow()
-            if user.expiry_date and user.expiry_date > now:
-                # Подписка ещё активна, продлеваем с текущей даты
-                new_expiry_date = user.expiry_date + timedelta(days=days)
-            else:
-                # Подписка истекла, считаем с сегодня
-                new_expiry_date = now + timedelta(days=days)
-            
-            user.is_active = True
-            user.expiry_date = new_expiry_date
-            user.updated_at = now
-            
-            db.commit()
-            db.refresh(user)
-            logger.info(f"Subscription renewed for user {user.id} until {new_expiry_date}")
-            return True
-        except Exception as e:
-            logger.error(f"Error renewing subscription: {e}")
-            db.rollback()
-            return False
+    async def activate_subscription(db: Session, user: User, days: int = 30) -> bool:
+        """Активировать подписку (установить дату окончания с текущего момента)"""
+        now = datetime.utcnow()
+        user.expiry_date = now + timedelta(days=days)
+        user.is_active = True
+        db.commit()
+        logger.info(f"Subscription activated for user {user.id}, expires at {user.expiry_date}")
+        return True
+    
+    @staticmethod
+    async def renew_subscription(db: Session, user: User, days: int = 30) -> bool:
+        """Продлить подписку (добавить дни к текущей дате окончания или от текущей даты)"""
+        now = datetime.utcnow()
+        if user.expiry_date and user.expiry_date > now:
+            # Подписка ещё активна – добавляем дни
+            new_expiry = user.expiry_date + timedelta(days=days)
+        else:
+            # Подписка истекла – начинаем с сегодня
+            new_expiry = now + timedelta(days=days)
+        user.expiry_date = new_expiry
+        user.is_active = True
+        db.commit()
+        logger.info(f"Subscription renewed for user {user.id}, new expiry {new_expiry}")
+        return True
     
     @staticmethod
     def get_days_remaining(user: User) -> Optional[int]:
-        if not user.expiry_date or not user.is_active:
+        """Вернуть количество оставшихся дней подписки (или None, если нет expiry_date)"""
+        if not user.expiry_date:
             return None
-        
+        remaining = (user.expiry_date - datetime.utcnow()).days
+        return max(0, remaining)
+    
+    @staticmethod
+    async def check_and_deactivate_expired(db: Session):
+        """Деактивировать пользователей с истекшей подпиской (вызывать периодически)"""
         now = datetime.utcnow()
-        if user.expiry_date <= now:
-            return None
-        
-        delta = user.expiry_date - now
-        return delta.days
+        stmt = select(User).where(User.is_active == True, User.expiry_date < now)
+        expired_users = db.execute(stmt).scalars().all()
+        for user in expired_users:
+            user.is_active = False
+            logger.info(f"User {user.id} deactivated due to expired subscription")
+        db.commit()
+        return len(expired_users)
+
 
 class PromptService:
-    # Пример промптов для тестирования
+    """Работа с промптами (заглушка – позже заменим на БД или JSON)"""
+    
+    # Пример данных (заглушка)
     PROMPTS = [
         {
             "id": 1,
-            "title": "Создание SEO статьи",
-            "description": "Профессиональный промпт для генерации SEO-оптимизированных статей для блога",
-            "category": "Контент-маркетинг",
-            "usage_count": 1250,
-            "rating": 4.8
+            "title": "SEO Оптимизация контента",
+            "description": "Промпт для создания SEO-оптимизированных статей",
+            "category": "SEO",
+            "usage_count": 245,
+            "rating": 4.8,
+            "content": "Ты — эксперт по SEO... (содержимое промпта)"
         },
         {
             "id": 2,
-            "title": "Анализ конкурентов",
-            "description": "Умный промпт для детального анализа конкурентов и выявления ниш",
-            "category": "Аналитика",
-            "usage_count": 890,
-            "rating": 4.9
+            "title": "Email маркетинг",
+            "description": "Генерация эффективных email-писем",
+            "category": "Маркетинг",
+            "usage_count": 189,
+            "rating": 4.7,
         },
         {
             "id": 3,
-            "title": "Генерация идей контента",
-            "description": "Креативный промпт для генерации 100+ идей контента на месяц",
-            "category": "Создание контента",
-            "usage_count": 2100,
-            "rating": 4.7
-        },
-        {
-            "id": 4,
-            "title": "Copywriting для Ads",
-            "description": "Профессиональный промпт для написания продающих объявлений в соцсетях",
-            "category": "Реклама",
-            "usage_count": 1560,
-            "rating": 4.9
-        },
-        {
-            "id": 5,
-            "title": "Email маркетинг",
-            "description": "Промпт для создания холодных и теплых email-кампаний",
-            "category": "Email маркетинг",
-            "usage_count": 950,
-            "rating": 4.8
-        },
-        {
-            "id": 6,
-            "title": "Создание видеоскрипта",
-            "description": "Полный промпт для написания скриптов YouTube и TikTok видео",
-            "category": "Видео",
-            "usage_count": 1420,
-            "rating": 4.6
-        },
-        {
-            "id": 7,
-            "title": "Midjourney Prompts Master",
-            "description": "Набор профессиональных промптов для генерации изображений в Midjourney",
-            "category": "AI Арт",
-            "usage_count": 3200,
-            "rating": 5.0
-        },
-        {
-            "id": 8,
-            "title": "Лендинг копия",
-            "description": "Промпт для написания убедительных текстов лендинг-страниц",
-            "category": "Веб-дизайн",
-            "usage_count": 1680,
-            "rating": 4.7
-        },
-        {
-            "id": 9,
-            "title": "ChatGPT для бизнеса",
-            "description": "Расширенные промпты для автоматизации рутинных процессов в бизнесе",
-            "category": "Автоматизация",
-            "usage_count": 2300,
-            "rating": 4.8
-        },
-        {
-            "id": 10,
-            "title": "Разработка стратегии",
-            "description": "Комплексный промпт для разработки маркетинг-стратегии на 6 месяцев",
-            "category": "Стратегия",
-            "usage_count": 780,
-            "rating": 4.9
+            "title": "Midjourney арт",
+            "description": "Создание промптов для Midjourney",
+            "category": "Дизайн",
+            "usage_count": 412,
+            "rating": 4.9,
         },
     ]
     
@@ -241,3 +161,8 @@ class PromptService:
             if prompt["id"] == prompt_id:
                 return prompt
         return None
+    
+    @staticmethod
+    def get_categories():
+        categories = {prompt["category"] for prompt in PromptService.PROMPTS}
+        return sorted(list(categories))

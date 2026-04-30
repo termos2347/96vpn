@@ -1,38 +1,23 @@
 import logging
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from sqlalchemy.orm import Session
+
 from db.base import get_db
-from sqlalchemy import select
 from db.models import User
 from config import settings
 from web.services.auth import PromptService, SubscriptionService
-from datetime import datetime
+from web.security import get_current_user_optional
 
 logger = logging.getLogger(__name__)
 
-# Инициализируем Jinja2
+# Jinja2
 templates_dir = Path(__file__).parent.parent / "templates"
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
 
 router = APIRouter(tags=["web"])
-
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> dict:
-    """Получить текущего пользователя из сессии"""
-    # Здесь можно добавить реальную логику сессий/JWT
-    user_id = request.cookies.get("user_id")
-    if not user_id:
-        return None
-    
-    try:
-        stmt = select(User).where(User.id == int(user_id))
-        user = db.execute(stmt).scalars().first()
-        return user
-    except:
-        return None
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -57,10 +42,10 @@ async def register_page(request: Request):
     return template.render(site_name=settings.APP_NAME)
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request, current_user: dict = Depends(get_current_user)):
+async def dashboard(request: Request, current_user: User = Depends(get_current_user_optional)):
     """Личный кабинет"""
     if not current_user:
-        return HTMLResponse("Unauthorized", status_code=401)
+        return RedirectResponse(url="/login", status_code=302)
     
     days_remaining = SubscriptionService.get_days_remaining(current_user)
     template = jinja_env.get_template("dashboard.html")
@@ -73,24 +58,24 @@ async def dashboard(request: Request, current_user: dict = Depends(get_current_u
     )
 
 @router.get("/prompts", response_class=HTMLResponse)
-async def prompts_page(request: Request, current_user: dict = Depends(get_current_user)):
+async def prompts_page(request: Request, current_user: User = Depends(get_current_user_optional)):
     """Страница с промптами"""
     if not current_user or not current_user.is_active:
         return HTMLResponse("Access Denied: Active subscription required", status_code=403)
     
     prompts = PromptService.get_all_prompts()
+    categories = PromptService.get_categories()
     template = jinja_env.get_template("prompts.html")
     return template.render(
         site_name=settings.APP_NAME,
         prompts=prompts,
+        categories=categories,
         user=current_user
     )
 
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
 async def payment_telegram(request: Request, tg_id: int, db: Session = Depends(get_db)):
     """Упрощённая страница оплаты для Telegram"""
-    from config import settings
-    
     template = jinja_env.get_template("payment_telegram.html")
     return template.render(
         site_name=settings.APP_NAME,
@@ -116,7 +101,7 @@ async def privacy(request: Request):
 async def prompt_detail(
     request: Request,
     prompt_id: int,
-    current_user: dict = Depends(get_current_user)
+    current_user: User = Depends(get_current_user_optional)
 ):
     """Страница с деталями промпта"""
     if not current_user or not current_user.is_active:
@@ -132,3 +117,4 @@ async def prompt_detail(
         prompt=prompt,
         user=current_user
     )
+    
