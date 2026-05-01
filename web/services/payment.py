@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests.exceptions
+import jwt
+import aiohttp
 
 from db.models import User
 from config import settings
@@ -27,19 +29,15 @@ class YookassaService:
     )
     async def create_payment(
         self,
-        user_id: int,
+        user_id: Optional[int],
         amount: float,
         plan: str,
         db: Session,
-        description: str = "Подписка на NeuroPrompt Premium"
+        description: str = "Подписка на NeuroPrompt Premium",
+        metadata: dict = None
     ) -> Optional[Dict[str, Any]]:
-        """Создаёт платёж в Yookassa с автоматическими повторными попытками при сетевых ошибках"""
+        """Создаёт платёж в Yookassa. Поддерживает как веб-пользователей, так и заказы из бота."""
         try:
-            user = db.execute(select(User).where(User.id == user_id)).scalars().first()
-            if not user:
-                logger.error(f"User {user_id} not found")
-                return None
-
             payment_data = {
                 "amount": {
                     "value": f"{amount:.2f}",
@@ -51,26 +49,35 @@ class YookassaService:
                 },
                 "capture": True,
                 "description": f"{description} ({plan})",
-                "metadata": {
-                    "user_id": user_id,
-                    "plan": plan,
-                    "source": "web_app"
-                }
+                "metadata": metadata or {}
             }
 
-            if user.yookassa_customer_id:
-                payment_data["customer_id"] = user.yookassa_customer_id
-            if user.payment_method_id:
-                payment_data["payment_method_id"] = user.payment_method_id
+            if user_id is not None:
+                # Веб-пользователь: добавляем customer_id, payment_method_id
+                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+                if not user:
+                    logger.error(f"User {user_id} not found")
+                    return None
+                if user.yookassa_customer_id:
+                    payment_data["customer_id"] = user.yookassa_customer_id
+                if user.payment_method_id:
+                    payment_data["payment_method_id"] = user.payment_method_id
+                # Добавляем метаданные, специфичные для веба
+                payment_data["metadata"]["source"] = "web"
+                payment_data["metadata"]["user_id"] = user_id
+            else:
+                # Для бота source должен быть "bot", но мы уже передали в metadata при вызове
+                pass
 
-            # Idempotency key — уникальный для каждого запроса
-            idempotence_key = f"payment_{user_id}_{datetime.utcnow().timestamp()}"
+            idempotence_key = f"payment_{user_id or 'bot'}_{datetime.utcnow().timestamp()}"
             payment = Payment.create(payment_data, idempotence_key)
 
-            user.yookassa_payment_id = payment.id
-            db.commit()
+            if user_id:
+                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+                user.yookassa_payment_id = payment.id
+                db.commit()
 
-            logger.info(f"Payment created: {payment.id} for user {user_id}, amount: {amount}")
+            logger.info(f"Payment created: {payment.id}, amount: {amount}")
             return {
                 "payment_id": payment.id,
                 "status": payment.status,
@@ -82,7 +89,7 @@ class YookassaService:
             return None
 
     async def get_payment_status(self, payment_id: str) -> Optional[str]:
-        """Получает статус платежа из ЮKassa"""
+        """Получает статус платежа из ЮKassa."""
         try:
             payment = Payment.find_one(payment_id)
             return payment.status
@@ -91,7 +98,7 @@ class YookassaService:
             return None
 
     async def process_webhook(self, webhook_data: Dict[str, Any], db: Session) -> bool:
-        """Обрабатывает уведомление об успешном платеже и активирует подписку"""
+        """Обрабатывает уведомление об успешном платеже и активирует подписку."""
         try:
             event = webhook_data.get("event")
             if event != "payment.succeeded":
@@ -99,33 +106,74 @@ class YookassaService:
                 return True
 
             payment = webhook_data.get("object", {})
+            metadata = payment.get("metadata", {})
+            source = metadata.get("source")
+
+            if source == "bot":
+                return await self._activate_bot_subscription(metadata)
+
+            # Существующая логика для веб-пользователей
             payment_id = payment.get("id")
             if not payment_id:
                 logger.error("Payment ID not found in webhook")
                 return False
 
-            # Поиск пользователя по payment_id
             user = db.execute(select(User).where(User.yookassa_payment_id == payment_id)).scalars().first()
             if not user:
                 logger.warning(f"User not found for payment {payment_id}")
                 return False
 
-            metadata = payment.get("metadata", {})
             plan = metadata.get("plan", "monthly")
             days = 90 if plan == "quarterly" else 30
 
-            # Проверяем, не активирована ли уже подписка с большим сроком
             if user.is_active and user.expiry_date and (user.expiry_date - datetime.utcnow()).days > days - 5:
                 logger.info(f"User {user.id} already has active subscription, skipping renewal")
                 return True
 
-            # Активируем подписку
             await SubscriptionService.renew_subscription(db, user, days)
             logger.info(f"Subscription activated for user {user.id} after payment {payment_id}")
             return True
         except Exception as e:
             logger.error(f"Error processing webhook: {e}")
             return False
+
+    async def _activate_bot_subscription(self, metadata: dict) -> bool:
+        """Активирует подписку бота через внутренний API."""
+        try:
+            token = metadata.get("token")
+            if not token:
+                logger.error("No token in webhook metadata")
+                return False
+
+            payload = jwt.decode(token, settings.INTERNAL_API_SECRET, algorithms=["HS256"])
+            telegram_id = payload["telegram_id"]
+            product_type = payload["product_type"]
+            period = payload["period"]
+        except Exception as e:
+            logger.error(f"Token decode failed: {e}")
+            return False
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    "http://localhost:8001/activate",
+                    json={
+                        "telegram_id": telegram_id,
+                        "product_type": product_type,
+                        "period": period
+                    },
+                    headers={"Authorization": f"Bearer {settings.INTERNAL_API_SECRET}"},
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info(f"Bot activation succeeded for {telegram_id}")
+                        return True
+                    else:
+                        logger.error(f"Bot activation returned {resp.status}")
+                        return False
+            except Exception as e:
+                logger.error(f"Failed to call bot activation API: {e}")
+                return False
 
 
 # Глобальный экземпляр сервиса

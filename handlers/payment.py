@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
@@ -6,16 +7,31 @@ from .keyboards import (
     vpn_currency_keyboard, vpn_period_keyboard,
     bypass_currency_keyboard, bypass_period_keyboard
 )
-from config import VPN_PRICES, BYPASS_PRICES
+from config import VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
 from services.vpn_provider import XUIVPNProvider
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, validate_currency, validate_days, ValidationError
+import jwt
 
 logger = logging.getLogger(__name__)
 vpn_provider = XUIVPNProvider()
 
 router = Router()
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
+
+def create_payment_token(telegram_id: int, product_type: str, period: str, currency: str, amount: float) -> str:
+    now = datetime.now(timezone.utc)                # ← ВОТ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+    exp = now + timedelta(hours=2)                  # 2 часа
+    payload = {
+        "telegram_id": telegram_id,
+        "product_type": product_type,
+        "period": period,
+        "currency": currency,
+        "amount": amount,
+        "exp": exp.timestamp()
+    }
+    logger.info(f"Token created at {now.isoformat()}, exp at {exp.isoformat()} (timestamp: {exp.timestamp()})")
+    return jwt.encode(payload, INTERNAL_API_SECRET, algorithm="HS256")
 
 # ---------- VPN Payment Handlers ----------
 
@@ -30,6 +46,7 @@ async def pay_vpn(message: types.Message):
         logger.warning(f"Validation error in pay_vpn: {e}")
         await message.answer("❌ Ошибка валидации. Попробуйте позже.")
 
+
 @router.callback_query(F.data.startswith("vpn_currency_"))
 @rate_limit(max_per_minute=10)
 async def vpn_choose_period(callback: types.CallbackQuery):
@@ -38,7 +55,7 @@ async def vpn_choose_period(callback: types.CallbackQuery):
         validate_user_id(callback.from_user.id)
         currency = callback.data.split("_")[-1]
         validate_currency(currency)
-        
+
         await callback.message.edit_text(
             "📅 Выберите период подписки:",
             reply_markup=vpn_period_keyboard(currency)
@@ -47,6 +64,7 @@ async def vpn_choose_period(callback: types.CallbackQuery):
     except ValidationError as e:
         logger.warning(f"Validation error in vpn_choose_period: {e}")
         await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
+
 
 @router.callback_query(F.data == "vpn_back_to_currency")
 @rate_limit(max_per_minute=10)
@@ -63,122 +81,37 @@ async def vpn_back_to_currency(callback: types.CallbackQuery):
         logger.warning(f"Validation error in vpn_back_to_currency: {e}")
         await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
 
-@router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|stars|usdt)$"))
+
+@router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|usdt)$"))
 @rate_limit(max_per_minute=5)
-async def vpn_process_payment(callback: types.CallbackQuery):
-    """Обрабатывает платёж за VPN подписку."""
-    data = callback.data
-    _, period, currency = data.split("_")
-    user_id = callback.from_user.id
-    
+async def vpn_payment_link(callback: types.CallbackQuery):
+    """Генерирует ссылку на сайт для оплаты через ЮKassa (RUB/USDT)."""
+    _, period, currency = callback.data.split("_")
+    telegram_id = callback.from_user.id
+    days = PERIOD_DAYS[period]
+    price = VPN_PRICES[currency][period]
+
     try:
-        # Валидируем входные данные
-        validate_user_id(user_id)
-        validate_currency(currency)
-        validate_days(PERIOD_DAYS[period])
-        
-        days = PERIOD_DAYS[period]
-        price = VPN_PRICES[currency][period]
-        
-        logger.info(f"Processing VPN payment for user {user_id}: {period} {currency} ({price})")
-        
-        if currency == "stars":
-            # Telegram Stars платёж
-            await callback.message.answer_invoice(
-                title="VPN Подписка",
-                description=f"Доступ к VPN на {days} дней",
-                payload=f"vpn_{period}_{user_id}",
-                provider_token="",
-                currency="XTR",
-                prices=[LabeledPrice(label="VPN Подписка", amount=int(price))],
-                start_parameter="vpn_subscription",
-            )
-            await callback.answer()
-            return
-        
-        # Для рублей и USDT – имитация успешной оплаты
-        await set_vpn_subscription(user_id, days)
-        
-        email = f"user_{user_id}@96vpn.bot"
-        
-        # Создаём клиента на 3x-ui
-        client_data = await vpn_provider.create_client(email)
-        if not client_data:
-            client_data = await vpn_provider.get_client_by_email(email)
-            if client_data:
-                logger.info(f"Found existing client for {email}")
-        
-        if client_data:
-            sub_id = client_data["subId"]
-            await set_vpn_client_id(user_id, client_data["uuid"])
-            link = vpn_provider.get_subscription_link(sub_id)
-            await callback.message.edit_text(
-                f"✅ VPN подписка активирована на {days} дней!\n\n"
-                f"🔗 Ссылка для подключения:\n`{link}`",
-                parse_mode="Markdown"
-            )
-            logger.info(f"VPN subscription activated for user {user_id}")
-        else:
-            await callback.message.edit_text(
-                "⚠️ Подписка активирована, но не удалось создать ключ.\n"
-                "Попробуйте позже или обратитесь в поддержку."
-            )
-            logger.error(f"Failed to create VPN client for user {user_id}")
-        
-        await callback.answer()
-        
-    except ValidationError as e:
-        logger.warning(f"Validation error in vpn_process_payment: {e}")
-        await callback.answer("❌ Ошибка: некорректные данные", show_alert=True)
+        token = create_payment_token(telegram_id, "vpn", period, currency, price)
     except Exception as e:
-        logger.error(f"Exception in vpn_process_payment: {e}", exc_info=True)
-        await callback.answer("❌ Ошибка при обработке платежа", show_alert=True)
-        await callback.message.answer_invoice(
-            title="VPN Подписка",
-            description=f"Доступ к VPN на {days} дней",
-            payload=f"vpn_{period}_{user_id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="VPN Подписка", amount=price)],
-            start_parameter="vpn_subscription",
-        )
-        await callback.answer()
+        logger.error(f"Failed to create payment token: {e}")
+        await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
-    # Для рублей и USDT – имитация успешной оплаты
-    await set_vpn_subscription(user_id, days)
+    payment_url = f"{SITE_URL}/pay/vpn?token={token}"
 
-    email = f"user_{user_id}@96vpn.bot"
-    
-    # Пытаемся создать нового клиента
-    client_data = await vpn_provider.create_client(email)
-    if not client_data:
-        # Если клиент уже существует (дубликат email) – ищем его
-        client_data = await vpn_provider.get_client_by_email(email)
-        if client_data:
-            logger.info(f"Найден существующий клиент {email} с subId {client_data['subId']}")
-    
-    if client_data:
-        sub_id = client_data["subId"]
-        await set_vpn_client_id(user_id, client_data["uuid"])
-        link = vpn_provider.get_subscription_link(sub_id)
-        await callback.message.edit_text(
-            f"✅ VPN подписка на {days} дней активирована!\n"
-            f"Оплата: {period} через {currency.upper()}\n\n"
-            f"🔗 Ссылка для подключения:\n`{link}`",
-            parse_mode="Markdown"
-        )
-    else:
-        await callback.message.edit_text(
-            f"✅ VPN подписка на {days} дней активирована!\n"
-            f"Оплата: {period} через {currency.upper()}\n\n"
-            f"⚠️ Не удалось создать или найти ключ автоматически.\n"
-            f"Пожалуйста, нажмите 🚀 Подключить VPN позже или обратитесь в поддержку."
-        )
+    await callback.message.edit_text(
+        f"💳 Для оплаты перейдите по ссылке:\n{payment_url}\n\n"
+        "Ссылка действительна 30 минут.",
+        disable_web_page_preview=True
+    )
     await callback.answer()
 
-# ---------- Bypass ----------
+
+# ---------- Bypass Payment Handlers ----------
+
 @router.message(F.text == "💰 Оплатить обход")
+@rate_limit(max_per_minute=10)
 async def pay_bypass(message: types.Message):
     user_id = message.from_user.id
     if not await is_vpn_active(user_id):
@@ -189,7 +122,9 @@ async def pay_bypass(message: types.Message):
         return
     await message.answer("🔓 Выберите валюту для оплаты обхода блокировок:", reply_markup=bypass_currency_keyboard())
 
+
 @router.callback_query(F.data.startswith("bypass_currency_"))
+@rate_limit(max_per_minute=10)
 async def bypass_choose_period(callback: types.CallbackQuery):
     currency = callback.data.split("_")[-1]
     await callback.message.edit_text(
@@ -198,7 +133,9 @@ async def bypass_choose_period(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+
 @router.callback_query(F.data == "bypass_back_to_currency")
+@rate_limit(max_per_minute=10)
 async def bypass_back_to_currency(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "🔓 Выберите валюту для оплаты обхода блокировок:",
@@ -206,8 +143,11 @@ async def bypass_back_to_currency(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-@router.callback_query(F.data.regexp(r"^bypass_(1m|3m)_(rub|stars|usdt)$"))
-async def bypass_process_payment(callback: types.CallbackQuery):
+
+@router.callback_query(F.data.regexp(r"^bypass_(1m|3m)_(rub|usdt)$"))
+@rate_limit(max_per_minute=5)
+async def bypass_payment_link(callback: types.CallbackQuery):
+    """Генерирует ссылку на сайт для оплаты обхода DPI."""
     user_id = callback.from_user.id
     if not await is_vpn_active(user_id):
         await callback.message.edit_text(
@@ -217,34 +157,32 @@ async def bypass_process_payment(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    data = callback.data
-    _, period, currency = data.split("_")
+    _, period, currency = callback.data.split("_")
     days = PERIOD_DAYS[period]
+    price = BYPASS_PRICES[currency][period]
 
-    if currency == "stars":
-        price = BYPASS_PRICES["stars"][period]
-        await callback.message.answer_invoice(
-            title="Обход блокировок",
-            description=f"Доступ к обходу DPI на {days} дней",
-            payload=f"bypass_{period}_{user_id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="Обход блокировок", amount=price)],
-            start_parameter="bypass_subscription",
-        )
-        await callback.answer()
-    else:
-        await set_bypass_subscription(user_id, days)
-        await callback.message.edit_text(
-            f"✅ Обход на {days} дней активирован!\n"
-            f"Оплата: {period} через {currency.upper()}"
-        )
-        await callback.answer()
+    try:
+        token = create_payment_token(user_id, "bypass", period, currency, price)
+    except Exception as e:
+        logger.error(f"Failed to create payment token: {e}")
+        await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
+        return
+
+    payment_url = f"{SITE_URL}/pay/vpn?token={token}"   # можно вести на ту же страницу, шаблон универсальный
+    await callback.message.edit_text(
+        f"💳 Для оплаты обхода перейдите по ссылке:\n{payment_url}\n\n"
+        "Ссылка действительна 30 минут.",
+        disable_web_page_preview=True
+    )
+    await callback.answer()
+
 
 # ---------- Платежи Telegram Stars ----------
+
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
+
 
 @router.message(F.successful_payment)
 async def successful_payment(message: types.Message):

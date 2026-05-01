@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Оплата подписки - {{ site_name }}{% endblock %}
+
+{% block content %}
+<main class="min-h-screen flex items-center justify-center px-6">
+    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow text-center">
+        <h1 class="text-3xl font-bold mb-4 gradient-text">Оплата подписки</h1>
+        <p class="text-xl mb-2">{{ product }}</p>
+        <p class="text-2xl font-bold mb-6">{{ amount }} {{ currency }}</p>
+        <p class="text-gray-400 mb-8">После оплаты подписка активируется автоматически.</p>
+        <button id="payButton" class="button-primary text-white px-8 py-3 rounded-lg font-bold w-full">
+            Оплатить
+        </button>
+        <p class="text-gray-500 text-sm mt-4">Вы будете перенаправлены на платёжную систему.</p>
+    </div>
+</main>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('payButton').addEventListener('click', async () => {
+    const token = new URLSearchParams(window.location.search).get('token');
+    if (!token) {
+        alert('Ошибка: отсутствует токен');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/payment/initiate-vpn?token=${token}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.confirmation_url) {
+            window.location.href = data.confirmation_url;
+        } else {
+            alert('Ошибка при создании платежа: ' + (data.detail || 'неизвестная ошибка'));
+        }
+    } catch(e) {
+        alert('Ошибка соединения с сервером');
+    }
+});
+</script>
+{% endblock %}
