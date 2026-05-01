@@ -4,19 +4,19 @@ import signal
 import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiohttp import ClientTimeout, TCPConnector, ClientSession
+from aiohttp import ClientTimeout, TCPConnector, ClientSession, web
 from config import TOKEN, PROXY_URL
 from handlers import router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
 from db.base import init_db, engine
 from utils.logger import setup_logger
+from internal_api import create_internal_app
 
 async def main():
     # Настраиваем логирование
     setup_logger()
     logger = logging.getLogger(__name__)
-
     logger.info("Starting VPN bot...")
 
     try:
@@ -29,7 +29,6 @@ async def main():
     session = None
     if PROXY_URL:
         try:
-            # Создаём кастомный коннектор с большими лимитами
             connector = TCPConnector(
                 limit=100,
                 limit_per_host=30,
@@ -38,18 +37,16 @@ async def main():
                 enable_cleanup_closed=True,
             )
             timeout = ClientTimeout(
-                total=60,          # общий таймаут на запрос
-                connect=20,        # на установку соединения
-                sock_read=30,      # на чтение данных
-                sock_connect=20,   # на подключение сокета
+                total=60,
+                connect=20,
+                sock_read=30,
+                sock_connect=20,
             )
-            # Создаём ClientSession и передаём её в AiohttpSession
             client_session = ClientSession(
                 connector=connector,
                 timeout=timeout,
             )
             session = AiohttpSession(proxy=PROXY_URL)
-            # Подменяем внутреннюю сессию на нашу кастомную
             session._session = client_session
             logger.info(f"Using HTTP proxy with custom timeouts: {PROXY_URL}")
         except Exception as e:
@@ -58,22 +55,33 @@ async def main():
 
     bot = Bot(token=TOKEN, session=session)
     dp = Dispatcher()
-    
-    # Настройка graceful shutdown
+
+    # Запускаем внутренний HTTP API
+    internal_app = create_internal_app()
+    runner = web.AppRunner(internal_app)
+    await runner.setup()
+    site = web.TCPSite(runner, 'localhost', 8001)
+    await site.start()
+    logger.info("Internal API started on http://localhost:8001")
+
+    # Обработчик graceful shutdown (работает в Windows)
+    loop = asyncio.get_running_loop()
+
     def signal_handler(signum, frame):
-        logging.info(f"Received signal {signum}, shutting down...")
-        asyncio.create_task(shutdown(bot, session))
-    
+        logger.info(f"Received signal {signum}, shutting down...")
+        # Планируем задачу остановки
+        asyncio.create_task(shutdown(bot, session, runner))
+
+    # Регистрируем обработчики сигналов (работает в Windows)
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     await start_scheduler(bot)
     await setup_bot_commands(bot)
     dp.include_router(router)
-    
+
     logger.info("Bot started successfully")
-    
-    # Бесконечный цикл с перезапуском при падении поллинга
+
     restart_count = 0
     max_restarts = 10
     while restart_count < max_restarts:
@@ -86,24 +94,25 @@ async def main():
             restart_count += 1
             logger.error(f"Polling crashed (attempt {restart_count}/{max_restarts}): {e}", exc_info=True)
             if restart_count < max_restarts:
-                await asyncio.sleep(min(5 * restart_count, 60))  # увеличиваем задержку
+                await asyncio.sleep(min(5 * restart_count, 60))
             else:
                 logger.error("Max restart attempts reached, shutting down")
                 break
 
-async def shutdown(bot, session):
+
+async def shutdown(bot, session, internal_runner=None):
     """Graceful shutdown."""
     logging.info("Starting graceful shutdown...")
-    
-    # Останавливаем бота
+
     if bot.session:
         await bot.session.close()
     if session:
         await session.close()
-    
-    # Закрываем движок БД
+
+    if internal_runner:
+        await internal_runner.cleanup()
+
     await engine.dispose()
-    
     logging.info("Shutdown complete.")
 
 

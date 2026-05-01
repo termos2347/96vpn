@@ -2,6 +2,7 @@ import logging
 import hashlib
 import hmac
 import uuid
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from web.schemas.schemas import PaymentResponse, SubscriptionInfo
@@ -9,6 +10,7 @@ from web.services.payment import yookassa_service
 from web.services.auth import SubscriptionService, AuthService
 from web.security import get_current_user_optional
 from config import settings
+from config import INTERNAL_API_SECRET
 from db.base import get_db
 from db.models import User
 
@@ -132,3 +134,33 @@ if settings.DEBUG:
             raise HTTPException(status_code=404, detail="User not found")
         await SubscriptionService.renew_subscription(db, user, days=30)
         return {"status": "activated", "expiry_date": user.expiry_date}
+
+@router.post("/api/payment/initiate-vpn")
+async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(get_db)):
+    """Создаёт платёж в ЮKassa для покупки, инициированной из бота."""
+    try:
+        payload = jwt.decode(token, INTERNAL_API_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    payment = await yookassa_service.create_payment(
+        user_id=None,  # не привязан к веб-пользователю
+        amount=payload["amount"],
+        plan=f"{payload['product_type']}_{payload['period']}_{payload['currency']}",
+        db=db,
+        description=f"Подписка {payload['product_type']} ({payload['period']})",
+        metadata={
+            "source": "bot",
+            "token": token,
+            "telegram_id": payload["telegram_id"],
+            "product_type": payload["product_type"],
+            "period": payload["period"],
+            "currency": payload["currency"]
+        }
+    )
+
+    if not payment:
+        raise HTTPException(status_code=500, detail="Failed to create payment")
+    return {"confirmation_url": payment["confirmation_url"]}

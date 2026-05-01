@@ -10,6 +10,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import ClientTimeout, TCPConnector, ClientSession, web
 
+# === Настройка вывода в UTF-8 (избавляет от ошибок с эмодзи) ===
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # Импорты бота
 from config import TOKEN, PROXY_URL
 from handlers import router
@@ -22,10 +26,8 @@ from internal_api import create_internal_app
 # Импорты веб-части
 from web.app import app as fastapi_app
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 async def main():
-    # Логирование
     setup_logger()
     logger = logging.getLogger(__name__)
     logger.info("Starting combined server (bot + web)…")
@@ -38,7 +40,7 @@ async def main():
         logger.error(f"Database init failed: {e}")
         sys.exit(1)
 
-    # === Настройка бота ===
+    # --- Настройка бота ---
     session = None
     if PROXY_URL:
         try:
@@ -59,7 +61,7 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    # === Внутренний HTTP API бота (для активации) ===
+    # --- Внутренний HTTP API бота (порт 8001) ---
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
@@ -67,7 +69,7 @@ async def main():
     await internal_site.start()
     logger.info("Internal API started on http://localhost:8001")
 
-    # === Запуск FastAPI через uvicorn (в asyncio) ===
+    # --- Запуск FastAPI через uvicorn ---
     config = uvicorn.Config(
         app=fastapi_app,
         host="0.0.0.0",
@@ -75,23 +77,21 @@ async def main():
         log_level="info",
     )
     server = uvicorn.Server(config)
-    # Запускаем его как фоновую задачу
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")
 
-    # === Graceful shutdown ===
+    # --- Graceful shutdown ---
     loop = asyncio.get_running_loop()
 
     def shutdown_handler(signum, frame):
         logger.info(f"Signal {signum} received, shutting down…")
-        # Отменяем все задачи (бот и веб)
         for task in asyncio.all_tasks(loop):
             task.cancel()
 
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    # === Запуск бота ===
+    # --- Запуск планировщика и бота ---
     await start_scheduler(bot)
     await setup_bot_commands(bot)
 
@@ -113,7 +113,7 @@ async def main():
                 logger.error("Max restarts reached")
                 break
 
-    # === Остановка веб-сервера и API ===
+    # --- Остановка веб-сервера и API ---
     logger.info("Shutting down web server…")
     server.should_exit = True
     await web_task
