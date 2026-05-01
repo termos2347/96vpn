@@ -6,8 +6,7 @@ __pycache__/
 *.pyc
 
 # Виртуальное окружение
-venv/
-env/
+.venv/
 .env/
 
 # Файлы IDE
@@ -16,10 +15,13 @@ env/
 
 # Логи
 logs/
-*.log
+*.logs
+logs/
 
 migrations\versions\
+.pytest_cache
 
 test_async_api.py
 test_manual_api.py
 test_provider.py
+test_vpn_manager.py

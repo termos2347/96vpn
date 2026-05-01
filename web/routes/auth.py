@@ -1,4 +1,3 @@
-# web/routes/auth.py (исправленная версия)
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
@@ -23,7 +22,6 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
     
-    # После регистрации не активируем подписку – требуется оплата
     return {
         "id": user.id,
         "email": user.email,
@@ -31,8 +29,8 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     }
 
 @router.post("/login")
-async def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    """Вход пользователя – возвращает JWT токен"""
+async def login(credentials: UserLogin, response: Response, db: Session = Depends(get_db)):
+    """Вход пользователя – устанавливает HttpOnly cookie с JWT."""
     user = await AuthService.authenticate_user(
         db=db,
         email=credentials.email,
@@ -41,15 +39,29 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Создаём JWT токен
     access_token = create_access_token(user_id=user.id)
     
+    # Устанавливаем безопасную cookie
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,          # Недоступна из JavaScript
+        secure=True,            # Передавать только по HTTPS (для разработки на localhost отключить)
+        samesite="lax",
+        max_age=2592000,        # 30 дней
+        path="/"
+    )
+    
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
         "user_id": user.id,
         "is_active": user.is_active
     }
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Выход – удаляет cookie."""
+    response.delete_cookie("access_token", path="/")
+    return {"status": "ok"}
 
 @router.get("/profile/{user_id}", response_model=UserProfile)
 async def get_profile(user_id: int, db: Session = Depends(get_db)):

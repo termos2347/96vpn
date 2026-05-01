@@ -7,11 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             color: #e0e0e0;
@@ -43,7 +39,6 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <!-- Navigation -->
     <nav class="glass-effect sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
             <div class="flex items-center gap-2">
@@ -53,18 +48,18 @@
             <div class="flex gap-6 items-center">
                 <a href="/" class="hover:text-purple-400 transition">Главная</a>
                 <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
-                <!-- Кабинет – виден только авторизованным -->
-                <a id="dashboard-link" href="/dashboard" class="hover:text-purple-400 transition" style="display: none;">Кабинет</a>
-                <!-- Вход – виден только неавторизованным -->
-                <a id="login-link" href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
+                {% if user %}
+                    <a href="/dashboard" class="hover:text-purple-400 transition">Кабинет</a>
+                    <button id="logout-btn" class="button-primary text-white px-6 py-2 rounded-lg">Выйти</button>
+                {% else %}
+                    <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
+                {% endif %}
             </div>
         </div>
     </nav>
 
-    <!-- Content -->
     {% block content %}{% endblock %}
 
-    <!-- Footer -->
     <footer class="glass-effect mt-20 border-t border-purple-500 border-opacity-20">
         <div class="max-w-7xl mx-auto px-6 py-8">
             <div class="grid md:grid-cols-4 gap-8 mb-8">
@@ -99,28 +94,16 @@
         </div>
     </footer>
 
+    <!-- Скрипт только для кнопки выхода (отправляет POST на logout) -->
+    {% if user %}
     <script>
-        function getCookie(name) {
-            let matches = document.cookie.match(new RegExp(
-                "(?:^|; )" + name.replace(/([\.$?*|{}\(\)\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"
-            ));
-            return matches ? decodeURIComponent(matches[1]) : undefined;
-        }
-
-        const token = getCookie('access_token');
-        const dashboardLink = document.getElementById('dashboard-link');
-        const loginLink = document.getElementById('login-link');
-
-        if (token) {
-            // Пользователь авторизован: показываем Кабинет, скрываем Вход
-            if (dashboardLink) dashboardLink.style.display = 'inline-block';
-            if (loginLink) loginLink.style.display = 'none';
-        } else {
-            // Не авторизован: скрываем Кабинет, показываем Вход
-            if (dashboardLink) dashboardLink.style.display = 'none';
-            if (loginLink) loginLink.style.display = 'inline-block';
-        }
+        document.getElementById('logout-btn')?.addEventListener('click', async function(e) {
+            e.preventDefault();
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/';
+        });
     </script>
+    {% endif %}
 
     {% block extra_js %}{% endblock %}
 </body>
