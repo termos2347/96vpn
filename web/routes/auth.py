@@ -21,7 +21,7 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
         source="web"
     )
     if not user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Пользователь с таким email уже зарегистрирован")
     
     # После регистрации не активируем подписку – требуется оплата
     return {

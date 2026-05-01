@@ -59,10 +59,7 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
 
 @router.get("/prompts", response_class=HTMLResponse)
 async def prompts_page(request: Request, current_user: User = Depends(get_current_user_optional)):
-    """Страница с промптами"""
-    if not current_user or not current_user.is_active:
-        return HTMLResponse("Access Denied: Active subscription required", status_code=403)
-    
+    """Страница со списком промптов – доступна всем (даже без логина/подписки)"""
     prompts = PromptService.get_all_prompts()
     categories = PromptService.get_categories()
     template = jinja_env.get_template("prompts.html")
@@ -70,7 +67,8 @@ async def prompts_page(request: Request, current_user: User = Depends(get_curren
         site_name=settings.APP_NAME,
         prompts=prompts,
         categories=categories,
-        user=current_user
+        user=current_user,
+        is_active=current_user.is_active if current_user else False
     )
 
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
@@ -101,20 +99,64 @@ async def privacy(request: Request):
 async def prompt_detail(
     request: Request,
     prompt_id: int,
-    current_user: User = Depends(get_current_user_optional)
-):
-    """Страница с деталями промпта"""
-    if not current_user or not current_user.is_active:
-        return HTMLResponse("Access Denied: Active subscription required", status_code=403)
-    
+    current_user: User = Depends(get_current_user_optional)):
+    """Страница деталей промпта – полный текст только для активных подписчиков"""
     prompt = PromptService.get_prompt_by_id(prompt_id)
     if not prompt:
         return HTMLResponse("Prompt not found", status_code=404)
     
+    # Если промпт бесплатный – показываем без проверки
+    if prompt.get("is_free", False):
+        template = jinja_env.get_template("prompt_detail.html")
+        return template.render(
+            site_name=settings.APP_NAME,
+            prompt=prompt,
+            user=current_user,
+            is_free=True
+        )
+    
+    # Если не бесплатный и пользователь не активен – показываем страницу с предложением подписаться
+    if not current_user or not current_user.is_active:
+        template = jinja_env.get_template("subscribe_required.html")
+        return template.render(
+            site_name=settings.APP_NAME,
+            prompt_title=prompt["title"],
+            user_id=current_user.id if current_user else None
+        )
+    
+    # Активный подписчик – видит полное содержимое
     template = jinja_env.get_template("prompt_detail.html")
     return template.render(
         site_name=settings.APP_NAME,
         prompt=prompt,
-        user=current_user
+        user=current_user,
+        is_free=False
     )
     
+@router.get("/payment-success", response_class=HTMLResponse)
+async def payment_success(request: Request):
+    """Страница успешной оплаты"""
+    template = jinja_env.get_template("payment_success.html")
+    return template.render(
+        site_name=settings.APP_NAME
+    )
+    
+@router.get("/payment-failed", response_class=HTMLResponse)
+async def payment_failed(request: Request, user_id: int = None):
+    template = jinja_env.get_template("payment_failed.html")
+    return template.render(site_name=settings.APP_NAME, user_id=user_id)
+
+@router.get("/pay-choice", response_class=HTMLResponse)
+async def pay_choice(request: Request, user_id: int, db: Session = Depends(get_db)):
+    """Страница выбора тарифа после регистрации"""
+    from web.services.auth import AuthService
+    user = await AuthService.get_user_by_id(db, user_id)
+    if not user:
+        return HTMLResponse("User not found", status_code=404)
+    template = jinja_env.get_template("pay_choice.html")
+    return template.render(
+        site_name=settings.APP_NAME,
+        user_id=user_id,
+        monthly_price=int(settings.MONTHLY_PRICE),
+        quarterly_price=int(settings.QUARTERLY_PRICE)
+    )

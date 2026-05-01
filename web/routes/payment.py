@@ -67,7 +67,7 @@ async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
         ).hexdigest()
         if not hmac.compare_digest(signature, expected):
             logger.warning("Invalid webhook signature")
-            return {"status": "invalid signature"}
+        return {"status": "invalid signature"}
     
     try:
         webhook_data = await request.json()

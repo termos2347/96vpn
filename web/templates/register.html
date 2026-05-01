@@ -82,29 +82,58 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
     const username = document.querySelector('input[name="username"]').value;
     const password = document.querySelector('input[name="password"]').value;
     const passwordConfirm = document.querySelector('input[name="password_confirm"]').value;
+    const messageDiv = document.getElementById('message');
     
     if (password !== passwordConfirm) {
-        document.getElementById('message').innerHTML = '<span class="text-red-400">Пароли не совпадают</span>';
+        messageDiv.innerHTML = '<span class="text-red-400">Пароли не совпадают</span>';
         return;
     }
     
     try {
-        const response = await fetch('/api/auth/register', {
+        // 1. Регистрация
+        const registerResponse = await fetch('/api/auth/register', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({email, username, password, source: 'web'})
         });
         
-        const data = await response.json();
+        const registerData = await registerResponse.json();
         
-        if (response.ok) {
-            document.getElementById('message').innerHTML = '<span class="text-green-400">Регистрация успешна! Перенаправляем...</span>';
-            setTimeout(() => window.location.href = `/pay-choice?user_id=${data.id}`, 2000);
-        } else {
-            document.getElementById('message').innerHTML = `<span class="text-red-400">${data.detail}</span>`;
+        if (!registerResponse.ok) {
+            let errorText = registerData.detail || 'Ошибка регистрации';
+            if (errorText.includes('уже зарегистрирован')) {
+                messageDiv.innerHTML = `
+                    <div class="text-red-400 mb-2">${errorText}</div>
+                    <div><a href="/login" class="text-purple-400 underline hover:text-purple-300">Войти в аккаунт</a></div>
+                `;
+            } else {
+                messageDiv.innerHTML = `<div class="text-red-400">${errorText}</div>`;
+            }
+            return;
         }
+        
+        // 2. Автоматический логин
+        const loginResponse = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email, password})
+        });
+        
+        const loginData = await loginResponse.json();
+        
+        if (!loginResponse.ok) {
+            // Если логин не удался, перенаправляем на страницу логина
+            messageDiv.innerHTML = '<span class="text-yellow-400">Регистрация успешна. Пожалуйста, войдите.</span>';
+            setTimeout(() => window.location.href = '/login', 1500);
+            return;
+        }
+        
+        // 3. Устанавливаем токен в куку и перенаправляем на выбор тарифа
+        document.cookie = `access_token=${loginData.access_token}; path=/; max-age=2592000`; // 30 дней
+        window.location.href = `/pay-choice?user_id=${loginData.user_id}`;
+        
     } catch (error) {
-        document.getElementById('message').innerHTML = '<span class="text-red-400">Ошибка при регистрации</span>';
+        messageDiv.innerHTML = '<span class="text-red-400">Ошибка соединения с сервером</span>';
     }
 });
 </script>

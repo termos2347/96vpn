@@ -6,7 +6,7 @@
 <main class="min-h-screen px-6 py-20">
     <div class="max-w-6xl mx-auto">
         <h1 class="text-4xl font-bold mb-4 gradient-text">База профессиональных промптов</h1>
-        <p class="text-gray-400 mb-12">Выберите промпт для просмотра его полного содержимого и использования. Используйте доступные фильтры для упрощения поиска!</p>
+        <p class="text-gray-400 mb-12">Выберите промпт для просмотра его полного содержимого. Некоторые промпты доступны бесплатно!</p>
         
         <!-- Фильтры -->
         <div class="glass-effect p-4 rounded-lg mb-8 flex gap-4 flex-wrap">
@@ -29,12 +29,15 @@
             {% endfor %}
         </div>
 
-        <!-- Сетка промптов (скрыта по умолчанию) -->
+        <!-- Сетка промптов (скрыта по умолчанию, показывается после фильтрации) -->
         <div id="promptsGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6" style="display: none;">
             {% for prompt in prompts %}
-            <div class="glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToPrompt({{ prompt.id }})">
+            <div class="prompt-card glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" data-id="{{ prompt.id }}" data-title="{{ prompt.title }}" data-description="{{ prompt.description }}" data-category="{{ prompt.category }}" data-usage="{{ prompt.usage_count }}" data-rating="{{ prompt.rating }}" data-free="{{ prompt.get('is_free', False)|lower }}">
                 <div class="mb-4">
                     <span class="inline-block bg-purple-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-purple-300 mb-3">{{ prompt.category }}</span>
+                    {% if prompt.get('is_free', False) %}
+                        <span class="inline-block bg-green-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-green-300 ml-2">Бесплатно</span>
+                    {% endif %}
                     <h3 class="text-xl font-bold">{{ prompt.title }}</h3>
                 </div>
                 <p class="text-gray-400 text-sm mb-4 h-16 overflow-hidden">{{ prompt.description }}</p>
@@ -71,12 +74,13 @@ function filterPrompts() {
     
     const grid = document.getElementById('promptsGrid');
     grid.innerHTML = filtered.map(prompt => `
-        <div class="glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToPrompt(${prompt.id})">
+        <div class="prompt-card glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToPrompt(${prompt.id})">
             <div class="mb-4">
                 <span class="inline-block bg-purple-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-purple-300 mb-3">${prompt.category}</span>
-                <h3 class="text-xl font-bold">${prompt.title}</h3>
+                ${prompt.is_free ? '<span class="inline-block bg-green-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-green-300 ml-2">Бесплатно</span>' : ''}
+                <h3 class="text-xl font-bold">${escapeHtml(prompt.title)}</h3>
             </div>
-            <p class="text-gray-400 text-sm mb-4 h-16 overflow-hidden">${prompt.description}</p>
+            <p class="text-gray-400 text-sm mb-4 h-16 overflow-hidden">${escapeHtml(prompt.description)}</p>
             <div class="flex justify-between items-center">
                 <div class="flex gap-2 text-sm text-gray-400">
                     <span><i class="fas fa-copy"></i> ${prompt.usage_count}</span>
@@ -86,14 +90,28 @@ function filterPrompts() {
             </div>
         </div>
     `).join('');
+    
+    // Показать сетку промптов, скрыть категории
+    document.getElementById('categoriesGrid').style.display = 'none';
+    grid.style.display = 'grid';
 }
 
 function goToCategory(category) {
-    window.location.href = `/prompts?category=${category}`;
+    document.getElementById('categoryFilter').value = category;
+    filterPrompts();
 }
 
 function goToPrompt(promptId) {
     window.location.href = `/prompt/${promptId}`;
+}
+
+function escapeHtml(str) {
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
 }
 </script>
 {% endblock %}

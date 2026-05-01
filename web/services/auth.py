@@ -124,32 +124,37 @@ class PromptService:
     
     # Пример данных (заглушка)
     PROMPTS = [
-        {
-            "id": 1,
-            "title": "SEO Оптимизация контента",
-            "description": "Промпт для создания SEO-оптимизированных статей",
-            "category": "SEO",
-            "usage_count": 245,
-            "rating": 4.8,
-            "content": "Ты — эксперт по SEO... (содержимое промпта)"
-        },
-        {
-            "id": 2,
-            "title": "Email маркетинг",
-            "description": "Генерация эффективных email-писем",
-            "category": "Маркетинг",
-            "usage_count": 189,
-            "rating": 4.7,
-        },
-        {
-            "id": 3,
-            "title": "Midjourney арт",
-            "description": "Создание промптов для Midjourney",
-            "category": "Дизайн",
-            "usage_count": 412,
-            "rating": 4.9,
-        },
-    ]
+    {
+        "id": 1,
+        "title": "SEO Оптимизация контента",
+        "description": "Базовые принципы SEO для статей",
+        "category": "SEO",
+        "usage_count": 245,
+        "rating": 4.8,
+        "content": "Ты – SEO-специалист... (полный текст)",
+        "is_free": False
+    },
+    {
+        "id": 2,
+        "title": "Бесплатный: Как писать эффективные email-письма",
+        "description": "Пример бесплатного промпта для email-маркетинга",
+        "category": "Маркетинг",
+        "usage_count": 189,
+        "rating": 4.7,
+        "content": "Напиши письмо для рассылки... (полный текст доступен всем)",
+        "is_free": True
+    },
+    {
+        "id": 3,
+        "title": "Midjourney арт",
+        "description": "Создание промптов для Midjourney",
+        "category": "Дизайн",
+        "usage_count": 412,
+        "rating": 4.9,
+        "content": "Сгенерируй изображение... (платный)",
+        "is_free": False
+    },
+]
     
     @staticmethod
     def get_all_prompts():

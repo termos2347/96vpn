@@ -12,36 +12,30 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
         body {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
             color: #e0e0e0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        
         .gradient-text {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
         .glass-effect {
             background: rgba(255, 255, 255, 0.05);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
         .button-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             transition: all 0.3s ease;
         }
-        
         .button-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
         }
-        
         .neon-glow {
             box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
         }
@@ -59,8 +53,10 @@
             <div class="flex gap-6 items-center">
                 <a href="/" class="hover:text-purple-400 transition">Главная</a>
                 <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
-                <a href="/dashboard" class="hover:text-purple-400 transition">Кабинет</a>
-                <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
+                <!-- Кабинет – виден только авторизованным -->
+                <a id="dashboard-link" href="/dashboard" class="hover:text-purple-400 transition" style="display: none;">Кабинет</a>
+                <!-- Вход – виден только неавторизованным -->
+                <a id="login-link" href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
             </div>
         </div>
     </nav>
@@ -102,6 +98,29 @@
             </div>
         </div>
     </footer>
+
+    <script>
+        function getCookie(name) {
+            let matches = document.cookie.match(new RegExp(
+                "(?:^|; )" + name.replace(/([\.$?*|{}\(\)\[\]\\\/\+^])/g, '\\$1') + "=([^;]*)"
+            ));
+            return matches ? decodeURIComponent(matches[1]) : undefined;
+        }
+
+        const token = getCookie('access_token');
+        const dashboardLink = document.getElementById('dashboard-link');
+        const loginLink = document.getElementById('login-link');
+
+        if (token) {
+            // Пользователь авторизован: показываем Кабинет, скрываем Вход
+            if (dashboardLink) dashboardLink.style.display = 'inline-block';
+            if (loginLink) loginLink.style.display = 'none';
+        } else {
+            // Не авторизован: скрываем Кабинет, показываем Вход
+            if (dashboardLink) dashboardLink.style.display = 'none';
+            if (loginLink) loginLink.style.display = 'inline-block';
+        }
+    </script>
 
     {% block extra_js %}{% endblock %}
 </body>
