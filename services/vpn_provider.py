@@ -11,26 +11,23 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class XUIVPNProvider:
-    """Провайдер для интеграции с панелью управления 3x-ui."""
-    
     MAX_RETRIES = 3
-    RETRY_DELAY = 1  # секунды
-    REQUEST_TIMEOUT = 10  # секунды
-    
+    RETRY_DELAY = 1
+    REQUEST_TIMEOUT = 10
+
     def __init__(self):
-        self.base_url = XUI_BASE_URL.rstrip('/')
+        self.base_url = XUI_BASE_URL.rstrip('/') if XUI_BASE_URL else ""
         self.username = XUI_USERNAME
         self.password = XUI_PASSWORD
         self.inbound_id = XUI_INBOUND_ID
         self.sub_port = XUI_SUB_PORT
-        self.headers = {"Referer": f"{self.base_url}/panel/inbounds"}
-        self.session: aiohttp.ClientSession | None = None
-        self._server_address = self._extract_host(self.base_url)
+        self.headers = {"Referer": f"{self.base_url}/panel/inbounds"} if self.base_url else {}
+        self.session = None
+        self._server_address = self._extract_host(self.base_url) if self.base_url else ""
         self._is_authenticated = False
 
     @staticmethod
     def _extract_host(url: str) -> str:
-        """Извлекает хост из URL."""
         if not url:
             return ""
         try:
@@ -41,7 +38,6 @@ class XUIVPNProvider:
             return ""
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Получает или создаёт aiohttp сессию."""
         if self.session is None or self.session.closed:
             connector = aiohttp.TCPConnector(ssl=False, limit=100)
             timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
@@ -52,10 +48,13 @@ class XUIVPNProvider:
             )
         return self.session
 
+    async def close(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.info("XUI provider session closed")
+
     async def _retry_request(self, method: str, url: str, **kwargs) -> dict | None:
-        """Выполняет HTTP запрос с retry логикой."""
         session = await self._get_session()
-        
         for attempt in range(self.MAX_RETRIES):
             try:
                 method_func = getattr(session, method.lower())
@@ -64,38 +63,36 @@ class XUIVPNProvider:
                         try:
                             return await resp.json()
                         except:
-                            logger.warning(f"Failed to parse JSON response from {url}")
+                            logger.warning(f"Failed to parse JSON from {url}")
                             return None
                     elif resp.status == 401:
-                        # Ошибка аутентификации - пересоединяемся
                         self._is_authenticated = False
                         logger.warning(f"Authentication failed for {url}")
                         return None
                     else:
-                        logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+                        logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except asyncio.TimeoutError:
-                logger.warning(f"Timeout on {url}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+                logger.warning(f"Timeout on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except aiohttp.ClientError as e:
-                logger.warning(f"Client error on {url}: {e}, attempt {attempt + 1}/{self.MAX_RETRIES}")
+                logger.warning(f"Client error on {url}: {e}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except Exception as e:
                 logger.error(f"Unexpected error on {url}: {e}")
-            
-            # Ждём перед следующей попыткой (экспоненциальная задержка)
+
             if attempt < self.MAX_RETRIES - 1:
                 delay = self.RETRY_DELAY * (2 ** attempt)
                 await asyncio.sleep(delay)
-        
+
         logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
         return None
 
     async def login(self) -> bool:
-        """Аутентифицируется на панели 3x-ui."""
         if self._is_authenticated:
             return True
-        
+        if not self.base_url:
+            logger.error("XUI_BASE_URL is not set")
+            return False
         url = f"{self.base_url}/login"
         payload = {"username": self.username, "password": self.password}
-        
         try:
             result = await self._retry_request("POST", url, data=payload)
             if result and result.get("success"):
@@ -110,7 +107,6 @@ class XUIVPNProvider:
             return False
 
     async def create_client(self, email: str) -> dict | None:
-        """Создаёт клиента на панели 3x-ui."""
         if not await self.login():
             logger.error("Cannot create client: not authenticated")
             return None
@@ -118,7 +114,7 @@ class XUIVPNProvider:
         client_uuid = str(uuid.uuid4())
         sub_id = str(uuid.uuid4()).replace('-', '')[:16]
 
-        settings = {
+        settings_data = {
             "clients": [{
                 "id": client_uuid,
                 "email": email,
@@ -132,13 +128,13 @@ class XUIVPNProvider:
                 "flow": "xtls-rprx-vision"
             }]
         }
-        
+
         payload = {
             "id": self.inbound_id,
-            "settings": json.dumps(settings)
+            "settings": json.dumps(settings_data)
         }
         url = f"{self.base_url}/panel/api/inbounds/addClient"
-        
+
         try:
             result = await self._retry_request("POST", url, data=payload, headers=self.headers)
             if result and result.get("success"):
@@ -155,31 +151,25 @@ class XUIVPNProvider:
             return None
 
     async def get_client_by_email(self, email: str) -> dict | None:
-        """Ищет клиента по email на панели 3x-ui."""
         if not await self.login():
             logger.error("Cannot search client: not authenticated")
             return None
-
         url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
-        
         try:
             result = await self._retry_request("GET", url, headers=self.headers)
             if not result:
                 return None
-            
             inbound = result.get("obj")
             if not inbound:
                 logger.error("Inbound not found in API response")
                 return None
-            
-            settings = json.loads(inbound.get("settings", "{}"))
-            for client in settings.get("clients", []):
+            settings_data = json.loads(inbound.get("settings", "{}"))
+            for client in settings_data.get("clients", []):
                 if client.get("email") == email:
                     return {
                         "uuid": client.get("id"),
                         "subId": client.get("subId", client.get("id")[:16])
                     }
-            
             logger.debug(f"Client with email {email} not found")
             return None
         except Exception as e:
@@ -187,24 +177,19 @@ class XUIVPNProvider:
             return None
 
     def get_subscription_link(self, sub_id: str) -> str:
-        """Генерирует ссылку подписки для клиента."""
         if not self._server_address or not sub_id:
             logger.error("Invalid server address or sub_id")
             return ""
         return f"http://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
-        """Удаляет клиента с панели 3x-ui."""
         if not await self.login():
             logger.error("Cannot revoke client: not authenticated")
             return False
-
-        # Пытаемся разные эндпоинты (разные версии 3x-ui имеют разные URL)
         del_endpoints = [
             f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
             f"{self.base_url}/panel/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
         ]
-
         for url in del_endpoints:
             try:
                 result = await self._retry_request("POST", url, headers=self.headers)
@@ -214,12 +199,5 @@ class XUIVPNProvider:
             except Exception as e:
                 logger.debug(f"Failed endpoint {url}: {e}")
                 continue
-
         logger.error(f"Failed to revoke client {client_uuid}")
         return False
-
-    async def close(self):
-        """Закрывает aiohttp сессию."""
-        if self.session and not self.session.closed:
-            await self.session.close()
-            logger.info("XUI provider session closed")

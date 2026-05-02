@@ -11,16 +11,24 @@ class VPNManager:
         self.provider = XUIVPNProvider()
 
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
-        """Создает VPN-ключ для пользователя на указанное количество дней."""
         try:
-            # Получаем или создаем пользователя
             user = await get_or_create_user(user_id)
             if not user:
                 logger.error(f"Не удалось получить пользователя {user_id}")
                 return None
 
-            # Создаем клиента в XUI
-            email = f"user_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            # Постоянный email для пользователя
+            email = f"user_{user_id}@96vpn.bot"
+
+            # Если у пользователя уже есть client_id, попробуем получить существующую ссылку
+            if user.vpn_client_id:
+                existing = await self.provider.get_client_by_email(email)
+                if existing and existing.get("subId"):
+                    sub_link = self.provider.get_subscription_link(existing["subId"])
+                    logger.info(f"Найден существующий ключ для user_id={user_id}: {sub_link}")
+                    return sub_link
+
+            # Создаём нового клиента
             client_data = await self.provider.create_client(email)
             if not client_data:
                 logger.error(f"Не удалось создать клиента для user_id={user_id}")
@@ -29,10 +37,7 @@ class VPNManager:
             client_uuid = client_data['uuid']
             sub_id = client_data['subId']
 
-            # Сохраняем client_id в БД
             await set_vpn_client_id(user_id, client_uuid)
-
-            # Возвращаем ссылку подписки
             sub_link = self.provider.get_subscription_link(sub_id)
             logger.info(f"Ключ создан для user_id={user_id}, sub_link: {sub_link}")
             return sub_link

@@ -1,16 +1,14 @@
 import logging
-import hashlib
-import hmac
-import uuid
 import jwt
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from web.schemas.schemas import PaymentResponse, SubscriptionInfo
 from web.services.payment import yookassa_service
 from web.services.auth import SubscriptionService, AuthService
 from web.security import get_current_user_optional
 from config import settings
-from config import INTERNAL_API_SECRET
 from db.base import get_db
 from db.models import User
 
@@ -19,6 +17,8 @@ router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 def verify_yookassa_signature(request: Request, body: bytes) -> bool:
     """Проверяет подпись вебхука от ЮKassa."""
+    import hashlib
+    import hmac
     signature = request.headers.get("X-Yookassa-Signature", "")
     if not signature or not settings.YOOKASSA_API_KEY:
         logger.warning("Missing signature or API key, skipping verification")
@@ -30,6 +30,60 @@ def verify_yookassa_signature(request: Request, body: bytes) -> bool:
     ).hexdigest()
     return hmac.compare_digest(signature, expected)
 
+# ---------- Новый эндпоинт для VPN-оплаты из бота ----------
+@router.post("/initiate-vpn")
+async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(get_db)):
+    """Создаёт платёж в ЮKassa для покупки, инициированной из бота."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.INTERNAL_API_SECRET,
+            algorithms=["HS256"],
+            leeway=60
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    payment = await yookassa_service.create_payment(
+        user_id=None,
+        amount=payload["amount"],
+        plan=f"{payload['product_type']}_{payload['period']}_{payload['currency']}",
+        db=db,
+        description=f"VPN подписка ({payload['period']})",
+        metadata={
+            "source": "bot",
+            "token": token,
+            "telegram_id": payload["telegram_id"],
+            "product_type": payload["product_type"],
+            "period": payload["period"],
+            "currency": payload["currency"]
+        }
+    )
+
+    if not payment:
+        raise HTTPException(status_code=500, detail="Failed to create payment")
+
+    # Сохраняем payment_id в куки, чтобы страница успеха могла его получить
+    response = JSONResponse(content={"confirmation_url": payment["confirmation_url"]})
+    response.set_cookie(
+        key="vpn_payment_id",
+        value=payment["payment_id"],
+        max_age=3600,    # 1 час
+        httponly=True,
+        path="/"
+    )
+    return response
+
+# ---------- Эндпоинт проверки и активации (для страницы успеха) ----------
+@router.get("/check-vpn-payment")
+async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
+    """Проверяет статус платежа и активирует подписку (для страницы успеха)."""
+    success = await yookassa_service.check_and_activate(payment_id, db)
+    return {"activated": success}
+
+# ---------- Существующие маршруты (без изменений) ----------
 @router.post("/create")
 async def create_payment(
     user_id: int,
@@ -65,7 +119,6 @@ async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
     """Webhook от Yookassa с проверкой подписи."""
     body = await request.body()
     if not verify_yookassa_signature(request, body):
-        # В режиме отладки можно пропустить проверку, но в продакшене – нет
         if settings.DEBUG:
             logger.warning("Invalid webhook signature, but DEBUG mode allows ignoring")
         else:
@@ -106,8 +159,8 @@ async def activate_telegram_payment(
             user_id=telegram_id,
             source="bot",
             is_active=False,
-            created_at=__import__('datetime').datetime.utcnow(),
-            updated_at=__import__('datetime').datetime.utcnow()
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
         db.add(user)
         db.commit()
@@ -125,7 +178,7 @@ async def activate_telegram_payment(
         raise HTTPException(status_code=500, detail="Failed to create payment")
     return PaymentResponse(**payment)
 
-# Для отладки – временный эндпоинт ручной активации (удалить в продакшене)
+# Для отладки – временный эндпоинт
 if settings.DEBUG:
     @router.post("/test-activate/{user_id}")
     async def test_activate_subscription(user_id: int, db: Session = Depends(get_db)):
@@ -134,33 +187,3 @@ if settings.DEBUG:
             raise HTTPException(status_code=404, detail="User not found")
         await SubscriptionService.renew_subscription(db, user, days=30)
         return {"status": "activated", "expiry_date": user.expiry_date}
-
-@router.post("/api/payment/initiate-vpn")
-async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(get_db)):
-    """Создаёт платёж в ЮKassa для покупки, инициированной из бота."""
-    try:
-        payload = jwt.decode(token, INTERNAL_API_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=400, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=400, detail="Invalid token")
-
-    payment = await yookassa_service.create_payment(
-        user_id=None,  # не привязан к веб-пользователю
-        amount=payload["amount"],
-        plan=f"{payload['product_type']}_{payload['period']}_{payload['currency']}",
-        db=db,
-        description=f"Подписка {payload['product_type']} ({payload['period']})",
-        metadata={
-            "source": "bot",
-            "token": token,
-            "telegram_id": payload["telegram_id"],
-            "product_type": payload["product_type"],
-            "period": payload["period"],
-            "currency": payload["currency"]
-        }
-    )
-
-    if not payment:
-        raise HTTPException(status_code=500, detail="Failed to create payment")
-    return {"confirmation_url": payment["confirmation_url"]}

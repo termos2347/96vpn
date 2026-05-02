@@ -26,20 +26,23 @@ async def connect_vpn(message: types.Message):
             )
             return
         
+        # Постоянный email для поиска/создания клиента на панели
         email = f"user_{user_id}@96vpn.bot"
         logger.info(f"User {user_id} requesting VPN connection link")
         
-        # Получаем существующего клиента с сервера
+        # Ищем существующего клиента
         client_data = await vpn_provider.get_client_by_email(email)
         
         if not client_data:
-            # Клиент не найден – создаём нового
+            # Если не найден (например, после ручной активации старого формата), создаём
             logger.info(f"Client {email} not found on panel, creating new...")
             client_data = await vpn_provider.create_client(email)
         
         if client_data and client_data.get("subId"):
             sub_id = client_data["subId"]
-            await set_vpn_client_id(user_id, client_data["uuid"])
+            # Сохраняем UUID в БД, если ещё не сохранён
+            if not await get_vpn_client_id(user_id):
+                await set_vpn_client_id(user_id, client_data["uuid"])
             link = vpn_provider.get_subscription_link(sub_id)
             
             logger.info(f"VPN link generated for user {user_id}")
