@@ -17,17 +17,29 @@ router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 
 def verify_yookassa_signature(request: Request, body: bytes) -> bool:
+    """Проверяет подпись вебхука от ЮKassa, используя YOOKASSA_WEBHOOK_SECRET."""
     import hashlib
     import hmac
+
     signature = request.headers.get("X-Yookassa-Signature", "")
-    if not signature or not settings.YOOKASSA_API_KEY:
-        logger.warning("Missing signature or API key, skipping verification")
+    if not signature:
+        logger.warning("Missing X-Yookassa-Signature header")
         return False
+
+    # В продакшене обязательно должен быть задан YOOKASSA_WEBHOOK_SECRET
+    if not settings.DEBUG and not settings.YOOKASSA_WEBHOOK_SECRET:
+        logger.error("YOOKASSA_WEBHOOK_SECRET is not set – cannot verify webhook")
+        return False
+
+    # Выбираем секрет: в первую очередь – YOOKASSA_WEBHOOK_SECRET, иначе (для dev) – YOOKASSA_API_KEY
+    secret = settings.YOOKASSA_WEBHOOK_SECRET or settings.YOOKASSA_API_KEY
+
     expected = hmac.new(
-        settings.YOOKASSA_API_KEY.encode("utf-8"),
+        secret.encode("utf-8"),
         body,
         hashlib.sha256
     ).hexdigest()
+
     return hmac.compare_digest(signature, expected)
 
 
