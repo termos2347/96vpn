@@ -15,33 +15,25 @@ from db.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payment", tags=["payment"])
 
-
 def verify_yookassa_signature(request: Request, body: bytes) -> bool:
-    """Проверяет подпись вебхука от ЮKassa, используя YOOKASSA_WEBHOOK_SECRET."""
     import hashlib
     import hmac
-
     signature = request.headers.get("X-Yookassa-Signature", "")
     if not signature:
         logger.warning("Missing X-Yookassa-Signature header")
         return False
 
-    # В продакшене обязательно должен быть задан YOOKASSA_WEBHOOK_SECRET
-    if not settings.DEBUG and not settings.YOOKASSA_WEBHOOK_SECRET:
-        logger.error("YOOKASSA_WEBHOOK_SECRET is not set – cannot verify webhook")
+    secret = settings.YOOKASSA_API_KEY
+    if not secret:
+        logger.error("YOOKASSA_API_KEY not set")
         return False
-
-    # Выбираем секрет: в первую очередь – YOOKASSA_WEBHOOK_SECRET, иначе (для dev) – YOOKASSA_API_KEY
-    secret = settings.YOOKASSA_WEBHOOK_SECRET or settings.YOOKASSA_API_KEY
 
     expected = hmac.new(
         secret.encode("utf-8"),
         body,
         hashlib.sha256
     ).hexdigest()
-
     return hmac.compare_digest(signature, expected)
-
 
 # ---------- Инициация VPN-оплаты из бота ----------
 @router.post("/initiate-vpn")
@@ -77,7 +69,6 @@ async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(ge
     if not payment:
         raise HTTPException(status_code=500, detail="Failed to create payment")
 
-    # Добавляем payment_id в return_url для страницы успеха
     confirmation_url = payment["confirmation_url"]
     if "?" in confirmation_url:
         confirmation_url += f"&payment_id={payment['payment_id']}"
@@ -93,15 +84,13 @@ async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(ge
     )
     return response
 
-
 # ---------- Проверка и активация после возврата ----------
 @router.get("/check-vpn-payment")
 async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
     success = await yookassa_service.check_and_activate(payment_id, db)
     return {"activated": success}
 
-
-# ---------- Существующие маршруты (без изменений, но для полноты) ----------
+# ---------- Прямая оплата (веб-пользователи) ----------
 @router.post("/create")
 async def create_payment(
     user_id: int,
@@ -113,7 +102,7 @@ async def create_payment(
         raise HTTPException(status_code=401, detail="Authentication required")
     if plan not in ["monthly", "quarterly"]:
         raise HTTPException(status_code=400, detail="Invalid plan")
-    
+
     amount = settings.MONTHLY_PRICE if plan == "monthly" else settings.QUARTERLY_PRICE
     payment = await yookassa_service.create_payment(
         user_id=user_id,
@@ -125,7 +114,6 @@ async def create_payment(
         raise HTTPException(status_code=500, detail="Failed to create payment")
     return PaymentResponse(**payment)
 
-
 @router.get("/status/{payment_id}")
 async def get_payment_status(payment_id: str):
     status = await yookassa_service.get_payment_status(payment_id)
@@ -133,17 +121,13 @@ async def get_payment_status(payment_id: str):
         raise HTTPException(status_code=404, detail="Payment not found")
     return {"payment_id": payment_id, "status": status}
 
-
 @router.post("/webhook/yookassa")
 async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
     body = await request.body()
     if not verify_yookassa_signature(request, body):
-        if settings.DEBUG:
-            logger.warning("Invalid webhook signature, but DEBUG mode allows ignoring")
-        else:
-            logger.warning("Invalid webhook signature, rejecting")
-            return {"status": "invalid signature"}
-    
+        logger.warning("Invalid webhook signature, rejecting")
+        return {"status": "invalid signature"}
+
     try:
         webhook_data = await request.json()
         success = await yookassa_service.process_webhook(webhook_data, db)
@@ -155,7 +139,6 @@ async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
         logger.error(f"Error processing webhook: {e}")
         return {"status": "error"}
 
-
 @router.get("/subscription-info", response_model=SubscriptionInfo)
 async def get_subscription_info(current_user: User = Depends(get_current_user_optional)):
     if not current_user:
@@ -166,45 +149,3 @@ async def get_subscription_info(current_user: User = Depends(get_current_user_op
         "days_remaining": days_remaining,
         "expiry_date": current_user.expiry_date
     }
-
-
-@router.post("/activate-telegram/{telegram_id}")
-async def activate_telegram_payment(
-    telegram_id: int,
-    plan: str = Query("monthly"),
-    db: Session = Depends(get_db)
-):
-    user = await AuthService.get_user_by_telegram(db, telegram_id)
-    if not user:
-        user = User(
-            user_id=telegram_id,
-            source="bot",
-            is_active=False,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    
-    amount = settings.MONTHLY_PRICE if plan == "monthly" else settings.QUARTERLY_PRICE
-    payment = await yookassa_service.create_payment(
-        user_id=user.id,
-        amount=amount,
-        plan=plan,
-        db=db,
-        description=f"Подписка для Telegram: {telegram_id}"
-    )
-    if not payment:
-        raise HTTPException(status_code=500, detail="Failed to create payment")
-    return PaymentResponse(**payment)
-
-
-if settings.DEBUG:
-    @router.post("/test-activate/{user_id}")
-    async def test_activate_subscription(user_id: int, db: Session = Depends(get_db)):
-        user = await AuthService.get_user_by_id(db, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        await SubscriptionService.renew_subscription(db, user, days=30)
-        return {"status": "activated", "expiry_date": user.expiry_date}
