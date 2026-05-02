@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from yookassa import Configuration, Payment
 from yookassa.domain.exceptions import ApiError
@@ -15,7 +15,6 @@ from config import settings
 from web.services.auth import SubscriptionService
 
 logger = logging.getLogger(__name__)
-
 
 class YookassaService:
     def __init__(self):
@@ -45,7 +44,7 @@ class YookassaService:
                 },
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": settings.YOOKASSA_RETURN_URL
+                    "return_url": f"{settings.YOOKASSA_RETURN_URL}?payment_id={payment.id}"
                 },
                 "capture": True,
                 "description": f"{description} ({plan})",
@@ -53,7 +52,6 @@ class YookassaService:
             }
 
             if user_id is not None:
-                # Веб-пользователь: добавляем customer_id, payment_method_id
                 user = db.execute(select(User).where(User.id == user_id)).scalars().first()
                 if not user:
                     logger.error(f"User {user_id} not found")
@@ -62,18 +60,16 @@ class YookassaService:
                     payment_data["customer_id"] = user.yookassa_customer_id
                 if user.payment_method_id:
                     payment_data["payment_method_id"] = user.payment_method_id
-                # Добавляем метаданные, специфичные для веба
                 payment_data["metadata"]["source"] = "web"
                 payment_data["metadata"]["user_id"] = user_id
             else:
-                # Для бота source должен быть "bot", но мы уже передали в metadata при вызове
+                # для bot source уже передан в metadata
                 pass
 
-            idempotence_key = f"payment_{user_id or 'bot'}_{datetime.utcnow().timestamp()}"
+            idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
             payment = Payment.create(payment_data, idempotence_key)
 
             if user_id:
-                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
                 user.yookassa_payment_id = payment.id
                 db.commit()
 
@@ -82,7 +78,7 @@ class YookassaService:
                 "payment_id": payment.id,
                 "status": payment.status,
                 "confirmation_url": payment.confirmation.confirmation_url if hasattr(payment, 'confirmation') else None,
-                "created_at": datetime.utcnow()
+                "created_at": datetime.now(timezone.utc)
             }
         except Exception as e:
             logger.error(f"Error creating payment: {e}")
@@ -112,7 +108,7 @@ class YookassaService:
             if source == "bot":
                 return await self._activate_bot_subscription(metadata)
 
-            # Существующая логика для веб-пользователей
+            # Веб-пользователь
             payment_id = payment.get("id")
             if not payment_id:
                 logger.error("Payment ID not found in webhook")
@@ -126,7 +122,7 @@ class YookassaService:
             plan = metadata.get("plan", "monthly")
             days = 90 if plan == "quarterly" else 30
 
-            if user.is_active and user.expiry_date and (user.expiry_date - datetime.utcnow()).days > days - 5:
+            if user.is_active and user.expiry_date and (user.expiry_date - datetime.now(timezone.utc)).days > days - 5:
                 logger.info(f"User {user.id} already has active subscription, skipping renewal")
                 return True
 
@@ -145,7 +141,7 @@ class YookassaService:
                 logger.error("No token in webhook metadata")
                 return False
 
-            payload = jwt.decode(token, settings.INTERNAL_API_SECRET, algorithms=["HS256"])
+            payload = jwt.decode(token, settings.INTERNAL_API_SECRET, algorithms=["HS256"], leeway=60)
             telegram_id = payload["telegram_id"]
             product_type = payload["product_type"]
             period = payload["period"]
@@ -175,6 +171,18 @@ class YookassaService:
                 logger.error(f"Failed to call bot activation API: {e}")
                 return False
 
+    async def check_and_activate(self, payment_id: str, db: Session) -> bool:
+        """Проверяет статус платежа и активирует подписку, если succeeded."""
+        try:
+            payment = Payment.find_one(payment_id)
+            if payment.status == 'succeeded':
+                metadata = payment.metadata
+                if metadata and metadata.get('source') == 'bot':
+                    return await self._activate_bot_subscription(metadata)
+            return False
+        except Exception as e:
+            logger.error(f"Check and activate error: {e}")
+            return False
 
 # Глобальный экземпляр сервиса
 yookassa_service = YookassaService()

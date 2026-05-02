@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Оплата успешна - {{ site_name }}{% endblock %}
+{% block content %}
+<div class="text-center mt-20">
+    <h1 class="text-4xl font-bold gradient-text mb-4">Платёж выполнен</h1>
+    <p class="text-xl text-gray-400 mb-8">Проверяем статус и активируем подписку...</p>
+    <div id="status-message"></div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(async () => {
+    // Читаем payment_id из куки
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+    }
+    const paymentId = getCookie('vpn_payment_id');
+    if (!paymentId) {
+        document.getElementById('status-message').innerHTML = '<p class="text-red-400">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>';
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/payment/check-vpn-payment?payment_id=${encodeURIComponent(paymentId)}`);
+        const data = await resp.json();
+        if (data.activated) {
+            document.getElementById('status-message').innerHTML = '<p class="text-green-400 text-2xl font-bold">Подписка активирована! Проверьте Telegram.</p>';
+        } else {
+            document.getElementById('status-message').innerHTML = '<p class="text-yellow-400">Подписка уже была активирована или произошла ошибка. Обратитесь в поддержку.</p>';
+        }
+        // Удаляем куку после проверки
+        document.cookie = "vpn_payment_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    } catch(e) {
+        document.getElementById('status-message').innerHTML = '<p class="text-red-400">Ошибка связи с сервером.</p>';
+    }
+})();
+</script>
+{% endblock %}
