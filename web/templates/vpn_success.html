@@ -10,13 +10,14 @@
 {% block extra_js %}
 <script>
 (async () => {
-    // Читаем payment_id из куки
     function getCookie(name) {
         const value = `; ${document.cookie}`;
         const parts = value.split(`; ${name}=`);
         if (parts.length === 2) return parts.pop().split(';').shift();
     }
-    const paymentId = getCookie('vpn_payment_id');
+    // Берём payment_id из URL (наш параметр или orderId от ЮKassa) или из куки
+    const urlParams = new URLSearchParams(window.location.search);
+    let paymentId = urlParams.get('payment_id') || urlParams.get('orderId') || getCookie('vpn_payment_id');
     if (!paymentId) {
         document.getElementById('status-message').innerHTML = '<p class="text-red-400">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>';
         return;

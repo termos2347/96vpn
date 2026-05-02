@@ -44,7 +44,7 @@ class YookassaService:
                 },
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": f"{settings.YOOKASSA_RETURN_URL}?payment_id={payment.id}"
+                    "return_url": settings.YOOKASSA_RETURN_URL
                 },
                 "capture": True,
                 "description": f"{description} ({plan})",
@@ -62,16 +62,15 @@ class YookassaService:
                     payment_data["payment_method_id"] = user.payment_method_id
                 payment_data["metadata"]["source"] = "web"
                 payment_data["metadata"]["user_id"] = user_id
-            else:
-                # для bot source уже передан в metadata
-                pass
 
             idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
             payment = Payment.create(payment_data, idempotence_key)
 
             if user_id:
-                user.yookassa_payment_id = payment.id
-                db.commit()
+                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+                if user:
+                    user.yookassa_payment_id = payment.id
+                    db.commit()
 
             logger.info(f"Payment created: {payment.id}, amount: {amount}")
             return {

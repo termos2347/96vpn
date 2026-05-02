@@ -38,11 +38,14 @@ async def handle_activation(request):
     try:
         if product_type == "vpn":
             await set_vpn_subscription(telegram_id, days)
-            # Создаём VPN-ключ
+            # Создаём VPN-ключ с обязательным закрытием менеджера
             manager = VPNManager()
-            link = await manager.create_key(telegram_id, days)
-            if not link:
-                logger.error(f"Failed to create VPN key for {telegram_id}")
+            try:
+                link = await manager.create_key(telegram_id, days)
+                if not link:
+                    logger.error(f"Failed to create VPN key for {telegram_id}")
+            finally:
+                await manager.close()
         elif product_type == "bypass":
             await set_bypass_subscription(telegram_id, days)
             # Здесь будет вызов активации обхода (заглушка)

@@ -18,6 +18,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 from config import TOKEN, PROXY_URL
 from handlers import router
 from handlers.common import setup_bot_commands
+from handlers.subscription import vpn_provider
 from services.scheduler import start_scheduler
 from db.base import init_db, engine
 from utils.logger import setup_logger
@@ -25,7 +26,6 @@ from internal_api import create_internal_app
 
 # Импорты веб-части
 from web.app import app as fastapi_app
-
 
 async def main():
     setup_logger()
@@ -83,13 +83,42 @@ async def main():
     # --- Graceful shutdown ---
     loop = asyncio.get_running_loop()
 
-    def shutdown_handler(signum, frame):
-        logger.info(f"Signal {signum} received, shutting down…")
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
+    async def shutdown():
+        """Корректное завершение всех сервисов."""
+        logger.info("Shutting down…")
+        # Останавливаем поллинг (если ещё активен)
+        try:
+            await dp.stop_polling()
+        except Exception:
+            pass
 
-    signal.signal(signal.SIGINT, shutdown_handler)
-    signal.signal(signal.SIGTERM, shutdown_handler)
+        # Закрываем сессию бота и прокси
+        if bot.session:
+            await bot.session.close()
+        if session:
+            await session.close()
+
+        # Закрываем VPN‑провайдер
+        await vpn_provider.close()
+
+        # Останавливаем веб‑сервер
+        server.should_exit = True
+        await web_task
+
+        # Останавливаем внутренний API
+        await internal_runner.cleanup()
+
+        # Закрываем движок БД
+        await engine.dispose()
+        logger.info("Shutdown complete.")
+
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, exiting…")
+        # Планируем задачу остановки
+        asyncio.create_task(shutdown())
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # --- Запуск планировщика и бота ---
     await start_scheduler(bot)
@@ -113,15 +142,8 @@ async def main():
                 logger.error("Max restarts reached")
                 break
 
-    # --- Остановка веб-сервера и API ---
-    logger.info("Shutting down web server…")
-    server.should_exit = True
-    await web_task
-
-    await internal_runner.cleanup()
-    await engine.dispose()
-    logger.info("Shutdown complete")
-
+    # Если вышли из цикла (например, после сигнала), вызываем shutdown
+    await shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
