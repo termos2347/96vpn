@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from config import DATABASE_URL
 from .models import Base
+from db.models import Base, User, PaymentLog
 
 is_sqlite = 'sqlite' in DATABASE_URL
 

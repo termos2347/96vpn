@@ -1,6 +1,6 @@
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, String, DateTime, Boolean
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 class Base(DeclarativeBase):
@@ -23,7 +23,7 @@ class User(Base):
     vpn_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # NeuroPrompt подписка
-    is_active: Mapped[bool] = mapped_column(Boolean, default=False)   # теперь по умолчанию False, пока не оплачено
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     # Платежи Yookassa
@@ -42,3 +42,11 @@ class Client(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     username: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class PaymentLog(Base):
+    __tablename__ = "payment_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    payment_id = Column(String, unique=True, nullable=False, index=True)
+    telegram_id = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)

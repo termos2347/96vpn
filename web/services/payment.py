@@ -103,12 +103,12 @@ class YookassaService:
             payment = webhook_data.get("object", {})
             metadata = payment.get("metadata", {})
             source = metadata.get("source")
+            payment_id = payment.get("id")
 
             if source == "bot":
-                return await self._activate_bot_subscription(metadata)
+                return await self._activate_bot_subscription(metadata, payment_id)
 
             # Веб-пользователь
-            payment_id = payment.get("id")
             if not payment_id:
                 logger.error("Payment ID not found in webhook")
                 return False
@@ -132,8 +132,8 @@ class YookassaService:
             logger.error(f"Error processing webhook: {e}")
             return False
 
-    async def _activate_bot_subscription(self, metadata: dict) -> bool:
-        """Активирует подписку бота через внутренний API."""
+    async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
+        """Активирует подписку бота через внутренний API, передавая payment_id для идемпотентности."""
         try:
             token = metadata.get("token")
             if not token:
@@ -155,7 +155,8 @@ class YookassaService:
                     json={
                         "telegram_id": telegram_id,
                         "product_type": product_type,
-                        "period": period
+                        "period": period,
+                        "payment_id": payment_id
                     },
                     headers={"Authorization": f"Bearer {settings.INTERNAL_API_SECRET}"},
                     timeout=aiohttp.ClientTimeout(total=10)
@@ -171,13 +172,13 @@ class YookassaService:
                 return False
 
     async def check_and_activate(self, payment_id: str, db: Session) -> bool:
-        """Проверяет статус платежа и активирует подписку, если succeeded."""
+        """Проверяет статус платежа и активирует подписку (для страницы успеха)."""
         try:
             payment = Payment.find_one(payment_id)
             if payment.status == 'succeeded':
                 metadata = payment.metadata
                 if metadata and metadata.get('source') == 'bot':
-                    return await self._activate_bot_subscription(metadata)
+                    return await self._activate_bot_subscription(metadata, payment_id)
             return False
         except Exception as e:
             logger.error(f"Check and activate error: {e}")
