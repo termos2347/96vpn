@@ -3,11 +3,12 @@ import html  # Добавлено для экранирования ссылок
 from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.enums import ParseMode
-from aiogram.types import LabeledPrice, PreCheckoutQuery
+from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
 from .keyboards import (
     vpn_currency_keyboard, vpn_period_keyboard,
-    bypass_currency_keyboard, bypass_period_keyboard
+    bypass_currency_keyboard, bypass_period_keyboard,
+    period_to_text, currency_symbol
 )
 from config import VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
 from services.vpn_provider import XUIVPNProvider
@@ -88,8 +89,8 @@ async def vpn_payment_link(callback: types.CallbackQuery):
 
     try:
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
-        # Экранируем токен, чтобы спецсимволы JWT не ломали HTML
-        payment_url = f"{SITE_URL}/pay/vpn?token={token}"
+        # Экранируем ссылку для безопасности
+        payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
@@ -97,14 +98,15 @@ async def vpn_payment_link(callback: types.CallbackQuery):
 
     await callback.message.delete()
 
+    # Текст с гиперссылкой
     msg = (
         f"💳 Для оплаты VPN <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
         f"<i>Ссылка действительна 2 часа.</i>"
     )
-    
+
     await callback.message.answer(
         text=msg,
-        parse_mode=ParseMode.HTML,
+        parse_mode=ParseMode.HTML, # Используем Enum для надежности
         disable_web_page_preview=True
     )
     await callback.answer()
@@ -159,26 +161,25 @@ async def bypass_payment_link(callback: types.CallbackQuery):
 
     try:
         token = create_payment_token(user_id, "bypass", period, currency, price)
-        payment_url = f"{SITE_URL}/pay/vpn?token={token}"
+        payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
     await callback.message.delete()
-    
+
     msg = (
-        f"💳 Для оплаты обхода <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
+        f"🛡️ Для оплаты обхода DPI <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
         f"<i>Ссылка действительна 2 часа.</i>"
     )
-    
+
     await callback.message.answer(
         text=msg,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
     await callback.answer()
-
 
 # ---------- Платежи Telegram Stars ----------
 

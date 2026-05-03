@@ -2,8 +2,6 @@ import logging
 from typing import Optional
 from services.vpn_provider import vpn_provider
 from db.crud import set_vpn_client_id, get_or_create_user
-from datetime import datetime, timedelta
-from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +28,6 @@ class VPNManager:
             client_data = await self.provider.create_client(email)
             if not client_data:
                 logger.error(f"Не удалось создать клиента для user_id={user_id}")
-                await send_admin_alert(f"Не удалось создать VPN-ключ для user_id={user_id}")
                 return None
 
             client_uuid = client_data['uuid']
@@ -43,7 +40,6 @@ class VPNManager:
 
         except Exception as e:
             logger.error(f"Ошибка при создании ключа для user_id={user_id}: {e}", exc_info=True)
-            await send_admin_alert(f"Ошибка создания VPN-ключа для user_id={user_id}: {e}")
             return None
 
     async def revoke_key(self, user_id: int) -> bool:
@@ -59,12 +55,10 @@ class VPNManager:
                 logger.info(f"Ключ отозван для user_id={user_id}")
             else:
                 logger.error(f"Не удалось отозвать ключ для user_id={user_id}")
-                await send_admin_alert(f"Не удалось отозвать VPN-ключ {user.vpn_client_id} для user_id={user_id}")
             return success
 
         except Exception as e:
             logger.error(f"Ошибка при отзыве ключа для user_id={user_id}: {e}", exc_info=True)
-            await send_admin_alert(f"Ошибка отзыва VPN-ключа для user_id={user_id}: {e}")
             return False
 
     async def get_subscription_link(self, user_id: int) -> Optional[str]:
