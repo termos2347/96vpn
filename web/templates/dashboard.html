@@ -26,6 +26,12 @@
                         <p class="text-sm text-gray-400">Дата регистрации</p>
                         <p class="text-lg font-bold">{{ user.created_at.strftime('%d.%m.%Y') }}</p>
                     </div>
+                    <!-- Кнопка выхода с подтверждением -->
+                    <div class="pt-4 border-t border-purple-500 border-opacity-20">
+                        <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition">
+                            <i class="fas fa-sign-out-alt mr-2"></i>Выйти
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -63,7 +69,7 @@
                         </p>
                     </div>
                     <p class="text-gray-400 mb-4">Ваша подписка больше не активна. Пожалуйста, продлите её, чтобы продолжать использовать сервис.</p>
-                    <a href="/pay-choice" class="button-primary text-white px-6 py-3 rounded inline-block font-bold text-lg">
+                    <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-3 rounded inline-block font-bold text-lg">
                         Оформить подписку
                     </a>
                 {% endif %}
@@ -86,35 +92,30 @@
                 <p class="text-gray-400">Прочитайте условия использования сервиса</p>
             </a>
         </div>
-
-        <!-- Внутри dashboard.html, например, после блока "Быстрые ссылки" -->
-        <div class="mt-8">
-            <div class="glass-effect p-6 rounded-lg text-center">
-                <h3 class="text-2xl font-bold mb-4 flex gap-2 items-center justify-center">
-                    <i class="fas fa-sign-out-alt text-red-400"></i> Выход
-                </h3>
-                <p class="text-gray-400 mb-6">Завершить сеанс и выйти из аккаунта</p>
-                <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition">
-                    Выйти
-                </button>
-            </div>
-        </div>
-
-        <script>
-            document.getElementById('logout-btn').addEventListener('click', function() {
-                // Удаляем куку с токеном
-                document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-                // Перенаправляем на главную
-                window.location.href = '/';
-            });
-        </script>
     </div>
 </main>
+{% endblock %}
 
+{% block extra_js %}
 <script>
 function renewSubscription() {
-    const userId = new URLSearchParams(window.location.search).get('user_id') || 'user_id';
     window.location.href = `/pay-choice?user_id={{ user.id }}`;
 }
+
+// Кнопка выхода с подтверждением и реальным разлогином
+document.getElementById('logout-btn').addEventListener('click', async function() {
+    if (!confirm('Вы уверены, что хотите выйти из аккаунта?')) {
+        return;
+    }
+    try {
+        // Серверное удаление куки (на всякий случай)
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+        // игнорируем ошибку, если сервер не ответил
+    }
+    // Клиентское удаление куки и редирект
+    document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    window.location.href = '/';
+});
 </script>
 {% endblock %}

@@ -10,7 +10,7 @@ from .keyboards import (
     bypass_currency_keyboard, bypass_period_keyboard,
     period_to_text, currency_symbol
 )
-from config import VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
+from config import PAYMENT_LINK_TTL_MINUTES, VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
 from services.vpn_provider import XUIVPNProvider
 from services.vpn_provider import vpn_provider
 from utils.decorators import rate_limit
@@ -24,7 +24,7 @@ PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 def create_payment_token(telegram_id: int, product_type: str, period: str, currency: str, amount: float) -> str:
     now = datetime.now(timezone.utc)
-    exp = now + timedelta(hours=2)
+    exp = now + timedelta(minutes=PAYMENT_LINK_TTL_MINUTES)
     payload = {
         "telegram_id": telegram_id,
         "product_type": product_type,
@@ -91,17 +91,18 @@ async def vpn_payment_link(callback: types.CallbackQuery):
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
         # Экранируем ссылку для безопасности
         payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
+        logger.info(f"Generated payment URL: {payment_url}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
     await callback.message.delete()
-
-    # Текст с гиперссылкой
+    
+    ttl_text = f"{PAYMENT_LINK_TTL_MINUTES} мин." if PAYMENT_LINK_TTL_MINUTES < 60 else f"{PAYMENT_LINK_TTL_MINUTES // 60} ч."
     msg = (
-        f"💳 Для оплаты VPN <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
-        f"<i>Ссылка действительна 2 часа.</i>"
+        f"💳 Для оплаты VPN <a href='{payment_url}'>нажмите здесь</a>\n"
+        f"<i>Ссылка действительна {ttl_text}.</i>"
     )
 
     await callback.message.answer(
@@ -162,6 +163,7 @@ async def bypass_payment_link(callback: types.CallbackQuery):
     try:
         token = create_payment_token(user_id, "bypass", period, currency, price)
         payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
+        logger.info(f"Generated payment URL: {payment_url}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
@@ -169,9 +171,10 @@ async def bypass_payment_link(callback: types.CallbackQuery):
 
     await callback.message.delete()
 
+    ttl_text = f"{PAYMENT_LINK_TTL_MINUTES} мин." if PAYMENT_LINK_TTL_MINUTES < 60 else f"{PAYMENT_LINK_TTL_MINUTES // 60} ч."
     msg = (
-        f"🛡️ Для оплаты обхода DPI <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
-        f"<i>Ссылка действительна 2 часа.</i>"
+        f"🛡️ Для оплаты обхода DPI <a href='{payment_url}'>нажмите здесь</a>\n"
+        f"<i>Ссылка действительна {ttl_text}.</i>"
     )
 
     await callback.message.answer(

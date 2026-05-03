@@ -35,6 +35,10 @@ class User(Base):
     last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Восстановление пароля (для веб-пользователей)
+    reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class Client(Base):
     __tablename__ = "clients"

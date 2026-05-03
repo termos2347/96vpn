@@ -79,13 +79,21 @@ async def create_payment(
 ):
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    user_id = current_user.id
-    if plan not in ["monthly", "quarterly"]:
+
+    if plan == "monthly":
+        amount = settings.MONTHLY_PRICE
+        days = 30
+    elif plan == "quarterly":
+        amount = settings.QUARTERLY_PRICE
+        days = 90
+    elif plan == "semiannual":
+        amount = settings.SEMIANNUAL_PRICE
+        days = 180
+    else:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
-    amount = settings.MONTHLY_PRICE if plan == "monthly" else settings.QUARTERLY_PRICE
     payment = await yookassa_service.create_payment(
-        user_id=user_id,
+        user_id=current_user.id,
         amount=amount,
         plan=plan,
         db=db

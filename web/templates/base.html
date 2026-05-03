@@ -50,7 +50,6 @@
                 <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
                 {% if user %}
                     <a href="/dashboard" class="hover:text-purple-400 transition">Кабинет</a>
-                    <button id="logout-btn" class="button-primary text-white px-6 py-2 rounded-lg">Выйти</button>
                 {% else %}
                     <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
                 {% endif %}
@@ -93,17 +92,6 @@
             </div>
         </div>
     </footer>
-
-    <!-- Скрипт только для кнопки выхода (отправляет POST на logout) -->
-    {% if user %}
-    <script>
-        document.getElementById('logout-btn')?.addEventListener('click', async function(e) {
-            e.preventDefault();
-            await fetch('/api/auth/logout', { method: 'POST' });
-            window.location.href = '/';
-        });
-    </script>
-    {% endif %}
 
     {% block extra_js %}{% endblock %}
 </body>

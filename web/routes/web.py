@@ -68,7 +68,8 @@ async def index(request: Request, current_user: User = Depends(get_current_user_
         site_name=settings.APP_NAME,
         user=current_user,
         monthly_price=int(settings.MONTHLY_PRICE),
-        quarterly_price=int(settings.QUARTERLY_PRICE)
+        quarterly_price=int(settings.QUARTERLY_PRICE),
+        semiannual_price=int(settings.SEMIANNUAL_PRICE)
     )
 
 @router.get("/login", response_class=HTMLResponse)
@@ -118,6 +119,7 @@ async def pay_choice(request: Request, db: Session = Depends(get_db),
         site_name=settings.APP_NAME,
         monthly_price=int(settings.MONTHLY_PRICE),
         quarterly_price=int(settings.QUARTERLY_PRICE),
+        semiannual_price=int(settings.SEMIANNUAL_PRICE),
         user=current_user
     )
 
@@ -136,13 +138,23 @@ async def payment_telegram(request: Request, tg_id: int, db: Session = Depends(g
 
 @router.get("/legal/terms", response_class=HTMLResponse)
 async def terms(request: Request, current_user: User = Depends(get_current_user_optional)):
+    from datetime import datetime
     template = jinja_env.get_template("terms.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return template.render(
+        site_name=settings.APP_NAME,
+        user=current_user,
+        current_date=datetime.now().strftime("%d.%m.%Y")
+    )
 
 @router.get("/legal/privacy", response_class=HTMLResponse)
 async def privacy(request: Request, current_user: User = Depends(get_current_user_optional)):
+    from datetime import datetime
     template = jinja_env.get_template("privacy.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return template.render(
+        site_name=settings.APP_NAME,
+        user=current_user,
+        current_date=datetime.now().strftime("%d.%m.%Y")
+    )
 
 @router.get("/prompt/{prompt_id}", response_class=HTMLResponse)
 async def prompt_detail(
@@ -186,3 +198,13 @@ async def payment_success(request: Request, current_user: User = Depends(get_cur
 async def payment_failed(request: Request, user_id: int = None, current_user: User = Depends(get_current_user_optional)):
     template = jinja_env.get_template("payment_failed.html")
     return template.render(site_name=settings.APP_NAME, user_id=user_id, user=current_user)
+
+@router.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(request: Request, current_user: User = Depends(get_current_user_optional)):
+    template = jinja_env.get_template("forgot_password.html")
+    return template.render(site_name=settings.APP_NAME, user=current_user)
+
+@router.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request, token: str, current_user: User = Depends(get_current_user_optional)):
+    template = jinja_env.get_template("reset_password.html")
+    return template.render(site_name=settings.APP_NAME, token=token, user=current_user)
