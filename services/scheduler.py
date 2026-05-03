@@ -4,18 +4,9 @@ from datetime import datetime, timedelta
 from db.base import AsyncSessionLocal
 from db.models import User
 from db.crud import set_vpn_client_id
-from services.vpn_provider import XUIVPNProvider
 from services.vpn_provider import vpn_provider
 from sqlalchemy import select, update
-
-import asyncio
-import logging
-from datetime import datetime, timedelta
-from db.base import AsyncSessionLocal
-from db.models import User
-from db.crud import set_vpn_client_id
-from services.vpn_provider import XUIVPNProvider
-from sqlalchemy import select, update
+from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +35,7 @@ async def check_expired_subscriptions(bot):
                         except Exception as e:
                             logger.warning(f"Network error revoking client {client_uuid}, attempt {attempt+1}: {e}")
                             if attempt < retry_count - 1:
-                                await asyncio.sleep(2 ** attempt)  # exponential backoff
+                                await asyncio.sleep(2 ** attempt)
                         except Exception as e:
                             logger.error(f"Unexpected error revoking client {client_uuid}, attempt {attempt+1}: {e}")
                             break
@@ -62,8 +53,10 @@ async def check_expired_subscriptions(bot):
                             logger.error(f"Не удалось отправить уведомление пользователю {user.user_id}: {e}")
                     else:
                         logger.error(f"Не удалось отозвать ключ {client_uuid} для user_id={user.user_id} после {retry_count} попыток")
+                        await send_admin_alert(f"Не удалось отозвать ключ {client_uuid} для user_id={user.user_id}")
         except Exception as e:
             logger.error(f"Ошибка в фоновой задаче проверки подписок: {e}", exc_info=True)
+            await send_admin_alert(f"Ошибка в задаче проверки подписок: {e}")
 
         await asyncio.sleep(3600)
 
@@ -73,7 +66,6 @@ async def send_expiry_reminders(bot):
         try:
             async with AsyncSessionLocal() as session:
                 now = datetime.utcnow()
-                # Выбираем всех, у кого подписка ещё активна и есть ключ
                 result = await session.execute(
                     select(User).where(
                         User.vpn_subscription_end > now,
@@ -87,11 +79,9 @@ async def send_expiry_reminders(bot):
                     if days_left not in (7, 3, 1):
                         continue
 
-                    # Проверяем, не отправляли ли уже сегодня
                     if user.last_reminder_sent and user.last_reminder_sent.date() == now.date():
                         continue
 
-                    # Отправляем уведомление с retry
                     day_word = {7: "7 дней", 3: "3 дня", 1: "1 день"}[days_left]
                     message_sent = False
                     for attempt in range(3):
@@ -110,7 +100,6 @@ async def send_expiry_reminders(bot):
                                 await asyncio.sleep(1)
 
                     if message_sent:
-                        # Фиксируем отправку
                         user.last_reminder_sent = now
                         await session.commit()
                         logger.info(f"Отправлено напоминание за {days_left} дн. пользователю {user.user_id}")
@@ -120,10 +109,9 @@ async def send_expiry_reminders(bot):
         except Exception as e:
             logger.error(f"Ошибка в задаче напоминаний: {e}", exc_info=True)
 
-        await asyncio.sleep(3600)  # проверяем раз в час
+        await asyncio.sleep(3600)
 
 async def start_scheduler(bot):
-    """Запускает обе фоновые задачи."""
     asyncio.create_task(check_expired_subscriptions(bot))
     asyncio.create_task(send_expiry_reminders(bot))
     logger.info("Фоновые задачи проверки подписок и напоминаний запущены")

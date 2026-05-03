@@ -9,6 +9,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import requests.exceptions
 import jwt
 import aiohttp
+from admin import send_admin_alert
 
 from db.models import User
 from config import settings
@@ -35,7 +36,6 @@ class YookassaService:
         description: str = "Подписка на NeuroPrompt Premium",
         metadata: dict = None
     ) -> Optional[Dict[str, Any]]:
-        """Создаёт платёж в Yookassa. Поддерживает как веб-пользователей, так и заказы из бота."""
         try:
             payment_data = {
                 "amount": {
@@ -84,7 +84,6 @@ class YookassaService:
             return None
 
     async def get_payment_status(self, payment_id: str) -> Optional[str]:
-        """Получает статус платежа из ЮKassa."""
         try:
             payment = Payment.find_one(payment_id)
             return payment.status
@@ -93,7 +92,6 @@ class YookassaService:
             return None
 
     async def process_webhook(self, webhook_data: Dict[str, Any], db: Session) -> bool:
-        """Обрабатывает уведомление об успешном платеже и активирует подписку."""
         try:
             event = webhook_data.get("event")
             if event != "payment.succeeded":
@@ -108,7 +106,6 @@ class YookassaService:
             if source == "bot":
                 return await self._activate_bot_subscription(metadata, payment_id)
 
-            # Веб-пользователь
             if not payment_id:
                 logger.error("Payment ID not found in webhook")
                 return False
@@ -130,10 +127,10 @@ class YookassaService:
             return True
         except Exception as e:
             logger.error(f"Error processing webhook: {e}")
+            await send_admin_alert(f"Ошибка обработки вебхука: {e}")
             return False
 
     async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
-        """Активирует подписку бота через внутренний API, передавая payment_id для идемпотентности."""
         try:
             token = metadata.get("token")
             if not token:
@@ -146,6 +143,7 @@ class YookassaService:
             period = payload["period"]
         except Exception as e:
             logger.error(f"Token decode failed: {e}")
+            await send_admin_alert(f"Ошибка декодирования токена бота в вебхуке: {e}")
             return False
 
         async with aiohttp.ClientSession() as session:
@@ -166,13 +164,14 @@ class YookassaService:
                         return True
                     else:
                         logger.error(f"Bot activation returned {resp.status}")
+                        await send_admin_alert(f"Ошибка активации подписки бота: telegram_id={telegram_id}, payment_id={payment_id}, status={resp.status}")
                         return False
             except Exception as e:
                 logger.error(f"Failed to call bot activation API: {e}")
+                await send_admin_alert(f"Не удалось вызвать API активации бота: {e}")
                 return False
 
     async def check_and_activate(self, payment_id: str, db: Session) -> bool:
-        """Проверяет статус платежа и активирует подписку (для страницы успеха)."""
         try:
             payment = Payment.find_one(payment_id)
             if payment.status == 'succeeded':
@@ -184,5 +183,4 @@ class YookassaService:
             logger.error(f"Check and activate error: {e}")
             return False
 
-# Глобальный экземпляр сервиса
 yookassa_service = YookassaService()

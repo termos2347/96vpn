@@ -7,10 +7,10 @@ from db.models import PaymentLog
 from db.base import AsyncSessionLocal
 from services.vpn_manager import VPNManager
 from sqlalchemy import select
+from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
-
 
 async def handle_activation(request):
     auth = request.headers.get("Authorization")
@@ -36,7 +36,6 @@ async def handle_activation(request):
 
     days = PERIOD_DAYS[period]
 
-    # --- Если передан payment_id, проверяем, не обработан ли он уже ---
     if payment_id:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -46,7 +45,6 @@ async def handle_activation(request):
                 logger.info(f"Payment {payment_id} already activated, skipping")
                 return web.json_response({"status": "already_activated"})
 
-            # Платеж новый – активируем подписку
             try:
                 if product_type == "vpn":
                     await set_vpn_subscription(telegram_id, days)
@@ -55,6 +53,7 @@ async def handle_activation(request):
                         link = await manager.create_key(telegram_id, days)
                         if not link:
                             logger.error(f"Failed to create VPN key for {telegram_id}")
+                            await send_admin_alert(f"Не создался VPN-ключ (internal) для telegram_id={telegram_id}, payment_id={payment_id}")
                     finally:
                         await manager.close()
                 elif product_type == "bypass":
@@ -62,7 +61,6 @@ async def handle_activation(request):
                 else:
                     return web.json_response({"error": "unknown product"}, status=400)
 
-                # Только после успешной активации фиксируем payment_id
                 session.add(PaymentLog(
                     payment_id=payment_id,
                     telegram_id=telegram_id,
@@ -75,9 +73,10 @@ async def handle_activation(request):
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Activation failed for {telegram_id}: {e}", exc_info=True)
+                await send_admin_alert(f"Ошибка активации подписки (internal) для telegram_id={telegram_id}, payment_id={payment_id}: {e}")
                 return web.json_response({"status": "error", "detail": str(e)}, status=500)
 
-    # --- Без payment_id – старая логика (без защиты от дублей) ---
+    # Без payment_id – старая логика
     try:
         if product_type == "vpn":
             await set_vpn_subscription(telegram_id, days)
@@ -86,6 +85,7 @@ async def handle_activation(request):
                 link = await manager.create_key(telegram_id, days)
                 if not link:
                     logger.error(f"Failed to create VPN key for {telegram_id}")
+                    await send_admin_alert(f"Не создался VPN-ключ (internal, без payment_id) для telegram_id={telegram_id}")
             finally:
                 await manager.close()
         elif product_type == "bypass":
@@ -98,8 +98,8 @@ async def handle_activation(request):
 
     except Exception as e:
         logger.error(f"Activation failed: {e}", exc_info=True)
+        await send_admin_alert(f"Ошибка активации (internal, без payment_id) для telegram_id={telegram_id}: {e}")
         return web.json_response({"status": "error", "detail": str(e)}, status=500)
-
 
 def create_internal_app():
     app = web.Application()
