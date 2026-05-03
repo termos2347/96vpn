@@ -1,10 +1,11 @@
 import asyncio
 import logging
 from collections import deque
+from io import BytesIO
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BufferedInputFile
 from sqlalchemy import text, select
 
 from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
@@ -19,7 +20,6 @@ admin_bot: Bot | None = None
 main_bot: Bot | None = None
 
 async def send_admin_alert(message: str):
-    """Отправить алерт админу."""
     global admin_bot
     if not admin_bot or not ADMIN_CHAT_ID:
         logger.warning("Admin bot not initialized, alert not sent")
@@ -36,7 +36,7 @@ async def startup():
     await admin_bot.set_my_commands([
         BotCommand(command="health", description="Проверка состояния"),
         BotCommand(command="errors", description="Последние ошибки"),
-        BotCommand(command="broadcast", description="Рассылка текста (reply на сообщение)"),
+        BotCommand(command="broadcast", description="Рассылка текста или медиа (reply на сообщение)"),
     ])
     logger.info("Admin bot started")
 
@@ -52,6 +52,7 @@ async def shutdown():
 
 dp = Dispatcher()
 
+# ---------- Команды ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer("🛡️ Админ-бот 96VPN. Доступные команды:\n/health\n/errors\n/broadcast (reply на сообщение)")
@@ -86,23 +87,58 @@ async def cmd_errors(message: types.Message):
 
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message):
-    # Проверка прав администратора
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
 
-    # Должен быть ответ на сообщение
     if not message.reply_to_message:
         await message.answer("❗ Ответьте на сообщение, которое нужно разослать, и пришлите /broadcast.")
         return
 
-    # Извлекаем текст из сообщения, на которое ответили
-    text_to_send = message.reply_to_message.text or message.reply_to_message.caption
-    if not text_to_send:
-        await message.answer("❗ В отвечаемом сообщении нет текста. Напишите текст и ответьте на него.")
+    reply = message.reply_to_message
+    text_to_send = reply.text or reply.caption
+
+    # Определяем тип медиа и получаем file_id (для скачивания админ-ботом)
+    media_type = None
+    file_id = None
+    filename = "file"
+    if reply.photo:
+        media_type = "photo"
+        file_id = reply.photo[-1].file_id
+        filename = "image.jpg"
+    elif reply.video:
+        media_type = "video"
+        file_id = reply.video.file_id
+        filename = "video.mp4"
+    elif reply.animation:
+        media_type = "animation"
+        file_id = reply.animation.file_id
+        filename = "animation.gif"
+    elif reply.document:
+        media_type = "document"
+        file_id = reply.document.file_id
+        # Если есть имя файла, используем его
+        if reply.document.file_name:
+            filename = reply.document.file_name
+
+    # Если нет ни медиа, ни текста
+    if not media_type and not text_to_send:
+        await message.answer("❗ В отвечаемом сообщении нет ни текста, ни медиа.")
         return
 
-    # Получаем список пользователей, которые запускали основного бота
+    # Скачиваем медиа в память один раз
+    media_bytes = None
+    if media_type:
+        try:
+            buf = BytesIO()
+            await admin_bot.download(file_id, destination=buf)
+            media_bytes = buf.getvalue()
+        except Exception as e:
+            logger.error(f"Failed to download media: {e}")
+            await message.answer("❌ Не удалось скачать файл для рассылки.")
+            return
+
+    # Список получателей
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User.user_id).where(
@@ -116,13 +152,25 @@ async def cmd_broadcast(message: types.Message):
         await message.answer("Нет клиентов для рассылки.")
         return
 
-    await message.answer(f"Рассылка текста на {len(user_ids)} клиентов началась...")
+    await message.answer(f"Рассылка на {len(user_ids)} клиентов началась...")
     success = 0
     fail = 0
 
     for uid in user_ids:
         try:
-            await main_bot.send_message(uid, text_to_send)
+            if media_type:
+                # Создаём новый InputFile из байтов для каждого клиента
+                input_file = BufferedInputFile(media_bytes, filename=filename)
+                if media_type == "photo":
+                    await main_bot.send_photo(uid, input_file, caption=text_to_send)
+                elif media_type == "video":
+                    await main_bot.send_video(uid, input_file, caption=text_to_send)
+                elif media_type == "animation":
+                    await main_bot.send_animation(uid, input_file, caption=text_to_send)
+                elif media_type == "document":
+                    await main_bot.send_document(uid, input_file, caption=text_to_send)
+            else:
+                await main_bot.send_message(uid, text_to_send)
             success += 1
             await asyncio.sleep(0.05)
         except Exception as e:
