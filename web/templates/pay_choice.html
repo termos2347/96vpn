@@ -21,7 +21,7 @@
           <li class="flex gap-2 items-center"><i class="fas fa-check text-green-400"></i> Еженедельные новые промпты</li>
           <li class="flex gap-2 items-center"><i class="fas fa-check text-green-400"></i> Техподдержка</li>
         </ul>
-        <button data-plan="monthly" data-user-id="{{ user_id }}" class="choose-plan button-primary text-white px-6 py-3 rounded-lg w-full font-bold">
+        <button data-plan="monthly" class="choose-plan button-primary text-white px-6 py-3 rounded-lg w-full font-bold">
           Выбрать
         </button>
       </div>
@@ -45,7 +45,7 @@
           <li class="flex gap-2 items-center"><i class="fas fa-check text-green-400"></i> Приоритетная поддержка</li>
           <li class="flex gap-2 items-center"><i class="fas fa-check text-green-400"></i> Закрытый канал сообщества</li>
         </ul>
-        <button data-plan="quarterly" data-user-id="{{ user_id }}" class="choose-plan button-primary text-white px-6 py-3 rounded-lg w-full font-bold">
+        <button data-plan="quarterly" class="choose-plan button-primary text-white px-6 py-3 rounded-lg w-full font-bold">
           Выбрать
         </button>
       </div>
@@ -58,11 +58,10 @@
   document.querySelectorAll('.choose-plan').forEach(btn => {
     btn.addEventListener('click', async function() {
       const plan = this.dataset.plan;
-      const userId = this.dataset.userId;
       const messageDiv = document.getElementById('paymentMessage');
       messageDiv.innerHTML = '<span class="text-yellow-400">Создание платежа...</span>';
       try {
-        const response = await fetch(`/api/payment/create?user_id=${userId}&plan=${plan}`, {
+        const response = await fetch(`/api/payment/create?plan=${plan}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' }
         });

@@ -7,10 +7,9 @@ from sqlalchemy import select
 from passlib.context import CryptContext
 from db.models import User
 from config import settings
-from passlib.context import CryptContext
 
 logger = logging.getLogger(__name__)
-pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class AuthService:
     """Сервис аутентификации и управления пользователями"""

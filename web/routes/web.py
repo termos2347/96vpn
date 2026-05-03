@@ -109,15 +109,13 @@ async def prompts_page(request: Request, current_user: User = Depends(get_curren
     )
 
 @router.get("/pay-choice", response_class=HTMLResponse)
-async def pay_choice(request: Request, user_id: int, db: Session = Depends(get_db),
+async def pay_choice(request: Request, db: Session = Depends(get_db),
                      current_user: User = Depends(get_current_user_optional)):
-    user = await AuthService.get_user_by_id(db, user_id)
-    if not user:
-        return HTMLResponse("User not found", status_code=404)
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=302)
     template = jinja_env.get_template("pay_choice.html")
     return template.render(
         site_name=settings.APP_NAME,
-        user_id=user_id,
         monthly_price=int(settings.MONTHLY_PRICE),
         quarterly_price=int(settings.QUARTERLY_PRICE),
         user=current_user

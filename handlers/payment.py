@@ -1,6 +1,8 @@
 import logging
+import html  # Добавлено для экранирования ссылок
 from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
+from aiogram.enums import ParseMode
 from aiogram.types import LabeledPrice, PreCheckoutQuery
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
 from .keyboards import (
@@ -9,28 +11,27 @@ from .keyboards import (
 )
 from config import VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
 from services.vpn_provider import XUIVPNProvider
+from services.vpn_provider import vpn_provider
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, validate_currency, validate_days, ValidationError
 import jwt
 
 logger = logging.getLogger(__name__)
-vpn_provider = XUIVPNProvider()
 
 router = Router()
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 def create_payment_token(telegram_id: int, product_type: str, period: str, currency: str, amount: float) -> str:
-    now = datetime.now(timezone.utc)                # ← ВОТ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
-    exp = now + timedelta(hours=2)                  # 2 часа
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(hours=2)
     payload = {
         "telegram_id": telegram_id,
         "product_type": product_type,
         "period": period,
         "currency": currency,
         "amount": amount,
-        "exp": exp.timestamp()
+        "exp": int(exp.timestamp())
     }
-    logger.info(f"Token created at {now.isoformat()}, exp at {exp.isoformat()} (timestamp: {exp.timestamp()})")
     return jwt.encode(payload, INTERNAL_API_SECRET, algorithm="HS256")
 
 # ---------- VPN Payment Handlers ----------
@@ -38,7 +39,6 @@ def create_payment_token(telegram_id: int, product_type: str, period: str, curre
 @router.message(F.text == "💳 Оплатить VPN")
 @rate_limit(max_per_minute=10)
 async def pay_vpn(message: types.Message):
-    """Показывает выбор валют для оплаты VPN."""
     try:
         validate_user_id(message.from_user.id)
         await message.answer("💎 Выберите валюту для оплаты VPN:", reply_markup=vpn_currency_keyboard())
@@ -50,12 +50,10 @@ async def pay_vpn(message: types.Message):
 @router.callback_query(F.data.startswith("vpn_currency_"))
 @rate_limit(max_per_minute=10)
 async def vpn_choose_period(callback: types.CallbackQuery):
-    """Показывает выбор периода подписки."""
     try:
         validate_user_id(callback.from_user.id)
         currency = callback.data.split("_")[-1]
         validate_currency(currency)
-
         await callback.message.edit_text(
             "📅 Выберите период подписки:",
             reply_markup=vpn_period_keyboard(currency)
@@ -69,7 +67,6 @@ async def vpn_choose_period(callback: types.CallbackQuery):
 @router.callback_query(F.data == "vpn_back_to_currency")
 @rate_limit(max_per_minute=10)
 async def vpn_back_to_currency(callback: types.CallbackQuery):
-    """Возврат к выбору валюты."""
     try:
         validate_user_id(callback.from_user.id)
         await callback.message.edit_text(
@@ -85,24 +82,29 @@ async def vpn_back_to_currency(callback: types.CallbackQuery):
 @router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|usdt)$"))
 @rate_limit(max_per_minute=5)
 async def vpn_payment_link(callback: types.CallbackQuery):
-    """Генерирует ссылку на сайт для оплаты через ЮKassa (RUB/USDT)."""
     _, period, currency = callback.data.split("_")
     telegram_id = callback.from_user.id
-    days = PERIOD_DAYS[period]
     price = VPN_PRICES[currency][period]
 
     try:
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
+        # Экранируем токен, чтобы спецсимволы JWT не ломали HTML
+        payment_url = f"{SITE_URL}/pay/vpn?token={token}"
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
-    payment_url = f"{SITE_URL}/pay/vpn?token={token}"
+    await callback.message.delete()
 
-    await callback.message.edit_text(
-        f"💳 Для оплаты перейдите по ссылке:\n{payment_url}\n\n"
-        "Ссылка действительна 30 минут.",
+    msg = (
+        f"💳 Для оплаты VPN <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
+        f"<i>Ссылка действительна 2 часа.</i>"
+    )
+    
+    await callback.message.answer(
+        text=msg,
+        parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
     await callback.answer()
@@ -147,31 +149,32 @@ async def bypass_back_to_currency(callback: types.CallbackQuery):
 @router.callback_query(F.data.regexp(r"^bypass_(1m|3m)_(rub|usdt)$"))
 @rate_limit(max_per_minute=5)
 async def bypass_payment_link(callback: types.CallbackQuery):
-    """Генерирует ссылку на сайт для оплаты обхода DPI."""
     user_id = callback.from_user.id
     if not await is_vpn_active(user_id):
-        await callback.message.edit_text(
-            "❌ Ваша VPN-подписка не активна. Оплата обхода невозможна.\n"
-            "Оплатите VPN в разделе 💳 Оплатить VPN."
-        )
-        await callback.answer()
+        await callback.answer("❌ Сначала оплатите основной VPN", show_alert=True)
         return
 
     _, period, currency = callback.data.split("_")
-    days = PERIOD_DAYS[period]
     price = BYPASS_PRICES[currency][period]
 
     try:
         token = create_payment_token(user_id, "bypass", period, currency, price)
+        payment_url = f"{SITE_URL}/pay/vpn?token={token}"
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
-    payment_url = f"{SITE_URL}/pay/vpn?token={token}"   # можно вести на ту же страницу, шаблон универсальный
-    await callback.message.edit_text(
-        f"💳 Для оплаты обхода перейдите по ссылке:\n{payment_url}\n\n"
-        "Ссылка действительна 30 минут.",
+    await callback.message.delete()
+    
+    msg = (
+        f"💳 Для оплаты обхода <b><a href='{payment_url}'>нажмите здесь</a></b>\n"
+        f"<i>Ссылка действительна 2 часа.</i>"
+    )
+    
+    await callback.message.answer(
+        text=msg,
+        parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
     await callback.answer()

@@ -15,10 +15,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Импорты бота
-from config import TOKEN, PROXY_URL
+from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
 from handlers import router
 from handlers.common import setup_bot_commands
-from handlers.subscription import vpn_provider
 from services.scheduler import start_scheduler
 from db.base import init_db, engine
 from utils.logger import setup_logger
@@ -26,6 +25,12 @@ from internal_api import create_internal_app
 
 # Импорты веб-части
 from web.app import app as fastapi_app
+
+# Глобальный провайдер VPN (используется и в боте, и в вебе)
+from services.vpn_provider import vpn_provider
+
+# Админ-бот
+from admin import start_polling as start_admin_polling, shutdown as shutdown_admin_bot
 
 async def main():
     setup_logger()
@@ -39,6 +44,13 @@ async def main():
     except Exception as e:
         logger.error(f"Database init failed: {e}")
         sys.exit(1)
+
+    # Предварительная аутентификация с VPN‑панелью
+    try:
+        await vpn_provider.login()
+        logger.info("VPN provider authenticated")
+    except Exception as e:
+        logger.warning(f"VPN provider pre-auth failed (will retry later): {e}")
 
     # --- Настройка бота ---
     session = None
@@ -80,41 +92,44 @@ async def main():
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")
 
+    # --- Запуск админ-бота ---
+    if ADMIN_BOT_TOKEN:
+        admin_task = asyncio.create_task(start_admin_polling())
+        logger.info("Admin bot polling started")
+    else:
+        logger.warning("ADMIN_BOT_TOKEN not set, admin bot disabled")
+
     # --- Graceful shutdown ---
     loop = asyncio.get_running_loop()
 
     async def shutdown():
         """Корректное завершение всех сервисов."""
         logger.info("Shutting down…")
-        # Останавливаем поллинг (если ещё активен)
         try:
             await dp.stop_polling()
         except Exception:
             pass
 
-        # Закрываем сессию бота и прокси
         if bot.session:
             await bot.session.close()
         if session:
             await session.close()
 
-        # Закрываем VPN‑провайдер
         await vpn_provider.close()
 
-        # Останавливаем веб‑сервер
+        # Остановка админ-бота
+        if ADMIN_BOT_TOKEN:
+            await shutdown_admin_bot()
+
         server.should_exit = True
         await web_task
 
-        # Останавливаем внутренний API
         await internal_runner.cleanup()
-
-        # Закрываем движок БД
         await engine.dispose()
         logger.info("Shutdown complete.")
 
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, exiting…")
-        # Планируем задачу остановки
         asyncio.create_task(shutdown())
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -142,7 +157,6 @@ async def main():
                 logger.error("Max restarts reached")
                 break
 
-    # Если вышли из цикла (например, после сигнала), вызываем shutdown
     await shutdown()
 
 if __name__ == "__main__":

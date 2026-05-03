@@ -25,7 +25,8 @@ yookassa>=3.3.0
 
 # ================== Безопасность ==================
 pyjwt>=2.0.0
-passlib[bcrypt]>=1.7.4
+passlib>=1.7.4
+bcrypt==3.2.2
 cryptography>=41.0.0
 python-jose[cryptography]>=3.3.0
 
