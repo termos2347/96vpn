@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 from services.vpn_provider import XUIVPNProvider
+from services.vpn_provider import vpn_provider
 from db.crud import set_vpn_client_id, get_or_create_user
 from datetime import datetime, timedelta
 
@@ -8,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class VPNManager:
     def __init__(self):
-        self.provider = XUIVPNProvider()
+        self.provider = vpn_provider
 
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
         try:

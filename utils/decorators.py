@@ -34,7 +34,7 @@ def rate_limit(max_per_minute: int = 5):
                 return await func(message_or_callback, *args, **kwargs)
             
             now = datetime.now()
-            cutoff_time = now - timedelta(minutes=1)
+            cutoff_time = now - timedelta(seconds=1)
             
             # Чистим старые записи
             _user_actions[user_id] = [
@@ -43,7 +43,7 @@ def rate_limit(max_per_minute: int = 5):
             
             # Проверяем лимит
             if len(_user_actions[user_id]) >= max_per_minute:
-                logger.warning(f"Rate limit exceeded for user {user_id} {user_info}")
+                logger.info(f"Rate limit exceeded for user {user_id} {user_info}")
                 if isinstance(message_or_callback, Message):
                     await message_or_callback.answer(
                         "⏱️ Слишком много запросов. Подождите немного..."

@@ -5,10 +5,8 @@ from db.base import AsyncSessionLocal
 from db.models import User
 from db.crud import set_vpn_client_id
 from services.vpn_provider import XUIVPNProvider
+from services.vpn_provider import vpn_provider
 from sqlalchemy import select, update
-
-logger = logging.getLogger(__name__)
-vpn_provider = XUIVPNProvider()
 
 import asyncio
 import logging
@@ -20,7 +18,6 @@ from services.vpn_provider import XUIVPNProvider
 from sqlalchemy import select, update
 
 logger = logging.getLogger(__name__)
-vpn_provider = XUIVPNProvider()
 
 async def check_expired_subscriptions(bot):
     """Проверяет истёкшие подписки и отзывает ключи с retry."""

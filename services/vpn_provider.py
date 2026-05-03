@@ -55,20 +55,27 @@ class XUIVPNProvider:
 
     async def _retry_request(self, method: str, url: str, **kwargs) -> dict | None:
         session = await self._get_session()
-        for attempt in range(self.MAX_RETRIES):
+        attempt = 0
+        while attempt < self.MAX_RETRIES:
             try:
                 method_func = getattr(session, method.lower())
                 async with method_func(url, **kwargs) as resp:
                     if resp.status == 200:
                         try:
                             return await resp.json()
-                        except:
+                        except Exception:
                             logger.warning(f"Failed to parse JSON from {url}")
                             return None
                     elif resp.status == 401:
+                        # Сессия истекла – пробуем перелогиниться и повторяем запрос
                         self._is_authenticated = False
-                        logger.warning(f"Authentication failed for {url}")
-                        return None
+                        if await self.login():
+                            logger.info("Re-authenticated after 401, retrying request")
+                            # Не увеличиваем attempt, чтобы не расходовать попытки
+                            continue
+                        else:
+                            logger.error("Re-authentication failed after 401")
+                            return None
                     else:
                         logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except asyncio.TimeoutError:
@@ -78,8 +85,9 @@ class XUIVPNProvider:
             except Exception as e:
                 logger.error(f"Unexpected error on {url}: {e}")
 
-            if attempt < self.MAX_RETRIES - 1:
-                delay = self.RETRY_DELAY * (2 ** attempt)
+            attempt += 1
+            if attempt < self.MAX_RETRIES:
+                delay = self.RETRY_DELAY * (2 ** (attempt - 1))
                 await asyncio.sleep(delay)
 
         logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
@@ -201,3 +209,6 @@ class XUIVPNProvider:
                 continue
         logger.error(f"Failed to revoke client {client_uuid}")
         return False
+    
+# Глобальный экземпляр провайдера (использовать во всём проекте)
+vpn_provider = XUIVPNProvider()

@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, staticfiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from web.routes import web, auth, payment, prompts
 from config import settings
@@ -39,7 +40,7 @@ app.add_middleware(
 # Статические файлы
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
-    app.mount("/static", staticfiles.StaticFiles(directory=str(static_dir)), name="static")
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Подключаем маршруты
 app.include_router(web.router)

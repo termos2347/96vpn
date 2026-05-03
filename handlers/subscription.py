@@ -4,10 +4,10 @@ from db.crud import is_vpn_active, get_vpn_client_id, set_vpn_client_id
 from services.vpn_provider import XUIVPNProvider
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
+from services.vpn_provider import vpn_provider
 
 logger = logging.getLogger(__name__)
 router = Router()
-vpn_provider = XUIVPNProvider()
 
 @router.message(F.text == "🚀 Подключить VPN")
 @rate_limit(max_per_minute=10)

@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     # ---------- Telegram Bot ----------
     BOT_TOKEN: str  # обязательное
+    
+    # ---------- Admin ----------
+    ADMIN_BOT_TOKEN: str = ""
+    ADMIN_CHAT_ID: str = ""
 
     # ---------- Proxy (опционально) ----------
     PROXY_URL: Optional[str] = None
@@ -97,3 +101,5 @@ BYPASS_PRICES = {
 # Внутренний API
 INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 SITE_URL = settings.SITE_URL
+ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
+ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID

@@ -61,3 +61,19 @@ async def test_vpn_manager_revoke_key_no_client():
         result = await manager.revoke_key(123)
 
         assert result is True  # Should return True for no-op
+        
+@pytest.mark.asyncio
+async def test_vpn_provider_create_client():
+    from services.vpn_provider import XUIVPNProvider
+    provider = XUIVPNProvider()
+    # Мокаем _retry_request
+    async def mock_retry(*args, **kwargs):
+        return {"success": True}
+    provider._retry_request = mock_retry
+    # Мокаем login
+    provider._is_authenticated = True
+    
+    result = await provider.create_client("test@example.com")
+    assert result is not None
+    assert "uuid" in result
+    assert "subId" in result

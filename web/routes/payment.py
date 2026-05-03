@@ -15,26 +15,6 @@ from db.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payment", tags=["payment"])
 
-def verify_yookassa_signature(request: Request, body: bytes) -> bool:
-    import hashlib
-    import hmac
-    signature = request.headers.get("X-Yookassa-Signature", "")
-    if not signature:
-        logger.warning("Missing X-Yookassa-Signature header")
-        return False
-
-    secret = settings.YOOKASSA_API_KEY
-    if not secret:
-        logger.error("YOOKASSA_API_KEY not set")
-        return False
-
-    expected = hmac.new(
-        secret.encode("utf-8"),
-        body,
-        hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(signature, expected)
-
 # ---------- Инициация VPN-оплаты из бота ----------
 @router.post("/initiate-vpn")
 async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(get_db)):
@@ -93,13 +73,13 @@ async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
 # ---------- Прямая оплата (веб-пользователи) ----------
 @router.post("/create")
 async def create_payment(
-    user_id: int,
-    plan: str = Query(..., description="monthly или quarterly"),
+    plan: str = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_optional)
 ):
-    if not current_user or current_user.id != user_id:
+    if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = current_user.id
     if plan not in ["monthly", "quarterly"]:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
@@ -123,11 +103,7 @@ async def get_payment_status(payment_id: str):
 
 @router.post("/webhook/yookassa")
 async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
-    body = await request.body()
-    if not verify_yookassa_signature(request, body):
-        logger.warning("Invalid webhook signature, rejecting")
-        return {"status": "invalid signature"}
-
+    """Обработка уведомлений от ЮKassa (без дополнительной проверки)."""
     try:
         webhook_data = await request.json()
         success = await yookassa_service.process_webhook(webhook_data, db)
