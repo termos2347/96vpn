@@ -1,12 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Оплата успешна - {{ site_name }}{% endblock %}
-{% block content %}
-<div class="text-center mt-20">
-    <h1 class="text-4xl font-bold gradient-text mb-4">Платёж выполнен</h1>
-    <p class="text-xl text-gray-400 mb-8">Проверяем статус и активируем подписку...</p>
-    <div id="status-message"></div>
-</div>
+
+{% block extra_css %}
+<style>
+    /* Спиннер из трёх прыгающих точек */
+    .dot-spinner {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        height: 60px;
+    }
+    .dot-spinner > div {
+        width: 10px;
+        height: 10px;
+        background: #a78bfa;            /* фиолетовый оттенок, как в дизайне */
+        border-radius: 50%;
+        animation: bounce 1.2s infinite ease-in-out both;
+    }
+    .dot-spinner > div:nth-child(1) { animation-delay: -0.32s; }
+    .dot-spinner > div:nth-child(2) { animation-delay: -0.16s; }
+    .dot-spinner > div:nth-child(3) { animation-delay: 0s; }
+
+    @keyframes bounce {
+        0%, 80%, 100% {
+            transform: translateY(0);
+        }
+        40% {
+            transform: translateY(-20px);
+        }
+    }
+</style>
 {% endblock %}
+
+{% block content %}
+<main class="min-h-screen flex items-center justify-center px-6">
+    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow text-center">
+        <h1 class="text-3xl font-bold gradient-text mb-6">Платёж выполнен</h1>
+        <div id="status-area">
+            <p class="text-gray-400 mb-6">Проверяем статус и активируем подписку...</p>
+            <div class="dot-spinner">
+                <div></div>
+                <div></div>
+                <div></div>
+            </div>
+        </div>
+    </div>
+</main>
+{% endblock %}
+
 {% block extra_js %}
 <script>
 (async () => {
@@ -15,25 +57,27 @@
         const parts = value.split(`; ${name}=`);
         if (parts.length === 2) return parts.pop().split(';').shift();
     }
-    // Берём payment_id из URL (наш параметр или orderId от ЮKassa) или из куки
     const urlParams = new URLSearchParams(window.location.search);
     let paymentId = urlParams.get('payment_id') || urlParams.get('orderId') || getCookie('vpn_payment_id');
+    const statusArea = document.getElementById('status-area');
+
     if (!paymentId) {
-        document.getElementById('status-message').innerHTML = '<p class="text-red-400">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>';
+        statusArea.innerHTML = '<p class="text-red-400 text-xl">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>';
         return;
     }
+
     try {
         const resp = await fetch(`/api/payment/check-vpn-payment?payment_id=${encodeURIComponent(paymentId)}`);
         const data = await resp.json();
         if (data.activated) {
-            document.getElementById('status-message').innerHTML = '<p class="text-green-400 text-2xl font-bold">Подписка активирована! Проверьте Telegram.</p>';
+            statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p>';
         } else {
-            document.getElementById('status-message').innerHTML = '<p class="text-yellow-400">Подписка уже была активирована или произошла ошибка. Обратитесь в поддержку.</p>';
+            statusArea.innerHTML = '<p class="text-yellow-400 text-xl">⚠️ Подписка уже была активирована ранее или произошла ошибка. Если вы не получили доступ, обратитесь в поддержку.</p>';
         }
         // Удаляем куку после проверки
         document.cookie = "vpn_payment_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     } catch(e) {
-        document.getElementById('status-message').innerHTML = '<p class="text-red-400">Ошибка связи с сервером.</p>';
+        statusArea.innerHTML = '<p class="text-red-400 text-xl">Ошибка связи с сервером. Попробуйте позже.</p>';
     }
 })();
 </script>
