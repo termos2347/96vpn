@@ -36,7 +36,7 @@ async def startup():
     await admin_bot.set_my_commands([
         BotCommand(command="health", description="Проверка состояния"),
         BotCommand(command="errors", description="Последние ошибки"),
-        BotCommand(command="sendall", description="Рассылка сообщения всем клиентам"),
+        BotCommand(command="broadcast", description="Рассылка текста (reply на сообщение)"),
     ])
     logger.info("Admin bot started")
 
@@ -54,7 +54,7 @@ dp = Dispatcher()
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer("🛡️ Админ-бот 96VPN. Доступные команды:\n/health\n/errors\n/sendall <текст>")
+    await message.answer("🛡️ Админ-бот 96VPN. Доступные команды:\n/health\n/errors\n/broadcast (reply на сообщение)")
 
 @dp.message(Command("health"))
 async def cmd_health(message: types.Message):
@@ -84,22 +84,25 @@ async def cmd_errors(message: types.Message):
         text += f"{i}. {err}\n"
     await message.answer(text)
 
-@dp.message(Command("sendall"))
-async def cmd_sendall(message: types.Message):
+@dp.message(Command("broadcast"))
+async def cmd_broadcast(message: types.Message):
     # Проверка прав администратора
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
 
-    # Извлекаем текст после команды
-    raw = message.text or ""
-    parts = raw.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("❗ Укажите текст сообщения: /sendall <текст>")
+    # Должен быть ответ на сообщение
+    if not message.reply_to_message:
+        await message.answer("❗ Ответьте на сообщение, которое нужно разослать, и пришлите /broadcast.")
         return
-    text_to_send = parts[1]
 
-    # Получаем список всех пользователей, которые запускали основного бота
+    # Извлекаем текст из сообщения, на которое ответили
+    text_to_send = message.reply_to_message.text or message.reply_to_message.caption
+    if not text_to_send:
+        await message.answer("❗ В отвечаемом сообщении нет текста. Напишите текст и ответьте на него.")
+        return
+
+    # Получаем список пользователей, которые запускали основного бота
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User.user_id).where(
@@ -113,7 +116,7 @@ async def cmd_sendall(message: types.Message):
         await message.answer("Нет клиентов для рассылки.")
         return
 
-    await message.answer(f"Рассылка '{text_to_send}' на {len(user_ids)} клиентов началась...")
+    await message.answer(f"Рассылка текста на {len(user_ids)} клиентов началась...")
     success = 0
     fail = 0
 
@@ -121,9 +124,9 @@ async def cmd_sendall(message: types.Message):
         try:
             await main_bot.send_message(uid, text_to_send)
             success += 1
-            await asyncio.sleep(0.05)   # щадящий интервал
+            await asyncio.sleep(0.05)
         except Exception as e:
-            logger.info(f"Sendall could not deliver to {uid}: {e}")
+            logger.info(f"Broadcast could not deliver to {uid}: {e}")
             fail += 1
 
     await message.answer(f"✅ Рассылка завершена: отправлено {success}, ошибок {fail}.")
