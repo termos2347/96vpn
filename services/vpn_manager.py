@@ -1,9 +1,9 @@
 import logging
 from typing import Optional
-from services.vpn_provider import XUIVPNProvider
 from services.vpn_provider import vpn_provider
 from db.crud import set_vpn_client_id, get_or_create_user
 from datetime import datetime, timedelta
+from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +18,8 @@ class VPNManager:
                 logger.error(f"Не удалось получить пользователя {user_id}")
                 return None
 
-            # Постоянный email для пользователя
             email = f"user_{user_id}@96vpn.bot"
 
-            # Если у пользователя уже есть client_id, попробуем получить существующую ссылку
             if user.vpn_client_id:
                 existing = await self.provider.get_client_by_email(email)
                 if existing and existing.get("subId"):
@@ -29,10 +27,10 @@ class VPNManager:
                     logger.info(f"Найден существующий ключ для user_id={user_id}: {sub_link}")
                     return sub_link
 
-            # Создаём нового клиента
             client_data = await self.provider.create_client(email)
             if not client_data:
                 logger.error(f"Не удалось создать клиента для user_id={user_id}")
+                await send_admin_alert(f"Не удалось создать VPN-ключ для user_id={user_id}")
                 return None
 
             client_uuid = client_data['uuid']
@@ -45,48 +43,44 @@ class VPNManager:
 
         except Exception as e:
             logger.error(f"Ошибка при создании ключа для user_id={user_id}: {e}", exc_info=True)
+            await send_admin_alert(f"Ошибка создания VPN-ключа для user_id={user_id}: {e}")
             return None
 
     async def revoke_key(self, user_id: int) -> bool:
-        """Отзывает VPN-ключ пользователя."""
         try:
             user = await get_or_create_user(user_id)
             if not user or not user.vpn_client_id:
                 logger.warning(f"Пользователь {user_id} не имеет активного ключа")
-                return True  # Нечего отзывать
+                return True
 
             success = await self.provider.revoke_client(user.vpn_client_id)
             if success:
-                # Очищаем client_id в БД
                 await set_vpn_client_id(user_id, None)
                 logger.info(f"Ключ отозван для user_id={user_id}")
             else:
                 logger.error(f"Не удалось отозвать ключ для user_id={user_id}")
+                await send_admin_alert(f"Не удалось отозвать VPN-ключ {user.vpn_client_id} для user_id={user_id}")
             return success
 
         except Exception as e:
             logger.error(f"Ошибка при отзыве ключа для user_id={user_id}: {e}", exc_info=True)
+            await send_admin_alert(f"Ошибка отзыва VPN-ключа для user_id={user_id}: {e}")
             return False
 
     async def get_subscription_link(self, user_id: int) -> Optional[str]:
-        """Возвращает ссылку подписки для пользователя."""
         try:
             user = await get_or_create_user(user_id)
             if not user or not user.vpn_client_id:
                 return None
-
-            # Ищем клиента по email (user_id)
             email = f"user_{user_id}"
             client_data = await self.provider.get_client_by_email(email)
             if client_data:
                 sub_link = self.provider.get_subscription_link(client_data['subId'])
                 return sub_link
             return None
-
         except Exception as e:
             logger.error(f"Ошибка при получении ссылки подписки для user_id={user_id}: {e}", exc_info=True)
             return None
 
     async def close(self):
-        """Закрывает соединения провайдера."""
         await self.provider.close()
