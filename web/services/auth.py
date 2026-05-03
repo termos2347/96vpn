@@ -1,5 +1,5 @@
-# web/services/auth.py
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -66,7 +66,32 @@ class AuthService:
     async def get_user_by_telegram(db: Session, telegram_id: int) -> Optional[User]:
         stmt = select(User).where(User.user_id == telegram_id)
         return db.execute(stmt).scalars().first()
+    
+    @staticmethod
+    async def create_reset_token(db: Session, email: str) -> Optional[str]:
+        """Создаёт токен для сброса пароля и возвращает его (или None)."""
+        stmt = select(User).where(User.email == email)
+        user = db.execute(stmt).scalars().first()
+        if not user:
+            return None
+        token = secrets.token_urlsafe(32)
+        user.reset_token = token
+        user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
+        db.commit()
+        return token
 
+    @staticmethod
+    async def reset_password(db: Session, token: str, new_password: str) -> bool:
+        """Сбрасывает пароль, если токен валиден."""
+        stmt = select(User).where(User.reset_token == token)
+        user = db.execute(stmt).scalars().first()
+        if not user or user.reset_token_expires is None or user.reset_token_expires < datetime.utcnow():
+            return False
+        user.hashed_password = pwd_context.hash(new_password)
+        user.reset_token = None
+        user.reset_token_expires = None
+        db.commit()
+        return True
 
 class SubscriptionService:
     """Управление подписками"""

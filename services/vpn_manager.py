@@ -77,4 +77,5 @@ class VPNManager:
             return None
 
     async def close(self):
-        await self.provider.close()
+        # Не закрываем глобальный провайдер, сессия управляется отдельно
+        pass

@@ -143,7 +143,6 @@ class YookassaService:
             period = payload["period"]
         except Exception as e:
             logger.error(f"Token decode failed: {e}")
-            await send_admin_alert(f"Ошибка декодирования токена бота в вебхуке: {e}")
             return False
 
         async with aiohttp.ClientSession() as session:
@@ -160,27 +159,36 @@ class YookassaService:
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
                     if resp.status == 200:
-                        logger.info(f"Bot activation succeeded for {telegram_id}")
-                        return True
+                        data = await resp.json()
+                        # Принимаем и "ok", и "already_activated" как успех
+                        if data.get("status") in ("ok", "already_activated"):
+                            logger.info(f"Bot activation succeeded for {telegram_id}")
+                            return True
+                        else:
+                            logger.error(f"Bot activation returned {resp.status} with unexpected status: {data}")
+                            return False
                     else:
                         logger.error(f"Bot activation returned {resp.status}")
-                        await send_admin_alert(f"Ошибка активации подписки бота: telegram_id={telegram_id}, payment_id={payment_id}, status={resp.status}")
                         return False
             except Exception as e:
                 logger.error(f"Failed to call bot activation API: {e}")
-                await send_admin_alert(f"Не удалось вызвать API активации бота: {e}")
                 return False
 
     async def check_and_activate(self, payment_id: str, db: Session) -> bool:
+        """Проверяет статус платежа и активирует подписку (для страницы успеха)."""
         try:
             payment = Payment.find_one(payment_id)
             if payment.status == 'succeeded':
                 metadata = payment.metadata
                 if metadata and metadata.get('source') == 'bot':
                     return await self._activate_bot_subscription(metadata, payment_id)
+                # Для веб-платежей просто считаем успехом
+                return True
             return False
         except Exception as e:
             logger.error(f"Check and activate error: {e}")
             return False
+
+    
 
 yookassa_service = YookassaService()
