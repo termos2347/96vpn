@@ -2,107 +2,161 @@
 
 {% block title %}{{ site_name }} - Промпты{% endblock %}
 
-{% block content %}
-<main class="min-h-screen px-6 py-20">
-    <div class="max-w-6xl mx-auto">
-        <h1 class="text-4xl font-bold mb-4 gradient-text">База профессиональных промптов</h1>
-        <p class="text-gray-400 mb-12">Выберите промпт для просмотра его полного содержимого. Некоторые промпты доступны бесплатно!</p>
-        
-        <!-- Фильтры -->
-        <div class="glass-effect p-4 rounded-lg mb-8 flex gap-4 flex-wrap">
-            <input type="text" id="searchInput" placeholder="Поиск промптов..." class="bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white flex-1 focus:outline-none focus:border-purple-500">
-            <select id="categoryFilter" class="bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500">
-                <option value="">Все категории</option>
-                {% for category in categories %}
-                <option value="{{ category }}">{{ category }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        
-        <!-- Сетка категорий -->
-        <div id="categoriesGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {% for category in categories %}
-            <div class="glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToCategory('{{ category }}')">
-                <h3 class="text-xl font-bold">{{ category }}</h3>
-                <p class="text-gray-400 text-sm">Выберите промпты из этой категории.</p>
-            </div>
-            {% endfor %}
-        </div>
+{% block extra_css %}
+<style>
+    .sidebar {
+        min-width: 220px;
+        max-width: 280px;
+    }
+    .category-item {
+        transition: all 0.2s;
+    }
+    .category-item:hover, .category-item.active {
+        background: rgba(102, 126, 234, 0.2);
+        border-left: 3px solid #667eea;
+        padding-left: 1rem;
+    }
+    .prompt-card {
+        cursor: pointer;
+    }
+</style>
+{% endblock %}
 
-        <!-- Сетка промптов (скрыта по умолчанию, показывается после фильтрации) -->
-        <div id="promptsGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-6" style="display: none;">
-            {% for prompt in prompts %}
-            <div class="prompt-card glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" data-id="{{ prompt.id }}" data-title="{{ prompt.title }}" data-description="{{ prompt.description }}" data-category="{{ prompt.category }}" data-usage="{{ prompt.usage_count }}" data-rating="{{ prompt.rating }}" data-free="{{ prompt.get('is_free', False)|lower }}">
-                <div class="mb-4">
-                    <span class="inline-block bg-purple-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-purple-300 mb-3">{{ prompt.category }}</span>
-                    {% if prompt.get('is_free', False) %}
-                        <span class="inline-block bg-green-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-green-300 ml-2">Бесплатно</span>
-                    {% endif %}
-                    <h3 class="text-xl font-bold">{{ prompt.title }}</h3>
-                </div>
-                <p class="text-gray-400 text-sm mb-4 h-16 overflow-hidden">{{ prompt.description }}</p>
-                <div class="flex justify-between items-center">
-                    <div class="flex gap-2 text-sm text-gray-400">
-                        <span><i class="fas fa-copy"></i> {{ prompt.usage_count }}</span>
-                        <span><i class="fas fa-star text-yellow-400"></i> {{ prompt.rating }}</span>
+{% block content %}
+<main class="min-h-screen px-6 py-10">
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-4xl font-bold mb-6 gradient-text">База профессиональных промптов</h1>
+        
+        <div class="flex gap-6">
+            <!-- Левая колонка: категории -->
+            <div class="sidebar glass-effect rounded-lg p-4 h-fit">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                    <i class="fas fa-folder-open text-purple-400"></i> Категории
+                </h2>
+                <div class="space-y-1">
+                    <div class="category-item rounded px-3 py-2 active" data-category="">
+                        Все категории
                     </div>
-                    <i class="fas fa-arrow-right text-purple-400"></i>
+                    {% for category in categories %}
+                    <div class="category-item rounded px-3 py-2" data-category="{{ category }}">
+                        {{ category }}
+                    </div>
+                    {% endfor %}
+                </div>
+                <!-- Поиск -->
+                <div class="mt-6">
+                    <input type="text" id="searchInput" placeholder="Поиск..." class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500">
                 </div>
             </div>
-            {% endfor %}
+
+            <!-- Правая колонка: промпты -->
+            <div class="flex-1" id="promptsArea">
+                <!-- Здесь будет сетка промптов или детальный просмотр -->
+                <div id="promptsGrid" class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+                <div id="promptDetail" class="hidden"></div>
+            </div>
         </div>
     </div>
 </main>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-const prompts = {{ prompts | tojson }};
+const promptsData = {{ prompts | tojson }};
 const categories = {{ categories | tojson }};
 
-document.getElementById('searchInput').addEventListener('input', filterPrompts);
-document.getElementById('categoryFilter').addEventListener('change', filterPrompts);
+let activeCategory = '';   // '' значит все
+let activeSearch = '';
 
-function filterPrompts() {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const category = document.getElementById('categoryFilter').value;
-    
-    const filtered = prompts.filter(p => {
-        const matchSearch = p.title.toLowerCase().includes(searchTerm) || 
-                           p.description.toLowerCase().includes(searchTerm);
-        const matchCategory = !category || p.category === category;
+// DOM элементы
+const categoryItems = document.querySelectorAll('.category-item');
+const searchInput = document.getElementById('searchInput');
+const promptsGrid = document.getElementById('promptsGrid');
+const promptDetail = document.getElementById('promptDetail');
+
+// Обработчики категорий
+categoryItems.forEach(item => {
+    item.addEventListener('click', function() {
+        categoryItems.forEach(el => el.classList.remove('active'));
+        this.classList.add('active');
+        activeCategory = this.dataset.category;
+        filterAndRender();
+    });
+});
+
+// Поиск
+searchInput.addEventListener('input', function() {
+    activeSearch = this.value.toLowerCase();
+    filterAndRender();
+});
+
+function filterAndRender() {
+    let filtered = promptsData.filter(p => {
+        const matchSearch = p.title.toLowerCase().includes(activeSearch) ||
+                            p.description.toLowerCase().includes(activeSearch);
+        const matchCategory = !activeCategory || p.category === activeCategory;
         return matchSearch && matchCategory;
     });
-    
-    const grid = document.getElementById('promptsGrid');
-    grid.innerHTML = filtered.map(prompt => `
-        <div class="prompt-card glass-effect p-6 rounded-lg hover:border-purple-500 hover:border-opacity-100 border border-purple-500 border-opacity-20 transition cursor-pointer neon-glow" onclick="goToPrompt(${prompt.id})">
-            <div class="mb-4">
-                <span class="inline-block bg-purple-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-purple-300 mb-3">${prompt.category}</span>
-                ${prompt.is_free ? '<span class="inline-block bg-green-500 bg-opacity-20 px-3 py-1 rounded-full text-sm text-green-300 ml-2">Бесплатно</span>' : ''}
-                <h3 class="text-xl font-bold">${escapeHtml(prompt.title)}</h3>
+
+    // Показать сетку, скрыть детали
+    promptDetail.classList.add('hidden');
+    promptsGrid.classList.remove('hidden');
+    promptsGrid.innerHTML = filtered.map(prompt => `
+        <div class="prompt-card glass-effect p-5 rounded-lg hover:border-purple-500 border border-purple-500 border-opacity-20 transition neon-glow"
+             onclick="showPromptDetail(${prompt.id})">
+            <div class="mb-3">
+                <span class="inline-block bg-purple-500 bg-opacity-20 px-3 py-1 rounded-full text-xs text-purple-300 mb-2">${prompt.category}</span>
+                ${prompt.is_free ? '<span class="inline-block bg-green-500 bg-opacity-20 px-3 py-1 rounded-full text-xs text-green-300 ml-1">Бесплатно</span>' : ''}
+                <h3 class="text-lg font-bold mt-1">${escapeHtml(prompt.title)}</h3>
             </div>
-            <p class="text-gray-400 text-sm mb-4 h-16 overflow-hidden">${escapeHtml(prompt.description)}</p>
-            <div class="flex justify-between items-center">
-                <div class="flex gap-2 text-sm text-gray-400">
-                    <span><i class="fas fa-copy"></i> ${prompt.usage_count}</span>
-                    <span><i class="fas fa-star text-yellow-400"></i> ${prompt.rating}</span>
-                </div>
-                <i class="fas fa-arrow-right text-purple-400"></i>
+            <p class="text-gray-400 text-sm mb-4 h-12 overflow-hidden">${escapeHtml(prompt.description)}</p>
+            <div class="flex justify-between items-center text-xs text-gray-400">
+                <span><i class="fas fa-copy"></i> ${prompt.usage_count}</span>
+                <span><i class="fas fa-star text-yellow-400"></i> ${prompt.rating}</span>
             </div>
         </div>
     `).join('');
-    
-    // Показать сетку промптов, скрыть категории
-    document.getElementById('categoriesGrid').style.display = 'none';
-    grid.style.display = 'grid';
 }
 
-function goToCategory(category) {
-    document.getElementById('categoryFilter').value = category;
-    filterPrompts();
+function showPromptDetail(promptId) {
+    const prompt = promptsData.find(p => p.id === promptId);
+    if (!prompt) return;
+
+    // Скрыть сетку, показать детали
+    promptsGrid.classList.add('hidden');
+    promptDetail.classList.remove('hidden');
+    promptDetail.innerHTML = `
+        <div class="glass-effect p-6 rounded-lg neon-glow">
+            <button onclick="backToList()" class="text-purple-400 hover:text-purple-300 mb-4 inline-flex gap-2 items-center">
+                <i class="fas fa-arrow-left"></i> Назад к списку
+            </button>
+            <div class="mb-6">
+                <span class="inline-block bg-purple-500 bg-opacity-30 px-3 py-1 rounded-full text-sm text-purple-300">${prompt.category}</span>
+                ${prompt.is_free ? '<span class="inline-block bg-green-500 bg-opacity-30 px-3 py-1 rounded-full text-sm text-green-300 ml-2">Бесплатно</span>' : ''}
+                <h1 class="text-3xl font-bold mt-3">${escapeHtml(prompt.title)}</h1>
+                <p class="text-gray-400 mt-2">${escapeHtml(prompt.description)}</p>
+            </div>
+            <div class="bg-black bg-opacity-40 rounded-lg p-4 border border-purple-500 border-opacity-20 font-mono text-sm leading-relaxed mb-6">
+                ${escapeHtml(prompt.content || 'Полный текст промпта...')}
+            </div>
+            <div class="flex gap-3">
+                <button onclick="copyPrompt('${escapeHtml(prompt.content || '')}')" class="button-primary text-white px-6 py-2 rounded-lg font-bold flex gap-2 items-center">
+                    <i class="fas fa-copy"></i> Скопировать промпт
+                </button>
+            </div>
+        </div>
+    `;
 }
 
-function goToPrompt(promptId) {
-    window.location.href = `/prompt/${promptId}`;
+function backToList() {
+    promptDetail.classList.add('hidden');
+    promptsGrid.classList.remove('hidden');
+}
+
+function copyPrompt(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Промпт скопирован!');
+    });
 }
 
 function escapeHtml(str) {
@@ -113,5 +167,8 @@ function escapeHtml(str) {
         return m;
     });
 }
+
+// Изначальная загрузка (все категории)
+filterAndRender();
 </script>
 {% endblock %}
