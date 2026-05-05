@@ -2,10 +2,10 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
-from sqlalchemy import select, update
+from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import AsyncSessionLocal
-from db.models import User
+from db.models import User, Category, Prompt
 
 logger = logging.getLogger(__name__)
 
@@ -114,3 +114,132 @@ async def get_vpn_client_id(user_id: int) -> Optional[str]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(User.vpn_client_id).where(User.user_id == user_id))
         return result.scalar()
+
+# ---------- Категории ----------
+async def add_category(name: str) -> Optional[Category]:
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(select(Category).where(Category.name == name))
+        if existing.scalars().first():
+            return None
+        cat = Category(name=name)
+        session.add(cat)
+        await session.commit()
+        await session.refresh(cat)
+        return cat
+
+async def get_all_categories() -> list[str]:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Category.name).order_by(Category.name))
+        return [row[0] for row in result.all()]
+
+async def rename_category(old_name: str, new_name: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        cat = await session.execute(select(Category).where(Category.name == old_name))
+        cat = cat.scalars().first()
+        if not cat:
+            return False
+        cat.name = new_name
+        await session.commit()
+        return True
+
+async def delete_category(name: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        cat = await session.execute(select(Category).where(Category.name == name))
+        cat = cat.scalars().first()
+        if not cat:
+            return False
+        # Удаляем все промпты в этой категории
+        await session.execute(delete(Prompt).where(Prompt.category_id == cat.id))
+        await session.delete(cat)
+        await session.commit()
+        return True
+
+# ---------- Промпты ----------
+async def add_prompt(title: str, description: str, content: str, category_name: str, is_free: bool = False) -> Optional[Prompt]:
+    async with AsyncSessionLocal() as session:
+        cat = await session.execute(select(Category).where(Category.name == category_name))
+        cat = cat.scalars().first()
+        if not cat:
+            return None
+        prompt = Prompt(
+            title=title,
+            description=description,
+            content=content,
+            category_id=cat.id,
+            is_free=is_free
+        )
+        session.add(prompt)
+        await session.commit()
+        await session.refresh(prompt)
+        return prompt
+
+async def get_prompts_by_category(category_name: Optional[str] = None) -> list[dict]:
+    async with AsyncSessionLocal() as session:
+        if category_name:
+            cat = await session.execute(select(Category).where(Category.name == category_name))
+            cat = cat.scalars().first()
+            if not cat:
+                return []
+            stmt = select(Prompt).where(Prompt.category_id == cat.id).order_by(Prompt.title)
+        else:
+            stmt = select(Prompt).order_by(Prompt.title)
+        result = await session.execute(stmt)
+        prompts = result.scalars().all()
+        return [
+            {
+                "id": p.id,
+                "title": p.title,
+                "description": p.description,
+                "content": p.content,
+                "category": p.category.name,
+                "is_free": p.is_free,
+                "usage_count": p.usage_count,
+                "rating": p.rating,
+                "created_at": p.created_at
+            }
+            for p in prompts
+        ]
+
+async def get_prompt_by_id(prompt_id: int) -> Optional[dict]:
+    async with AsyncSessionLocal() as session:
+        p = await session.execute(select(Prompt).where(Prompt.id == prompt_id))
+        p = p.scalars().first()
+        if not p:
+            return None
+        return {
+            "id": p.id,
+            "title": p.title,
+            "description": p.description,
+            "content": p.content,
+            "category": p.category.name,
+            "is_free": p.is_free,
+            "usage_count": p.usage_count,
+            "rating": p.rating
+        }
+
+async def update_prompt(prompt_id: int, **kwargs) -> bool:
+    async with AsyncSessionLocal() as session:
+        p = await session.execute(select(Prompt).where(Prompt.id == prompt_id))
+        p = p.scalars().first()
+        if not p:
+            return False
+        for key, value in kwargs.items():
+            if key == "category_name":
+                cat = await session.execute(select(Category).where(Category.name == value))
+                cat = cat.scalars().first()
+                if cat:
+                    p.category_id = cat.id
+            elif hasattr(p, key):
+                setattr(p, key, value)
+        await session.commit()
+        return True
+
+async def delete_prompt(prompt_id: int) -> bool:
+    async with AsyncSessionLocal() as session:
+        p = await session.execute(select(Prompt).where(Prompt.id == prompt_id))
+        p = p.scalars().first()
+        if not p:
+            return False
+        await session.delete(p)
+        await session.commit()
+        return True

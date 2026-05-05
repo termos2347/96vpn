@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Boolean, Float, ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -54,3 +54,24 @@ class PaymentLog(Base):
     payment_id = Column(String, unique=True, nullable=False, index=True)
     telegram_id = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
+    
+class Category(Base):
+    __tablename__ = "categories"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class Prompt(Base):
+    __tablename__ = "prompts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(String(1000), nullable=False)
+    content: Mapped[str] = mapped_column(String(5000), nullable=False)  # полный текст промпта
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
+    is_free: Mapped[bool] = mapped_column(Boolean, default=False)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0)
+    rating: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    category = relationship("Category", backref="prompts")

@@ -144,54 +144,21 @@ class SubscriptionService:
 
 
 class PromptService:
-    """Работа с промптами (заглушка – позже заменим на БД или JSON)"""
-    
-    # Пример данных (заглушка)
-    PROMPTS = [
-    {
-        "id": 1,
-        "title": "SEO Оптимизация контента",
-        "description": "Базовые принципы SEO для статей",
-        "category": "SEO",
-        "usage_count": 245,
-        "rating": 4.8,
-        "content": "Ты – SEO-специалист... (полный текст)",
-        "is_free": False
-    },
-    {
-        "id": 2,
-        "title": "Бесплатный: Как писать эффективные email-письма",
-        "description": "Пример бесплатного промпта для email-маркетинга",
-        "category": "Маркетинг",
-        "usage_count": 189,
-        "rating": 4.7,
-        "content": "Напиши письмо для рассылки... (полный текст доступен всем)",
-        "is_free": True
-    },
-    {
-        "id": 3,
-        "title": "Midjourney арт",
-        "description": "Создание промптов для Midjourney",
-        "category": "Дизайн",
-        "usage_count": 412,
-        "rating": 4.9,
-        "content": "Сгенерируй изображение... (платный)",
-        "is_free": False
-    },
-]
-    
     @staticmethod
     def get_all_prompts():
-        return PromptService.PROMPTS
-    
+        # Синхронная обёртка над асинхронной функцией
+        import asyncio
+        from db.crud import get_prompts_by_category
+        return asyncio.run(get_prompts_by_category())
+
     @staticmethod
     def get_prompt_by_id(prompt_id: int):
-        for prompt in PromptService.PROMPTS:
-            if prompt["id"] == prompt_id:
-                return prompt
-        return None
-    
+        import asyncio
+        from db.crud import get_prompt_by_id as get_p
+        return asyncio.run(get_p(prompt_id))
+
     @staticmethod
     def get_categories():
-        categories = {prompt["category"] for prompt in PromptService.PROMPTS}
-        return sorted(list(categories))
+        import asyncio
+        from db.crud import get_all_categories
+        return asyncio.run(get_all_categories())

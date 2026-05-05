@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from config import DATABASE_URL
-from .models import Base
+from .models import Base, User, PaymentLog, Category, Prompt
 from db.models import Base, User, PaymentLog
 
 is_sqlite = 'sqlite' in DATABASE_URL
