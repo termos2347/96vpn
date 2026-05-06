@@ -98,13 +98,12 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
 
 @router.get("/prompts", response_class=HTMLResponse)
 async def prompts_page(request: Request, current_user: User = Depends(get_current_user_optional)):
-    prompts = await PromptService.get_all_prompts()
-    categories = await PromptService.get_categories()
+    data = await PromptService.get_prompts_data()
     template = jinja_env.get_template("prompts.html")
     return template.render(
         site_name=settings.APP_NAME,
-        prompts=prompts,
-        categories=categories,
+        prompts=data["prompts"],
+        categories=data["categories"],
         user=current_user,
         is_active=current_user.is_active if current_user else False
     )

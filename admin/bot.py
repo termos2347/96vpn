@@ -33,6 +33,7 @@ from db.crud import (
 )
 from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
+from web.services.auth import PromptService
 
 logger = logging.getLogger(__name__)
 
@@ -469,6 +470,7 @@ async def cmd_addcategory(message: types.Message):
     name = args[1].strip()
     cat = await add_category(name)
     if cat:
+        PromptService.invalidate()
         await message.answer(f"✅ Категория '{name}' создана.")
     else:
         await message.answer(f"❌ Категория '{name}' уже существует.")
@@ -484,6 +486,7 @@ async def cmd_renamecategory(message: types.Message):
         return
     old, new = args[1], args[2]
     if await rename_category(old, new):
+        PromptService.invalidate()
         await message.answer(f"✅ Категория переименована в '{new}'.")
     else:
         await message.answer("❌ Категория не найдена.")
@@ -499,6 +502,7 @@ async def cmd_deletecategory(message: types.Message):
         return
     name = args[1].strip()
     if await delete_category(name):
+        PromptService.invalidate()
         await message.answer(f"✅ Категория '{name}' и все её промпты удалены.")
     else:
         await message.answer("❌ Категория не найдена.")
@@ -555,6 +559,7 @@ async def process_is_free(message: types.Message, state: FSMContext):
         is_free=is_free
     )
     if prompt:
+        PromptService.invalidate()
         await message.answer(f"✅ Промпт '{prompt.title}' (ID {prompt.id}) добавлен!")
     else:
         await message.answer("❌ Ошибка при добавлении. Проверьте категорию.")
@@ -583,6 +588,7 @@ async def cmd_editprompt(message: types.Message):
         await message.answer("Укажите поля для обновления, например: /editprompt 5 title=Новый заголовок is_free=true")
         return
     if await update_prompt(prompt_id, **updates):
+        PromptService.invalidate()
         await message.answer("✅ Промпт обновлён.")
     else:
         await message.answer("❌ Промпт не найден или ошибка.")
@@ -602,6 +608,7 @@ async def cmd_deleteprompt(message: types.Message):
         await message.answer("ID должен быть числом.")
         return
     if await delete_prompt(prompt_id):
+        PromptService.invalidate()
         await message.answer("✅ Промпт удалён.")
     else:
         await message.answer("❌ Промпт не найден.")

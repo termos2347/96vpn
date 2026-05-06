@@ -254,3 +254,33 @@ async def delete_prompt(prompt_id: int) -> bool:
         await session.delete(p)
         await session.commit()
         return True
+    
+async def get_prompts_data() -> dict:
+    """Возвращает словарь с ключами 'prompts' и 'categories'."""
+    async with AsyncSessionLocal() as session:
+        # Получаем все промпты с подгрузкой категории
+        stmt = select(Prompt).options(selectinload(Prompt.category)).order_by(Prompt.title)
+        result = await session.execute(stmt)
+        prompts = result.scalars().all()
+
+        # Получаем все категории
+        result_cat = await session.execute(select(Category.name).order_by(Category.name))
+        categories = [row[0] for row in result_cat.all()]
+
+        return {
+            "prompts": [
+                {
+                    "id": p.id,
+                    "title": p.title,
+                    "description": p.description,
+                    "content": p.content,
+                    "category": p.category.name,
+                    "is_free": p.is_free,
+                    "usage_count": p.usage_count,
+                    "rating": p.rating,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                }
+                for p in prompts
+            ],
+            "categories": categories
+        }

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta
@@ -8,6 +9,7 @@ from passlib.context import CryptContext
 from db.models import User
 from config import settings
 from db.crud import get_prompts_by_category, get_prompt_by_id as get_p, get_all_categories
+from services.cache import cache_manager
 
 logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -132,13 +134,19 @@ class SubscriptionService:
 
 class PromptService:
     @staticmethod
-    async def get_all_prompts():
-        return await get_prompts_by_category()
-
-    @staticmethod
-    async def get_prompt_by_id(prompt_id: int):
-        return await get_p(prompt_id)
+    async def get_prompts_data():
+        data = await cache_manager.get_prompts_data()
+        if data is None:
+            from db.crud import get_prompts_data as fetch_data
+            data = await fetch_data()
+            await cache_manager.set_prompts_data(data)
+        return data
 
     @staticmethod
     async def get_categories():
-        return await get_all_categories()
+        data = await PromptService.get_prompts_data()
+        return data["categories"]
+
+    @staticmethod
+    def invalidate():
+        asyncio.create_task(cache_manager.invalidate())
