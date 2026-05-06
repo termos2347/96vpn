@@ -33,13 +33,23 @@ from db.crud import (
 )
 from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
-from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
 error_log = deque(maxlen=10)
 admin_bot: Bot | None = None
 main_bot: Bot | None = None
+
+# ---------- Функция отправки алертов ----------
+async def send_admin_alert(message: str):
+    global admin_bot
+    if not admin_bot or not ADMIN_CHAT_ID:
+        logger.warning("Admin bot not initialized, alert not sent")
+        return
+    try:
+        await admin_bot.send_message(ADMIN_CHAT_ID, f"🚨 {message}")
+    except Exception as e:
+        logger.error(f"Failed to send admin alert: {e}")
 
 async def startup():
     global admin_bot, main_bot
@@ -290,7 +300,6 @@ async def cmd_grant(message: types.Message):
         await message.answer("❌ Дни должны быть положительным числом.")
         return
 
-    from services.vpn_manager import VPNManager
     try:
         async with AsyncSessionLocal() as session:
             user = await get_or_create_user(tid, session=session)
@@ -337,7 +346,6 @@ async def cmd_revoke(message: types.Message):
         await message.answer("❌ Неверный формат telegram_id.")
         return
 
-    from services.vpn_manager import VPNManager
     try:
         manager = VPNManager()
         success = await manager.revoke_key(tid)

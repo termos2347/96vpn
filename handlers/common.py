@@ -2,6 +2,7 @@ import logging
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand
+from aiogram.exceptions import TelegramForbiddenError
 from db.crud import get_vpn_end, get_bypass_end, is_bypass_active, get_or_create_user
 from datetime import datetime
 from utils.decorators import rate_limit
@@ -37,12 +38,20 @@ async def cmd_start(message: types.Message):
             "Выберите нужный раздел в меню ниже:",
             reply_markup=main_keyboard()
         )
+    except TelegramForbiddenError:
+        logger.info(f"User {message.from_user.id} blocked the bot")
     except ValidationError as e:
         logger.warning(f"Validation error in /start: {e}")
-        await message.answer("❌ Ошибка при инициализации. Попробуйте позже.")
+        try:
+            await message.answer("❌ Ошибка при инициализации. Попробуйте позже.")
+        except TelegramForbiddenError:
+            pass
     except Exception as e:
         logger.error(f"Exception in /start: {e}", exc_info=True)
-        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+        try:
+            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+        except TelegramForbiddenError:
+            pass
 
 @router.message(F.text == "ℹ️ Инфо")
 @rate_limit(max_per_minute=10)

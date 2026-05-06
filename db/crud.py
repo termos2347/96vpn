@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from db.base import AsyncSessionLocal
 from db.models import User, Category, Prompt
 
@@ -180,9 +181,14 @@ async def get_prompts_by_category(category_name: Optional[str] = None) -> list[d
             cat = cat.scalars().first()
             if not cat:
                 return []
-            stmt = select(Prompt).where(Prompt.category_id == cat.id).order_by(Prompt.title)
+            stmt = (select(Prompt)
+                    .where(Prompt.category_id == cat.id)
+                    .options(selectinload(Prompt.category))
+                    .order_by(Prompt.title))
         else:
-            stmt = select(Prompt).order_by(Prompt.title)
+            stmt = (select(Prompt)
+                    .options(selectinload(Prompt.category))
+                    .order_by(Prompt.title))
         result = await session.execute(stmt)
         prompts = result.scalars().all()
         return [
@@ -195,14 +201,18 @@ async def get_prompts_by_category(category_name: Optional[str] = None) -> list[d
                 "is_free": p.is_free,
                 "usage_count": p.usage_count,
                 "rating": p.rating,
-                "created_at": p.created_at
+                "created_at": p.created_at.isoformat() if p.created_at else None
             }
             for p in prompts
         ]
 
 async def get_prompt_by_id(prompt_id: int) -> Optional[dict]:
     async with AsyncSessionLocal() as session:
-        p = await session.execute(select(Prompt).where(Prompt.id == prompt_id))
+        p = await session.execute(
+            select(Prompt)
+            .where(Prompt.id == prompt_id)
+            .options(selectinload(Prompt.category))
+        )
         p = p.scalars().first()
         if not p:
             return None
@@ -214,7 +224,8 @@ async def get_prompt_by_id(prompt_id: int) -> Optional[dict]:
             "category": p.category.name,
             "is_free": p.is_free,
             "usage_count": p.usage_count,
-            "rating": p.rating
+            "rating": p.rating,
+            # created_at здесь не отдаём в шаблон, но если нужно, можно добавить
         }
 
 async def update_prompt(prompt_id: int, **kwargs) -> bool:
