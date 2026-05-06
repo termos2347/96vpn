@@ -17,8 +17,8 @@ async def get_all_prompts(current_user: User = Depends(get_current_user_optional
         raise HTTPException(status_code=401, detail="Authentication required")
     if not current_user.is_active:
         raise HTTPException(status_code=403, detail="Active subscription required")
-    prompts = await PromptService.get_all_prompts()
-    return prompts
+    data = await PromptService.get_prompts_data()
+    return data["prompts"]
 
 @router.get("/{prompt_id}")
 async def get_prompt(prompt_id: int, current_user: User = Depends(get_current_user_optional)):
