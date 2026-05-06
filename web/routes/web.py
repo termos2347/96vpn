@@ -98,8 +98,8 @@ async def dashboard(request: Request, current_user: User = Depends(get_current_u
 
 @router.get("/prompts", response_class=HTMLResponse)
 async def prompts_page(request: Request, current_user: User = Depends(get_current_user_optional)):
-    prompts = PromptService.get_all_prompts()
-    categories = PromptService.get_categories()
+    prompts = await PromptService.get_all_prompts()
+    categories = await PromptService.get_categories()
     template = jinja_env.get_template("prompts.html")
     return template.render(
         site_name=settings.APP_NAME,
@@ -162,7 +162,7 @@ async def prompt_detail(
     prompt_id: int,
     current_user: User = Depends(get_current_user_optional)
 ):
-    prompt = PromptService.get_prompt_by_id(prompt_id)
+    prompt = await PromptService.get_prompt_by_id(prompt_id)
     if not prompt:
         return HTMLResponse("Prompt not found", status_code=404)
     if prompt.get("is_free", False):

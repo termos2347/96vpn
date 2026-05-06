@@ -60,7 +60,6 @@ if DATABASE_URL:
         )
     else:
         parsed, qs = _split_db_url(DATABASE_URL)
-        # Преобразуем ssl в sslmode для psycopg2
         if 'ssl' in qs:
             ssl_value = qs['ssl'][0] if qs['ssl'] else 'require'
             qs.pop('ssl', None)
@@ -68,7 +67,18 @@ if DATABASE_URL:
         qs.pop('channel_binding', None)
         new_query = urlencode(qs, doseq=True)
         sync_url = urlunparse(parsed._replace(query=new_query))
-        sync_engine = create_engine(sync_url, echo=False)
+        sync_engine = create_engine(
+            sync_url,
+            echo=False,
+            pool_pre_ping=True,            # проверять соединение перед запросом
+            pool_recycle=600,              # пересоздавать каждые 10 минут
+            connect_args={
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 5,
+            }
+        )
 else:
     sync_engine = None
 
