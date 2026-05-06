@@ -4,13 +4,11 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from config import DATABASE_URL
-from .models import Base, User, PaymentLog, Category, Prompt
-from db.models import Base, User, PaymentLog
+from .models import Base, WebUser, BotUser, BotPayment, Category, Prompt
 
 is_sqlite = 'sqlite' in DATABASE_URL
 
 def _split_db_url(url: str):
-    """Разбирает URL и возвращает (базовый URL, параметры query)."""
     parsed = urlparse(url)
     return parsed, dict(parse_qs(parsed.query))
 
@@ -28,10 +26,7 @@ if DATABASE_URL:
         )
     else:
         parsed, qs = _split_db_url(DATABASE_URL)
-        # Удаляем параметры, которые не поддерживаются asyncpg
         qs.pop('channel_binding', None)
-        # Для asyncpg оставляем параметр ssl как есть (не преобразуем в sslmode)
-        # asyncpg принимает ssl=require или ssl=disable и т.д.
         new_query = urlencode(qs, doseq=True)
         async_db_url = urlunparse(parsed._replace(
             scheme='postgresql+asyncpg',
@@ -70,8 +65,8 @@ if DATABASE_URL:
         sync_engine = create_engine(
             sync_url,
             echo=False,
-            pool_pre_ping=True,            # проверять соединение перед запросом
-            pool_recycle=600,              # пересоздавать каждые 10 минут
+            pool_pre_ping=True,
+            pool_recycle=600,
             connect_args={
                 "keepalives": 1,
                 "keepalives_idle": 30,
@@ -85,7 +80,6 @@ else:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine) if sync_engine else None
 
 def get_db():
-    """Зависимость для получения синхронной сессии БД в FastAPI"""
     if SessionLocal is None:
         raise RuntimeError("Database not configured")
     db = SessionLocal()
@@ -95,14 +89,12 @@ def get_db():
         db.close()
 
 async def init_db():
-    """Инициализация БД (асинхронная, для бота)"""
     if not engine:
         return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 def init_sync_db():
-    """Синхронная инициализация БД (для веб-приложения)"""
     if sync_engine is None:
         raise RuntimeError("Database not configured")
     Base.metadata.create_all(bind=sync_engine)

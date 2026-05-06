@@ -3,7 +3,7 @@ from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand
 from aiogram.exceptions import TelegramForbiddenError
-from db.crud import get_vpn_end, get_bypass_end, is_bypass_active, get_or_create_user
+from db.crud import get_vpn_end, get_bypass_end, is_bypass_active, get_or_create_bot_user
 from datetime import datetime
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 async def setup_bot_commands(bot):
-    """Настраивает команды бота."""
     commands = [
         BotCommand(command="start", description="🚀 Главное меню"),
     ]
@@ -22,14 +21,12 @@ async def setup_bot_commands(bot):
 @router.message(Command("start"))
 @rate_limit(max_per_minute=10)
 async def cmd_start(message: types.Message):
-    """Обработчик команды /start."""
     try:
         user_id = message.from_user.id
         username = message.from_user.username
         
-        # Валидируем и создаём пользователя
         validate_user_id(user_id)
-        await get_or_create_user(user_id, username)
+        await get_or_create_bot_user(user_id, username)
         
         logger.info(f"User {user_id} (@{username}) started the bot")
         
@@ -56,12 +53,10 @@ async def cmd_start(message: types.Message):
 @router.message(F.text == "ℹ️ Инфо")
 @rate_limit(max_per_minute=10)
 async def info(message: types.Message):
-    """Показывает информацию о подписках пользователя."""
     try:
         user_id = message.from_user.id
         validate_user_id(user_id)
         
-        # Получаем статус подписок
         vpn_end = await get_vpn_end(user_id)
         vpn_status = "❌ не активна"
         if vpn_end and vpn_end > datetime.now():

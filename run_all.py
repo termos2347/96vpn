@@ -9,6 +9,7 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import ClientTimeout, TCPConnector, ClientSession, web
+from web.services.auth import PromptService
 
 # === Настройка вывода в UTF-8 (избавляет от ошибок с эмодзи) ===
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -88,6 +89,8 @@ async def main():
         port=8000,
         log_level="info",
     )
+    
+    await PromptService.init_cache()
     server = uvicorn.Server(config)
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")

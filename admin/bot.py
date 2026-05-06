@@ -13,9 +13,9 @@ from sqlalchemy import select, text, func
 
 from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
 from db.base import engine, AsyncSessionLocal
-from db.models import User
+from db.models import BotUser
 from db.crud import (
-    get_or_create_user,
+    get_or_create_bot_user,
     set_vpn_subscription,
     get_vpn_end,
     is_vpn_active,
@@ -200,10 +200,7 @@ async def cmd_broadcast(message: types.Message):
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(User.user_id).where(
-                User.user_id.isnot(None),
-                User.source == "bot"
-            )
+            select(BotUser.telegram_id).where(BotUser.telegram_id.isnot(None))
         )
         user_ids = [row[0] for row in result.all()]
 
@@ -254,7 +251,7 @@ async def cmd_userinfo(message: types.Message):
         return
 
     async with AsyncSessionLocal() as session:
-        user = await get_or_create_user(tid, session=session)
+        user = await get_or_create_bot_user(tid, session=session)
         if not user:
             await message.answer("❌ Пользователь не найден.")
             return
@@ -269,7 +266,7 @@ async def cmd_userinfo(message: types.Message):
         vpn_key = user.vpn_client_id or "не создан"
 
         text = (
-            f"👤 Пользователь: {user.user_id}\n"
+            f"👤 Пользователь: {user.telegram_id}\n"
             f"🔹 Username: @{user.username or '—'}\n"
             f"📧 Email: {user.email or '—'}\n\n"
             f"🚀 VPN-подписка: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
@@ -303,7 +300,7 @@ async def cmd_grant(message: types.Message):
 
     try:
         async with AsyncSessionLocal() as session:
-            user = await get_or_create_user(tid, session=session)
+            user = await get_or_create_bot_user(tid, session=session)
             has_active_key = user.vpn_client_id and user.vpn_subscription_end and user.vpn_subscription_end > datetime.utcnow()
             if has_active_key:
                 await set_vpn_subscription(tid, days)
@@ -317,7 +314,7 @@ async def cmd_grant(message: types.Message):
         await manager.close()
 
         async with AsyncSessionLocal() as session:
-            user = await get_or_create_user(tid, session=session)
+            user = await get_or_create_bot_user(tid, session=session)
             end_date = user.vpn_subscription_end.strftime('%d.%m.%Y') if user.vpn_subscription_end else "неизвестно"
 
         msg = f"✅ VPN-подписка для {tid} активирована на {days} дн. до {end_date}."
@@ -354,7 +351,7 @@ async def cmd_revoke(message: types.Message):
 
         if success:
             async with AsyncSessionLocal() as session:
-                user = await get_or_create_user(tid, session=session)
+                user = await get_or_create_bot_user(tid, session=session)
                 if user:
                     user.vpn_subscription_end = datetime.utcnow() - timedelta(days=1)
                     await session.commit()
@@ -381,60 +378,56 @@ async def cmd_stats(message: types.Message):
     month_later = now + timedelta(days=30)
 
     async with AsyncSessionLocal() as session:
-        total_res = await session.execute(select(func.count(User.id)).where(User.source == "bot"))
+        total_res = await session.execute(select(func.count(BotUser.id)))
         total = total_res.scalar() or 0
 
         new_today_res = await session.execute(
-            select(func.count(User.id)).where(User.source == "bot", User.created_at >= today_start))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= today_start))
         new_today = new_today_res.scalar() or 0
 
         new_week_res = await session.execute(
-            select(func.count(User.id)).where(User.source == "bot", User.created_at >= week_ago))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago))
         new_week = new_week_res.scalar() or 0
 
         new_month_res = await session.execute(
-            select(func.count(User.id)).where(User.source == "bot", User.created_at >= month_ago))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago))
         new_month = new_month_res.scalar() or 0
 
         active_res = await session.execute(
-            select(func.count(User.id)).where(User.vpn_subscription_end > now, User.source == "bot"))
+            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now))
         active = active_res.scalar() or 0
 
         expire_today_res = await session.execute(
-            select(func.count(User.id)).where(
-                User.vpn_subscription_end > now,
-                User.vpn_subscription_end <= today_start + timedelta(days=1),
-                User.source == "bot"))
+            select(func.count(BotUser.id)).where(
+                BotUser.vpn_subscription_end > now,
+                BotUser.vpn_subscription_end <= today_start + timedelta(days=1)))
         expire_today = expire_today_res.scalar() or 0
 
         expire_7d_res = await session.execute(
-            select(func.count(User.id)).where(
-                User.vpn_subscription_end > now,
-                User.vpn_subscription_end <= week_later,
-                User.source == "bot"))
+            select(func.count(BotUser.id)).where(
+                BotUser.vpn_subscription_end > now,
+                BotUser.vpn_subscription_end <= week_later))
         expire_7d = expire_7d_res.scalar() or 0
 
         expire_30d_res = await session.execute(
-            select(func.count(User.id)).where(
-                User.vpn_subscription_end > now,
-                User.vpn_subscription_end <= month_later,
-                User.source == "bot"))
+            select(func.count(BotUser.id)).where(
+                BotUser.vpn_subscription_end > now,
+                BotUser.vpn_subscription_end <= month_later))
         expire_30d = expire_30d_res.scalar() or 0
 
         expired_res = await session.execute(
-            select(func.count(User.id)).where(
-                User.vpn_subscription_end <= now,
-                User.vpn_subscription_end.isnot(None),
-                User.source == "bot"))
+            select(func.count(BotUser.id)).where(
+                BotUser.vpn_subscription_end <= now,
+                BotUser.vpn_subscription_end.isnot(None)))
         expired = expired_res.scalar() or 0
 
         no_sub_res = await session.execute(
-            select(func.count(User.id)).where(User.vpn_subscription_end.is_(None), User.source == "bot"))
+            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None)))
         no_sub = no_sub_res.scalar() or 0
 
         avg_days_res = await session.execute(
-            select(func.avg(User.vpn_subscription_end - now)).where(
-                User.vpn_subscription_end > now, User.source == "bot"))
+            select(func.avg(BotUser.vpn_subscription_end - now)).where(
+                BotUser.vpn_subscription_end > now))
         avg_days = avg_days_res.scalar()
         try:
             avg_days = int(avg_days) if avg_days is not None else 0

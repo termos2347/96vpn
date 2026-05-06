@@ -2,10 +2,10 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from db.base import AsyncSessionLocal
-from db.models import User
+from db.models import BotUser
 from db.crud import set_vpn_client_id
 from services.vpn_provider import vpn_provider
-from sqlalchemy import select, update
+from sqlalchemy import select
 from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
@@ -17,9 +17,9 @@ async def check_expired_subscriptions(bot):
         try:
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
-                    select(User).where(
-                        User.vpn_subscription_end < datetime.now(),
-                        User.vpn_client_id.isnot(None)
+                    select(BotUser).where(
+                        BotUser.vpn_subscription_end < datetime.utcnow(),
+                        BotUser.vpn_client_id.isnot(None)
                     )
                 )
                 expired_users = result.scalars().all()
@@ -43,17 +43,18 @@ async def check_expired_subscriptions(bot):
                     if success:
                         user.vpn_client_id = None
                         await session.commit()
-                        logger.info(f"Ключ {client_uuid} отозван для user_id={user.user_id}")
+                        logger.info(f"Ключ {client_uuid} отозван для user_id={user.telegram_id}")
                         try:
                             await bot.send_message(
-                                user.user_id,
+                                user.telegram_id,
                                 "❌ Ваша VPN-подписка истекла. Для продления перейдите в раздел оплаты."
                             )
                         except Exception as e:
-                            logger.error(f"Не удалось отправить уведомление пользователю {user.user_id}: {e}")
+                            logger.error(f"Не удалось отправить уведомление пользователю {user.telegram_id}: {e}")
                     else:
-                        logger.error(f"Не удалось отозвать ключ {client_uuid} для user_id={user.user_id} после {retry_count} попыток")
-                        await send_admin_alert(f"Не удалось отозвать ключ {client_uuid} для user_id={user.user_id}")
+                        logger.error(f"Не удалось отозвать ключ {client_uuid} для user_id={user.telegram_id} после {retry_count} попыток")
+                        await send_admin_alert(f"Не удалось отозвать ключ {client_uuid} для user_id={user.telegram_id}")
+
         except Exception as e:
             logger.error(f"Ошибка в фоновой задаче проверки подписок: {e}", exc_info=True)
             await send_admin_alert(f"Ошибка в задаче проверки подписок: {e}")
@@ -67,9 +68,9 @@ async def send_expiry_reminders(bot):
             async with AsyncSessionLocal() as session:
                 now = datetime.utcnow()
                 result = await session.execute(
-                    select(User).where(
-                        User.vpn_subscription_end > now,
-                        User.vpn_client_id.isnot(None)
+                    select(BotUser).where(
+                        BotUser.vpn_subscription_end > now,
+                        BotUser.vpn_client_id.isnot(None)
                     )
                 )
                 users = result.scalars().all()
@@ -87,7 +88,7 @@ async def send_expiry_reminders(bot):
                     for attempt in range(3):
                         try:
                             await bot.send_message(
-                                user.user_id,
+                                user.telegram_id,
                                 f"⏰ Ваша VPN-подписка истекает через {day_word}.\n"
                                 f"Дата окончания: {user.vpn_subscription_end.strftime('%d.%m.%Y')}\n"
                                 f"Продлите её в разделе 💳 Оплатить VPN, чтобы не остаться без доступа."
@@ -95,16 +96,16 @@ async def send_expiry_reminders(bot):
                             message_sent = True
                             break
                         except Exception as e:
-                            logger.warning(f"Не удалось отправить напоминание пользователю {user.user_id}, attempt {attempt+1}: {e}")
+                            logger.warning(f"Не удалось отправить напоминание пользователю {user.telegram_id}, attempt {attempt+1}: {e}")
                             if attempt < 2:
                                 await asyncio.sleep(1)
 
                     if message_sent:
                         user.last_reminder_sent = now
                         await session.commit()
-                        logger.info(f"Отправлено напоминание за {days_left} дн. пользователю {user.user_id}")
+                        logger.info(f"Отправлено напоминание за {days_left} дн. пользователю {user.telegram_id}")
                     else:
-                        logger.error(f"Не удалось отправить напоминание пользователю {user.user_id} после 3 попыток")
+                        logger.error(f"Не удалось отправить напоминание пользователю {user.telegram_id} после 3 попыток")
 
         except Exception as e:
             logger.error(f"Ошибка в задаче напоминаний: {e}", exc_info=True)
@@ -112,6 +113,7 @@ async def send_expiry_reminders(bot):
         await asyncio.sleep(3600)
 
 async def start_scheduler(bot):
+    """Запускает обе фоновые задачи."""
     asyncio.create_task(check_expired_subscriptions(bot))
     asyncio.create_task(send_expiry_reminders(bot))
     logger.info("Фоновые задачи проверки подписок и напоминаний запущены")

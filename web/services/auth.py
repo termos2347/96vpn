@@ -1,25 +1,29 @@
-import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
+
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from passlib.context import CryptContext
-from db.models import User
+from db.models import WebUser
 from config import settings
-from db.crud import get_prompts_by_category, get_prompt_by_id as get_p, get_all_categories
-from services.cache import cache_manager
+from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories
 
 logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# ========== In‑memory кэш ==========
+_cached_data: Optional[Dict[str, Any]] = None
+_cache_valid = False
+
 
 class AuthService:
     """Сервис аутентификации и управления пользователями"""
 
     @staticmethod
-    async def create_user(db: Session, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[User]:
-        stmt = select(User).where(User.email == email)
+    async def create_user(db: Session, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[WebUser]:
+        stmt = select(WebUser).where(WebUser.email == email)
         existing = db.execute(stmt).scalars().first()
         if existing:
             logger.warning(f"User with email {email} already exists")
@@ -27,11 +31,10 @@ class AuthService:
 
         hashed = pwd_context.hash(password)
 
-        user = User(
+        user = WebUser(
             email=email,
             username=username,
             hashed_password=hashed,
-            source=source,
             is_active=False,
             expiry_date=None,
             created_at=datetime.utcnow(),
@@ -44,8 +47,8 @@ class AuthService:
         return user
 
     @staticmethod
-    async def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
-        stmt = select(User).where(User.email == email)
+    async def authenticate_user(db: Session, email: str, password: str) -> Optional[WebUser]:
+        stmt = select(WebUser).where(WebUser.email == email)
         user = db.execute(stmt).scalars().first()
         if not user:
             return None
@@ -56,18 +59,18 @@ class AuthService:
         return user
 
     @staticmethod
-    async def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
-        stmt = select(User).where(User.id == user_id)
+    async def get_user_by_id(db: Session, user_id: int) -> Optional[WebUser]:
+        stmt = select(WebUser).where(WebUser.id == user_id)
         return db.execute(stmt).scalars().first()
 
     @staticmethod
-    async def get_user_by_telegram(db: Session, telegram_id: int) -> Optional[User]:
-        stmt = select(User).where(User.user_id == telegram_id)
+    async def get_user_by_email(db: Session, email: str) -> Optional[WebUser]:
+        stmt = select(WebUser).where(WebUser.email == email)
         return db.execute(stmt).scalars().first()
 
     @staticmethod
     async def create_reset_token(db: Session, email: str) -> Optional[str]:
-        stmt = select(User).where(User.email == email)
+        stmt = select(WebUser).where(WebUser.email == email)
         user = db.execute(stmt).scalars().first()
         if not user:
             return None
@@ -79,7 +82,7 @@ class AuthService:
 
     @staticmethod
     async def reset_password(db: Session, token: str, new_password: str) -> bool:
-        stmt = select(User).where(User.reset_token == token)
+        stmt = select(WebUser).where(WebUser.reset_token == token)
         user = db.execute(stmt).scalars().first()
         if not user or user.reset_token_expires is None or user.reset_token_expires < datetime.utcnow():
             return False
@@ -92,7 +95,7 @@ class AuthService:
 
 class SubscriptionService:
     @staticmethod
-    async def activate_subscription(db: Session, user: User, days: int = 30) -> bool:
+    async def activate_subscription(db: Session, user: WebUser, days: int = 30) -> bool:
         now = datetime.utcnow()
         user.expiry_date = now + timedelta(days=days)
         user.is_active = True
@@ -101,7 +104,7 @@ class SubscriptionService:
         return True
 
     @staticmethod
-    async def renew_subscription(db: Session, user: User, days: int = 30) -> bool:
+    async def renew_subscription(db: Session, user: WebUser, days: int = 30) -> bool:
         now = datetime.utcnow()
         if user.expiry_date and user.expiry_date > now:
             new_expiry = user.expiry_date + timedelta(days=days)
@@ -114,7 +117,7 @@ class SubscriptionService:
         return True
 
     @staticmethod
-    def get_days_remaining(user: User) -> Optional[int]:
+    def get_days_remaining(user: WebUser) -> Optional[int]:
         if not user.expiry_date:
             return None
         remaining = (user.expiry_date - datetime.utcnow()).days
@@ -123,7 +126,7 @@ class SubscriptionService:
     @staticmethod
     async def check_and_deactivate_expired(db: Session):
         now = datetime.utcnow()
-        stmt = select(User).where(User.is_active == True, User.expiry_date < now)
+        stmt = select(WebUser).where(WebUser.is_active == True, WebUser.expiry_date < now)
         expired_users = db.execute(stmt).scalars().all()
         for user in expired_users:
             user.is_active = False
@@ -135,12 +138,16 @@ class SubscriptionService:
 class PromptService:
     @staticmethod
     async def get_prompts_data():
-        data = await cache_manager.get_prompts_data()
-        if data is None:
-            from db.crud import get_prompts_data as fetch_data
-            data = await fetch_data()
-            await cache_manager.set_prompts_data(data)
-        return data
+        global _cached_data, _cache_valid
+        if not _cache_valid or _cached_data is None:
+            logger.info("Loading prompts data from database...")
+            _cached_data = await get_prompts_data()
+            _cache_valid = True
+        return _cached_data
+
+    @staticmethod
+    async def get_prompt_by_id(prompt_id: int):
+        return await get_p(prompt_id)
 
     @staticmethod
     async def get_categories():
@@ -149,4 +156,16 @@ class PromptService:
 
     @staticmethod
     def invalidate():
-        asyncio.create_task(cache_manager.invalidate())
+        global _cache_valid
+        _cache_valid = False
+        logger.info("Prompts cache invalidated")
+        
+    @staticmethod
+    async def init_cache():
+        """Принудительно загружает кэш при старте приложения."""
+        global _cached_data, _cache_valid
+        if not _cache_valid or _cached_data is None:
+            logger.info("Preloading prompts data at startup...")
+            _cached_data = await get_prompts_data()
+            _cache_valid = True
+            logger.info("Prompts cache initialized")

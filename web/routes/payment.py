@@ -10,7 +10,7 @@ from web.services.auth import SubscriptionService, AuthService
 from web.security import get_current_user_optional
 from config import settings
 from db.base import get_db
-from db.models import User
+from db.models import WebUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payment", tags=["payment"])
@@ -75,20 +75,17 @@ async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
 async def create_payment(
     plan: str = Query(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_optional)
+    current_user: WebUser = Depends(get_current_user_optional)
 ):
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     if plan == "monthly":
         amount = settings.MONTHLY_PRICE
-        days = 30
     elif plan == "quarterly":
         amount = settings.QUARTERLY_PRICE
-        days = 90
     elif plan == "semiannual":
         amount = settings.SEMIANNUAL_PRICE
-        days = 180
     else:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
@@ -100,7 +97,21 @@ async def create_payment(
     )
     if not payment:
         raise HTTPException(status_code=500, detail="Failed to create payment")
-    return PaymentResponse(**payment)
+
+    # Устанавливаем куку с payment_id для страницы успеха
+    response = JSONResponse(content={
+        "payment_id": payment["payment_id"],
+        "status": payment["status"],
+        "confirmation_url": payment["confirmation_url"],
+        "created_at": str(payment["created_at"])  # преобразуем в строку
+    })
+    response.set_cookie(
+        key="vpn_payment_id",
+        value=payment["payment_id"],
+        max_age=3600,
+        path="/"
+    )
+    return response
 
 @router.get("/status/{payment_id}")
 async def get_payment_status(payment_id: str):
@@ -111,7 +122,6 @@ async def get_payment_status(payment_id: str):
 
 @router.post("/webhook/yookassa")
 async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
-    """Обработка уведомлений от ЮKassa (без дополнительной проверки)."""
     try:
         webhook_data = await request.json()
         success = await yookassa_service.process_webhook(webhook_data, db)
@@ -124,7 +134,7 @@ async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "error"}
 
 @router.get("/subscription-info", response_model=SubscriptionInfo)
-async def get_subscription_info(current_user: User = Depends(get_current_user_optional)):
+async def get_subscription_info(current_user: WebUser = Depends(get_current_user_optional)):
     if not current_user:
         raise HTTPException(status_code=401, detail="Authentication required")
     days_remaining = SubscriptionService.get_days_remaining(current_user)

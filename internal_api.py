@@ -5,8 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from config import INTERNAL_API_SECRET
-from db.crud import set_vpn_subscription, set_bypass_subscription
-from db.models import PaymentLog
+from db.crud import (
+    set_vpn_subscription,
+    set_bypass_subscription,
+    get_or_create_bot_user,
+    log_bot_payment,
+)
+from db.models import BotPayment
 from db.base import AsyncSessionLocal
 from services.vpn_manager import VPNManager
 from admin import send_admin_alert
@@ -44,7 +49,7 @@ async def handle_activation(request):
         async with AsyncSessionLocal() as session:
             # Проверяем, не обработан ли уже этот платёж
             result = await session.execute(
-                select(PaymentLog).where(PaymentLog.payment_id == payment_id)
+                select(BotPayment).where(BotPayment.payment_id == payment_id)
             )
             if result.scalars().first():
                 logger.info(f"Payment {payment_id} already activated, skipping")
@@ -63,27 +68,20 @@ async def handle_activation(request):
                                 f"Не создался VPN-ключ (internal) для telegram_id={telegram_id}, payment_id={payment_id}"
                             )
                     finally:
-                        # Не закрываем глобальный провайдер
                         pass
                 elif product_type == "bypass":
                     await set_bypass_subscription(telegram_id, days)
                 else:
                     return web.json_response({"error": "unknown product"}, status=400)
 
-                # Фиксируем платёж, чтобы избежать повторной активации
-                session.add(PaymentLog(
-                    payment_id=payment_id,
-                    telegram_id=telegram_id,
-                    created_at=datetime.now(timezone.utc)
-                ))
-                await session.commit()
+                # Фиксируем платёж
+                if not await log_bot_payment(payment_id, telegram_id):
+                    # Уже существует – значит, другой конкурентный запрос обработал
+                    logger.info(f"Payment {payment_id} already logged concurrently")
+                    return web.json_response({"status": "already_activated"})
+
                 logger.info(f"Subscription activated for {telegram_id}, payment {payment_id}")
                 return web.json_response({"status": "ok"})
-
-            except IntegrityError:
-                await session.rollback()
-                logger.info(f"Payment {payment_id} already activated (IntegrityError), skipping")
-                return web.json_response({"status": "already_activated"})
 
             except Exception as e:
                 await session.rollback()
