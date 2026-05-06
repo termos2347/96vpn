@@ -9,9 +9,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import requests.exceptions
 import jwt
 import aiohttp
-from admin import send_admin_alert
 
-from db.models import User
+from db.models import WebUser
 from config import settings
 from web.services.auth import SubscriptionService
 
@@ -52,7 +51,7 @@ class YookassaService:
             }
 
             if user_id is not None:
-                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+                user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
                 if not user:
                     logger.error(f"User {user_id} not found")
                     return None
@@ -67,7 +66,7 @@ class YookassaService:
             payment = Payment.create(payment_data, idempotence_key)
 
             if user_id:
-                user = db.execute(select(User).where(User.id == user_id)).scalars().first()
+                user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
                 if user:
                     user.yookassa_payment_id = payment.id
                     db.commit()
@@ -110,13 +109,15 @@ class YookassaService:
                 logger.error("Payment ID not found in webhook")
                 return False
 
-            user = db.execute(select(User).where(User.yookassa_payment_id == payment_id)).scalars().first()
+            user = db.execute(select(WebUser).where(WebUser.yookassa_payment_id == payment_id)).scalars().first()
             if not user:
                 logger.warning(f"User not found for payment {payment_id}")
                 return False
 
             plan = metadata.get("plan", "monthly")
-            days = 90 if plan == "quarterly" else 30
+            days = 90 if "quarterly" in plan else 30
+            if "semiannual" in plan:
+                days = 180
 
             if user.is_active and user.expiry_date and (user.expiry_date - datetime.now(timezone.utc)).days > days - 5:
                 logger.info(f"User {user.id} already has active subscription, skipping renewal")
@@ -127,7 +128,6 @@ class YookassaService:
             return True
         except Exception as e:
             logger.error(f"Error processing webhook: {e}")
-            await send_admin_alert(f"Ошибка обработки вебхука: {e}")
             return False
 
     async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
@@ -160,12 +160,11 @@ class YookassaService:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        # Принимаем и "ok", и "already_activated" как успех
                         if data.get("status") in ("ok", "already_activated"):
                             logger.info(f"Bot activation succeeded for {telegram_id}")
                             return True
                         else:
-                            logger.error(f"Bot activation returned {resp.status} with unexpected status: {data}")
+                            logger.error(f"Bot activation returned unexpected status: {data}")
                             return False
                     else:
                         logger.error(f"Bot activation returned {resp.status}")
@@ -175,7 +174,6 @@ class YookassaService:
                 return False
 
     async def check_and_activate(self, payment_id: str, db: Session) -> bool:
-        """Проверяет статус платежа и активирует подписку (для страницы успеха)."""
         try:
             payment = Payment.find_one(payment_id)
             if payment.status == 'succeeded':
@@ -188,7 +186,5 @@ class YookassaService:
         except Exception as e:
             logger.error(f"Check and activate error: {e}")
             return False
-
-    
 
 yookassa_service = YookassaService()

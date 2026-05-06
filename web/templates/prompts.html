@@ -115,13 +115,18 @@ function viewPrompt(promptId) {
     if (activeCard) activeCard.classList.add('border-purple-400');
 
     if (!prompt.is_free && !userIsActive) {
+        const isLoggedIn = {{ 'true' if user else 'false' }};
+        const buttonsHtml = isLoggedIn
+            ? `<a href="/pay-choice" class="button-primary text-white px-6 py-2 rounded-lg inline-block">Оформить подписку</a>`
+            : `<a href="/login" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">Войти</a>
+            <a href="/register" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">Зарегистрироваться</a>`;
+
         promptDetail.innerHTML = `
             <div class="glass-effect p-6 rounded-lg neon-glow text-center">
                 <h2 class="text-2xl font-bold gradient-text mb-4">${escapeHtml(prompt.title)}</h2>
                 <div class="text-yellow-400 text-6xl mb-4"><i class="fas fa-lock"></i></div>
                 <p class="text-gray-400 mb-6">Этот промпт доступен только по подписке.</p>
-                <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">Войти</a>
-                <a href="/register" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">Зарегистрироваться</a>
+                ${buttonsHtml}
             </div>
         `;
         return;

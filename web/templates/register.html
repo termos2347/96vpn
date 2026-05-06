@@ -136,7 +136,7 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
         }
         
         document.cookie = `access_token=${loginData.access_token}; path=/; max-age=2592000`;
-        window.location.href = `/pay-choice?user_id=${loginData.user_id}`;
+        window.location.href = '/pay-choice';
         
     } catch (error) {
         messageDiv.innerHTML = '<span class="text-red-400">Ошибка соединения с сервером</span>';

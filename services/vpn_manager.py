@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 from services.vpn_provider import vpn_provider
-from db.crud import set_vpn_client_id, get_or_create_user
+from db.crud import set_vpn_client_id, get_or_create_bot_user
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ class VPNManager:
 
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
         try:
-            user = await get_or_create_user(user_id)
+            user = await get_or_create_bot_user(user_id)
             if not user:
                 logger.error(f"Не удалось получить пользователя {user_id}")
                 return None
@@ -44,7 +44,7 @@ class VPNManager:
 
     async def revoke_key(self, user_id: int) -> bool:
         try:
-            user = await get_or_create_user(user_id)
+            user = await get_or_create_bot_user(user_id)
             if not user or not user.vpn_client_id:
                 logger.warning(f"Пользователь {user_id} не имеет активного ключа")
                 return True
@@ -63,7 +63,7 @@ class VPNManager:
 
     async def get_subscription_link(self, user_id: int) -> Optional[str]:
         try:
-            user = await get_or_create_user(user_id)
+            user = await get_or_create_bot_user(user_id)
             if not user or not user.vpn_client_id:
                 return None
             email = f"user_{user_id}"
@@ -77,5 +77,4 @@ class VPNManager:
             return None
 
     async def close(self):
-        # Не закрываем глобальный провайдер, сессия управляется отдельно
-        pass
+        await self.provider.close()
