@@ -115,7 +115,14 @@ class YookassaService:
                 return False
 
             plan = metadata.get("plan", "monthly")
-            days = 90 if "quarterly" in plan else 30
+            if plan == "monthly":
+                days = 30
+            elif plan == "quarterly":
+                days = 90
+            elif plan == "semiannual":
+                days = 180
+            else:
+                days = 30
             if "semiannual" in plan:
                 days = 180
 
