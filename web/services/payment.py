@@ -123,12 +123,6 @@ class YookassaService:
                 days = 180
             else:
                 days = 30
-            if "semiannual" in plan:
-                days = 180
-
-            if user.is_active and user.expiry_date and (user.expiry_date - datetime.now(timezone.utc)).days > days - 5:
-                logger.info(f"User {user.id} already has active subscription, skipping renewal")
-                return True
 
             await SubscriptionService.renew_subscription(db, user, days)
             logger.info(f"Subscription activated for user {user.id} after payment {payment_id}")
@@ -187,7 +181,23 @@ class YookassaService:
                 metadata = payment.metadata
                 if metadata and metadata.get('source') == 'bot':
                     return await self._activate_bot_subscription(metadata, payment_id)
-                # Для веб-платежей просто считаем успехом
+                if metadata and metadata.get('source') == 'web':
+                    user_id = metadata.get('user_id')
+                    if user_id:
+                        user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
+                        if user:
+                            plan = metadata.get('plan', 'monthly')
+                            if plan == 'monthly':
+                                days = 30
+                            elif plan == 'quarterly':
+                                days = 90
+                            elif plan == 'semiannual':
+                                days = 180
+                            else:
+                                days = 30
+                            await SubscriptionService.renew_subscription(db, user, days)
+                            logger.info(f"Subscription activated via return_url for user {user.id}")
+                            return True
                 return True
             return False
         except Exception as e:

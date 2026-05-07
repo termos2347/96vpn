@@ -26,7 +26,7 @@ def _render_template(template_name: str, request: Request, **kwargs):
     return template.render(site_name=settings.APP_NAME, user=current_user, **kwargs)
 
 # ---------- VPN оплата (из бота) ----------
-@router.get("/pay/vpn", response_class=HTMLResponse)
+@router.get("/pay/subscription", response_class=HTMLResponse)
 async def vpn_payment_page(request: Request, token: str):
     try:
         payload = jwt.decode(
@@ -54,7 +54,7 @@ async def vpn_payment_page(request: Request, token: str):
     )
 
 # ---------- Страница успеха VPN ----------
-@router.get("/vpn-success", response_class=HTMLResponse)
+@router.get("/payment/success", response_class=HTMLResponse)
 async def vpn_success_page(request: Request, orderId: str = None, current_user: WebUser = Depends(get_current_user_optional)):
     template = jinja_env.get_template("vpn_success.html")
     return template.render(site_name=settings.APP_NAME, payment_id=orderId, user=current_user)

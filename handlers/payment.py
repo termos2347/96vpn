@@ -90,7 +90,7 @@ async def vpn_payment_link(callback: types.CallbackQuery):
     try:
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
         # Экранируем ссылку для безопасности
-        payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
+        payment_url = f"{SITE_URL}/pay/subscription?token={token}"
         logger.info(f"Generated payment URL: {payment_url}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
@@ -162,7 +162,7 @@ async def bypass_payment_link(callback: types.CallbackQuery):
 
     try:
         token = create_payment_token(user_id, "bypass", period, currency, price)
-        payment_url = html.escape(f"{SITE_URL}/pay/vpn?token={token}")
+        payment_url = f"{SITE_URL}/pay/subscription?token={token}"
         logger.info(f"Generated payment URL: {payment_url}")
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")

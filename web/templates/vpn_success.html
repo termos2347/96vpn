@@ -67,7 +67,7 @@
     }
 
     try {
-        const resp = await fetch(`/api/payment/check-vpn-payment?payment_id=${encodeURIComponent(paymentId)}`);
+        const resp = await fetch('/api/payment/check-payment?payment_id=${encodeURIComponent(paymentId)}');
         const data = await resp.json();
         if (data.activated) {
             statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p>';
