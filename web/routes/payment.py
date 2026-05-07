@@ -65,7 +65,7 @@ async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(ge
     return response
 
 # ---------- Проверка и активация после возврата ----------
-@router.get("/check-vpn-payment")
+@router.get("/check-payment")
 async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
     success = await yookassa_service.check_and_activate(payment_id, db)
     return {"activated": success}
