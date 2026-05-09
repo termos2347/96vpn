@@ -17,7 +17,13 @@ class Settings(BaseSettings):
 
     # ---------- Proxy (опционально) ----------
     PROXY_URL: Optional[str] = None
-
+    
+    # Webhook (Telegram)
+    WEBHOOK_URL: str = ""
+    WEBHOOK_SECRET: str = ""
+    ADMIN_WEBHOOK_URL: str = ""
+    ADMIN_WEBHOOK_SECRET: str = ""
+    
     # ---------- XUI панель (3x-ui) ----------
     XUI_BASE_URL: Optional[str] = None
     XUI_USERNAME: Optional[str] = None
@@ -116,6 +122,8 @@ if 0 < xui_filled < len(xui_vars):
 TOKEN = settings.BOT_TOKEN
 DATABASE_URL = settings.DATABASE_URL
 PROXY_URL = settings.PROXY_URL
+WEBHOOK_URL = settings.WEBHOOK_URL
+WEBHOOK_SECRET = settings.WEBHOOK_SECRET
 
 XUI_BASE_URL = settings.XUI_BASE_URL
 XUI_USERNAME = settings.XUI_USERNAME
