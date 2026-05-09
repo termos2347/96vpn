@@ -1,13 +1,13 @@
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from passlib.context import CryptContext
-from db.models import WebUser
 from config import settings
+from db.models import WebUser
 from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories
 
 logger = logging.getLogger(__name__)
@@ -22,9 +22,10 @@ class AuthService:
     """Сервис аутентификации и управления пользователями"""
 
     @staticmethod
-    async def create_user(db: Session, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[WebUser]:
+    async def create_user(db: AsyncSession, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[WebUser]:
         stmt = select(WebUser).where(WebUser.email == email)
-        existing = db.execute(stmt).scalars().first()
+        result = await db.execute(stmt)
+        existing = result.scalars().first()
         if existing:
             logger.warning(f"User with email {email} already exists")
             return None
@@ -37,19 +38,20 @@ class AuthService:
             hashed_password=hashed,
             is_active=False,
             expiry_date=None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
         logger.info(f"Created user {user.id} with email {email}")
         return user
 
     @staticmethod
-    async def authenticate_user(db: Session, email: str, password: str) -> Optional[WebUser]:
+    async def authenticate_user(db: AsyncSession, email: str, password: str) -> Optional[WebUser]:
         stmt = select(WebUser).where(WebUser.email == email)
-        user = db.execute(stmt).scalars().first()
+        result = await db.execute(stmt)
+        user = result.scalars().first()
         if not user:
             return None
         if not user.hashed_password:
@@ -59,60 +61,64 @@ class AuthService:
         return user
 
     @staticmethod
-    async def get_user_by_id(db: Session, user_id: int) -> Optional[WebUser]:
+    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[WebUser]:
         stmt = select(WebUser).where(WebUser.id == user_id)
-        return db.execute(stmt).scalars().first()
+        result = await db.execute(stmt)
+        return result.scalars().first()
 
     @staticmethod
-    async def get_user_by_email(db: Session, email: str) -> Optional[WebUser]:
+    async def get_user_by_email(db: AsyncSession, email: str) -> Optional[WebUser]:
         stmt = select(WebUser).where(WebUser.email == email)
-        return db.execute(stmt).scalars().first()
+        result = await db.execute(stmt)
+        return result.scalars().first()
 
     @staticmethod
-    async def create_reset_token(db: Session, email: str) -> Optional[str]:
+    async def create_reset_token(db: AsyncSession, email: str) -> Optional[str]:
         stmt = select(WebUser).where(WebUser.email == email)
-        user = db.execute(stmt).scalars().first()
+        result = await db.execute(stmt)
+        user = result.scalars().first()
         if not user:
             return None
         token = secrets.token_urlsafe(32)
         user.reset_token = token
-        user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
-        db.commit()
+        user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        await db.commit()
         return token
 
     @staticmethod
-    async def reset_password(db: Session, token: str, new_password: str) -> bool:
+    async def reset_password(db: AsyncSession, token: str, new_password: str) -> bool:
         stmt = select(WebUser).where(WebUser.reset_token == token)
-        user = db.execute(stmt).scalars().first()
-        if not user or user.reset_token_expires is None or user.reset_token_expires < datetime.utcnow():
+        result = await db.execute(stmt)
+        user = result.scalars().first()
+        if not user or user.reset_token_expires is None or user.reset_token_expires < datetime.now(timezone.utc):
             return False
         user.hashed_password = pwd_context.hash(new_password)
         user.reset_token = None
         user.reset_token_expires = None
-        db.commit()
+        await db.commit()
         return True
 
 
 class SubscriptionService:
     @staticmethod
-    async def activate_subscription(db: Session, user: WebUser, days: int = 30) -> bool:
-        now = datetime.utcnow()
+    async def activate_subscription(db: AsyncSession, user: WebUser, days: int = 30) -> bool:
+        now = datetime.now(timezone.utc)
         user.expiry_date = now + timedelta(days=days)
         user.is_active = True
-        db.commit()
+        await db.commit()
         logger.info(f"Subscription activated for user {user.id}, expires at {user.expiry_date}")
         return True
 
     @staticmethod
-    async def renew_subscription(db: Session, user: WebUser, days: int = 30) -> bool:
-        now = datetime.utcnow()
+    async def renew_subscription(db: AsyncSession, user: WebUser, days: int = 30) -> bool:
+        now = datetime.now(timezone.utc)
         if user.expiry_date and user.expiry_date > now:
             new_expiry = user.expiry_date + timedelta(days=days)
         else:
             new_expiry = now + timedelta(days=days)
         user.expiry_date = new_expiry
         user.is_active = True
-        db.commit()
+        await db.commit()
         logger.info(f"Subscription renewed for user {user.id}, new expiry {new_expiry}")
         return True
 
@@ -120,18 +126,19 @@ class SubscriptionService:
     def get_days_remaining(user: WebUser) -> Optional[int]:
         if not user.expiry_date:
             return None
-        remaining = (user.expiry_date - datetime.utcnow()).days
+        remaining = (user.expiry_date - datetime.now(timezone.utc)).days
         return max(0, remaining)
 
     @staticmethod
-    async def check_and_deactivate_expired(db: Session):
-        now = datetime.utcnow()
+    async def check_and_deactivate_expired(db: AsyncSession) -> int:
+        now = datetime.now(timezone.utc)
         stmt = select(WebUser).where(WebUser.is_active == True, WebUser.expiry_date < now)
-        expired_users = db.execute(stmt).scalars().all()
+        result = await db.execute(stmt)
+        expired_users = result.scalars().all()
         for user in expired_users:
             user.is_active = False
             logger.info(f"User {user.id} deactivated due to expired subscription")
-        db.commit()
+        await db.commit()
         return len(expired_users)
 
 
@@ -162,7 +169,6 @@ class PromptService:
         
     @staticmethod
     async def init_cache():
-        """Принудительно загружает кэш при старте приложения."""
         global _cached_data, _cache_valid
         if not _cache_valid or _cached_data is None:
             logger.info("Preloading prompts data at startup...")

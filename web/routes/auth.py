@@ -1,10 +1,12 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
 from web.schemas.schemas import UserRegister, UserLogin, UserProfile
 from web.services.auth import AuthService
-from db.base import get_db
+from db.base import AsyncSession, get_async_db, get_db,  AsyncSessionLocal
 from web.security import create_access_token
 from config import settings
 
@@ -13,7 +15,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # ---------- Регистрация ----------
 @router.post("/register")
-async def register(user_data: UserRegister, db: Session = Depends(get_db)):
+async def register(user_data: UserRegister, db: AsyncSession = Depends(get_async_db)):
     user = await AuthService.create_user(
         db=db,
         email=user_data.email,
@@ -31,7 +33,7 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 # ---------- Вход ----------
 @router.post("/login")
-async def login(credentials: UserLogin, response: Response, db: Session = Depends(get_db)):
+async def login(credentials: UserLogin, response: Response, db: AsyncSession = Depends(get_async_db)):
     user = await AuthService.authenticate_user(db, credentials.email, credentials.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -58,7 +60,7 @@ async def logout(response: Response):
 
 # ---------- Профиль ----------
 @router.get("/profile/{user_id}", response_model=UserProfile)
-async def get_profile(user_id: int, db: Session = Depends(get_db)):
+async def get_profile(user_id: int, db: AsyncSession = Depends(get_async_db)):
     user = await AuthService.get_user_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -73,7 +75,7 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 @router.post("/forgot-password")
-async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_async_db)):
     token = await AuthService.create_reset_token(db, data.email)
     if token:
         reset_url = f"{settings.SITE_URL}/reset-password?token={token}"
@@ -82,7 +84,7 @@ async def forgot_password(data: ForgotPasswordRequest, db: Session = Depends(get
     return {"message": "Если указанный email зарегистрирован, ссылка для сброса отправлена."}
 
 @router.post("/reset-password")
-async def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(get_async_db)):
     success = await AuthService.reset_password(db, data.token, data.new_password)
     if not success:
         raise HTTPException(status_code=400, detail="Недействительный или истекший токен.")

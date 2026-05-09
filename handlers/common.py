@@ -4,7 +4,7 @@ from aiogram.filters import Command
 from aiogram.types import BotCommand
 from aiogram.exceptions import TelegramForbiddenError
 from db.crud import get_vpn_end, get_bypass_end, is_bypass_active, get_or_create_bot_user
-from datetime import datetime
+from datetime import datetime, timezone
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
 from .keyboards import main_keyboard
@@ -59,8 +59,8 @@ async def info(message: types.Message):
         
         vpn_end = await get_vpn_end(user_id)
         vpn_status = "❌ не активна"
-        if vpn_end and vpn_end > datetime.now():
-            days_left = (vpn_end - datetime.now()).days
+        if vpn_end and vpn_end > datetime.now(timezone.utc):
+            days_left = (vpn_end - datetime.now(timezone.utc)).days
             vpn_status = f"✅ активна, осталось {days_left} дн."
         
         bypass_active = await is_bypass_active(user_id)

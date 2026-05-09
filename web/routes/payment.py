@@ -3,13 +3,15 @@ import jwt
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from web.schemas.schemas import PaymentResponse, SubscriptionInfo
 from web.services.payment import yookassa_service
 from web.services.auth import SubscriptionService, AuthService
 from web.security import get_current_user_optional
 from config import settings
-from db.base import get_db
+from db.base import AsyncSession, get_async_db, get_db,  AsyncSessionLocal
 from db.models import WebUser
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ router = APIRouter(prefix="/api/payment", tags=["payment"])
 
 # ---------- Инициация VPN-оплаты из бота ----------
 @router.post("/initiate-vpn")
-async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(get_db)):
+async def initiate_vpn_payment(token: str = Query(...), db: AsyncSession = Depends(get_async_db)):
     try:
         payload = jwt.decode(
             token,
@@ -66,7 +68,7 @@ async def initiate_vpn_payment(token: str = Query(...), db: Session = Depends(ge
 
 # ---------- Проверка и активация после возврата ----------
 @router.get("/check-payment")
-async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
+async def check_vpn_payment(payment_id: str, db: AsyncSession = Depends(get_async_db)):
     success = await yookassa_service.check_and_activate(payment_id, db)
     return {"activated": success}
 
@@ -74,7 +76,7 @@ async def check_vpn_payment(payment_id: str, db: Session = Depends(get_db)):
 @router.post("/create")
 async def create_payment(
     plan: str = Query(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: WebUser = Depends(get_current_user_optional)
 ):
     if not current_user:
@@ -121,7 +123,7 @@ async def get_payment_status(payment_id: str):
     return {"payment_id": payment_id, "status": status}
 
 @router.post("/webhook/yookassa")
-async def yookassa_webhook(request: Request, db: Session = Depends(get_db)):
+async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_async_db)):
     try:
         webhook_data = await request.json()
         success = await yookassa_service.process_webhook(webhook_data, db)

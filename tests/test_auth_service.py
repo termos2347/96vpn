@@ -1,44 +1,53 @@
 import pytest
-from unittest.mock import MagicMock, patch
-from sqlalchemy.orm import Session
+from unittest.mock import AsyncMock, MagicMock
+from sqlalchemy.ext.asyncio import AsyncSession
 from web.services.auth import AuthService
-from db.models import User
+from db.models import WebUser
 from passlib.context import CryptContext
 
-# Используем тот же контекст, что и в AuthService
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 @pytest.fixture
-def mock_db():
-    """Создаёт мок-сессию БД."""
-    db = MagicMock(spec=Session)
+def mock_async_db():
+    """Создаёт мок-асинхронную сессию БД."""
+    db = MagicMock(spec=AsyncSession)
+    db.execute = AsyncMock()
     return db
 
 
 @pytest.mark.asyncio
-async def test_authenticate_user_correct_password(mock_db):
+async def test_authenticate_user_correct_password(mock_async_db):
     hashed = pwd_context.hash("secret")
-    expected_user = User(email="test@example.com", hashed_password=hashed)
-    mock_db.execute.return_value.scalars().first.return_value = expected_user
+    expected_user = WebUser(email="test@example.com", hashed_password=hashed)
+    
+    # Мокаем выполнение запроса
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = expected_user
+    mock_async_db.execute.return_value = mock_result
 
-    user = await AuthService.authenticate_user(mock_db, "test@example.com", "secret")
+    user = await AuthService.authenticate_user(mock_async_db, "test@example.com", "secret")
     assert user == expected_user
 
 
 @pytest.mark.asyncio
-async def test_authenticate_user_wrong_password(mock_db):
+async def test_authenticate_user_wrong_password(mock_async_db):
     hashed = pwd_context.hash("secret")
-    expected_user = User(email="test@example.com", hashed_password=hashed)
-    mock_db.execute.return_value.scalars().first.return_value = expected_user
+    expected_user = WebUser(email="test@example.com", hashed_password=hashed)
+    
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = expected_user
+    mock_async_db.execute.return_value = mock_result
 
-    user = await AuthService.authenticate_user(mock_db, "test@example.com", "wrong")
+    user = await AuthService.authenticate_user(mock_async_db, "test@example.com", "wrong")
     assert user is None
 
 
 @pytest.mark.asyncio
-async def test_authenticate_user_nonexistent(mock_db):
-    mock_db.execute.return_value.scalars().first.return_value = None
+async def test_authenticate_user_nonexistent(mock_async_db):
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.first.return_value = None
+    mock_async_db.execute.return_value = mock_result
 
-    user = await AuthService.authenticate_user(mock_db, "nobody@example.com", "pass")
+    user = await AuthService.authenticate_user(mock_async_db, "nobody@example.com", "pass")
     assert user is None
