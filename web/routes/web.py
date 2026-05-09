@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.base import AsyncSession, get_async_db, get_db, AsyncSessionLocal
+from db.base import AsyncSession, get_async_db, AsyncSessionLocal
 from db.models import WebUser
 from config import settings
 from web.services.auth import PromptService, SubscriptionService, AuthService

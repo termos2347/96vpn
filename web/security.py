@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from db.models import WebUser
-from db.base import AsyncSession, get_async_db, get_db, AsyncSessionLocal
+from db.base import AsyncSession, get_async_db, AsyncSessionLocal
 from config import settings
 from web.services.auth import AuthService
 

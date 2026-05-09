@@ -12,17 +12,18 @@ def _split_db_url(url: str):
     parsed = urlparse(url)
     return parsed, dict(parse_qs(parsed.query))
 
-# --- Асинхронный движок (бот) ---
+# --- Асинхронный движок (бот и веб) ---
 if DATABASE_URL:
     if is_sqlite:
+        # для SQLite настройки проще
         async_db_url = DATABASE_URL.replace('sqlite:///', 'sqlite+aiosqlite:///')
         engine = create_async_engine(
             async_db_url,
             echo=False,
             pool_pre_ping=True,
             pool_recycle=600,
-            pool_size=5,
-            max_overflow=10
+            pool_size=10,
+            max_overflow=20,
         )
     else:
         parsed, qs = _split_db_url(DATABASE_URL)
@@ -35,10 +36,12 @@ if DATABASE_URL:
         engine = create_async_engine(
             async_db_url,
             echo=False,
-            pool_pre_ping=True,
-            pool_recycle=600,
-            pool_size=5,
-            max_overflow=10
+            pool_pre_ping=True,          # проверять соединение перед использованием
+            pool_recycle=300,            # пересоздавать соединение через 5 минут (было 600)
+            pool_size=20,                # размер пула (было 5)
+            max_overflow=30,             # доп. соединения при нагрузке (было 10)
+            pool_timeout=30,             # таймаут ожидания соединения из пула
+            pool_use_lifo=True,          # отдавать последнее использованное соединение
         )
 else:
     engine = None
@@ -101,4 +104,7 @@ def init_sync_db():
     
 async def get_async_db():
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await session.close()

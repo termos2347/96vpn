@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from web.schemas.schemas import PromptCard
 from web.services.auth import PromptService, SubscriptionService
 from web.security import get_current_user_optional
-from db.base import get_db
 from db.models import WebUser
 
 logger = logging.getLogger(__name__)

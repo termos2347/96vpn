@@ -26,8 +26,8 @@ from internal_api import create_internal_app
 from web.app import app as fastapi_app
 from services.vpn_provider import vpn_provider
 
-# Диспетчер админ-бота (из существующего модуля)
-from admin.bot import dp as admin_dp
+# Импорты из админ-модуля
+from admin import startup as admin_startup, shutdown as admin_shutdown, dp as admin_dp
 
 # Модуль web.routes.web (для установки глобальных переменных вебхуков)
 from web.routes import web as web_routes
@@ -53,6 +53,18 @@ async def main():
     except Exception as e:
         logger.warning(f"VPN pre-auth failed: {e}")
 
+    # Инициализация админ-бота (создаёт admin_bot и main_bot, глобальные для рассылки)
+    await admin_startup()
+
+    # Для получения экземпляров ботов, созданных в admin_startup, импортируем их
+    from admin import bot as admin_module
+    admin_bot_instance = admin_module.admin_bot
+    main_bot_for_broadcast = admin_module.main_bot
+
+    if not admin_bot_instance:
+        logger.error("Admin bot not initialized properly")
+        sys.exit(1)
+
     # --- Настройка основного бота (webhook) ---
     if PROXY_URL:
         main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
@@ -69,19 +81,18 @@ async def main():
     web_routes.webhook_bot = main_bot
     web_routes.webhook_dp = main_dp
 
-    # --- Админ-бот (webhook) ---
-    admin_bot = None
+    # --- Админ-бот (webhook) — используем экземпляр, созданный в startup ---
+    admin_bot = admin_bot_instance
     if ADMIN_BOT_TOKEN and settings.ADMIN_WEBHOOK_URL:
-        admin_bot = Bot(token=ADMIN_BOT_TOKEN, session=AiohttpSession(timeout=180))
         web_routes.webhook_admin_bot = admin_bot
-        web_routes.webhook_admin_dp = admin_dp
+        web_routes.webhook_admin_dp = admin_dp   # диспетчер из admin.bot
         await admin_bot.set_webhook(
             url=settings.ADMIN_WEBHOOK_URL,
             secret_token=settings.ADMIN_WEBHOOK_SECRET or None
         )
         logger.info(f"Admin webhook set to {settings.ADMIN_WEBHOOK_URL}")
     else:
-        logger.warning("ADMIN_BOT_TOKEN or ADMIN_WEBHOOK_URL not set, admin bot disabled")
+        logger.warning("ADMIN_BOT_TOKEN or ADMIN_WEBHOOK_URL not set, admin webhook disabled")
 
     # --- Внутренний HTTP API бота (порт 8001) ---
     internal_app = create_internal_app()
@@ -107,8 +118,10 @@ async def main():
     await main_bot.set_webhook(url=webhook_url, secret_token=webhook_secret)
     logger.info(f"Main bot webhook set to {webhook_url}")
 
-    # --- Планировщик фоновых задач ---
+    # --- Планировщик фоновых задач (использует send_admin_alert, которому нужен admin_bot) ---
     await start_scheduler(main_bot)
+
+    # Остальные команды бота (не админского) – обработчики уже в main_dp
     await setup_bot_commands(main_bot)
 
     # --- Graceful shutdown ---
@@ -120,6 +133,8 @@ async def main():
             await admin_bot.delete_webhook()
             await admin_bot.session.close()
         await main_bot.session.close()
+        # Закрываем админ-бот (и main_bot для рассылки)
+        await admin_shutdown()
         await vpn_provider.close()
         server.should_exit = True
         await web_task

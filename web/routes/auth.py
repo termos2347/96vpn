@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr
 from web.schemas.schemas import UserRegister, UserLogin, UserProfile
 from web.services.auth import AuthService
-from db.base import AsyncSession, get_async_db, get_db,  AsyncSessionLocal
+from db.base import AsyncSession, get_async_db,  AsyncSessionLocal
 from web.security import create_access_token
 from config import settings
 
