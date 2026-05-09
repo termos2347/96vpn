@@ -135,7 +135,6 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             return;
         }
         
-        document.cookie = `access_token=${loginData.access_token}; path=/; max-age=2592000`;
         window.location.href = '/pay-choice';
         
     } catch (error) {

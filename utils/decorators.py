@@ -1,6 +1,6 @@
 from functools import wraps
 from aiogram.types import Message, CallbackQuery
-from datetime import datetime, timedelta
+from datetime import datetime, timezone,timedelta
 from collections import defaultdict
 import logging
 
@@ -33,7 +33,7 @@ def rate_limit(max_per_minute: int = 5):
             else:
                 return await func(message_or_callback, *args, **kwargs)
             
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             cutoff_time = now - timedelta(seconds=1)
             
             # Чистим старые записи

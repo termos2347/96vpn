@@ -255,7 +255,7 @@ curl -X GET "http://localhost:8000/api/prompts/all?user_id=1" \
 # В обработчике Telegram команды:
 """
 @router.message(Command("buy"))
-async def buy_subscription(message: Message, db: Session = Depends(get_db)):
+async def buy_subscription(message: Message, db: AsyncSession = Depends(get_async_db)):
     user_id = message.from_user.id
     
     # Переход на страницу оплаты

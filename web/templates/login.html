@@ -74,7 +74,6 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         const data = await response.json();
         
         if (response.ok) {
-            document.cookie = `access_token=${data.access_token}; path=/; max-age=2592000`;
             window.location.href = '/dashboard';
         } else {
             document.getElementById('message').innerHTML = '<span class="text-red-400">Неверные учётные данные</span>';

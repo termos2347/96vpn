@@ -28,30 +28,24 @@ async def main():
 
     session = None
     if PROXY_URL:
-        try:
-            connector = TCPConnector(
-                limit=100,
-                limit_per_host=30,
-                ttl_dns_cache=300,
-                force_close=False,
-                enable_cleanup_closed=True,
-            )
-            timeout = ClientTimeout(
-                total=60,
-                connect=20,
-                sock_read=30,
-                sock_connect=20,
-            )
-            client_session = ClientSession(
-                connector=connector,
-                timeout=timeout,
-            )
-            session = AiohttpSession(proxy=PROXY_URL)
-            session._session = client_session
-            logger.info(f"Using HTTP proxy with custom timeouts: {PROXY_URL}")
-        except Exception as e:
-            logger.error(f"Failed to setup proxy session: {e}", exc_info=True)
-            session = None
+        connector = TCPConnector(
+            limit=100,
+            limit_per_host=30,
+            ttl_dns_cache=600,           # увеличили кэш DNS
+            force_close=False,
+            enable_cleanup_closed=True,
+            keepalive_timeout=30,        # держим соединение дольше
+        )
+        timeout = ClientTimeout(
+            total=180,                   # общий таймаут 3 минуты
+            connect=30,                  # таймаут подключения
+            sock_read=60,                # чтения данных
+            sock_connect=30,             # соединения сокета
+        )
+        client_session = ClientSession(connector=connector, timeout=timeout)
+        session = AiohttpSession(proxy=PROXY_URL)
+        session._session = client_session
+        logger.info(f"Proxy configured: {PROXY_URL} with extended timeouts")
 
     bot = Bot(token=TOKEN, session=session)
     dp = Dispatcher()

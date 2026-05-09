@@ -21,6 +21,8 @@ logs/
 migrations\versions\
 .pytest_cache
 
+alembic.ini
+
 test_async_api.py
 test_manual_api.py
 test_provider.py

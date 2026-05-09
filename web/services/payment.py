@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from yookassa import Configuration, Payment
 from yookassa.domain.exceptions import ApiError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests.exceptions
@@ -15,6 +15,7 @@ from config import settings
 from web.services.auth import SubscriptionService
 
 logger = logging.getLogger(__name__)
+
 
 class YookassaService:
     def __init__(self):
@@ -31,7 +32,7 @@ class YookassaService:
         user_id: Optional[int],
         amount: float,
         plan: str,
-        db: Session,
+        db: AsyncSession,
         description: str = "Подписка на NeuroPrompt Premium",
         metadata: dict = None
     ) -> Optional[Dict[str, Any]]:
@@ -51,7 +52,8 @@ class YookassaService:
             }
 
             if user_id is not None:
-                user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
+                result = await db.execute(select(WebUser).where(WebUser.id == user_id))
+                user = result.scalars().first()
                 if not user:
                     logger.error(f"User {user_id} not found")
                     return None
@@ -66,10 +68,11 @@ class YookassaService:
             payment = Payment.create(payment_data, idempotence_key)
 
             if user_id:
-                user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
+                result = await db.execute(select(WebUser).where(WebUser.id == user_id))
+                user = result.scalars().first()
                 if user:
                     user.yookassa_payment_id = payment.id
-                    db.commit()
+                    await db.commit()
 
             logger.info(f"Payment created: {payment.id}, amount: {amount}")
             return {
@@ -90,7 +93,7 @@ class YookassaService:
             logger.error(f"Error getting payment status: {e}")
             return None
 
-    async def process_webhook(self, webhook_data: Dict[str, Any], db: Session) -> bool:
+    async def process_webhook(self, webhook_data: Dict[str, Any], db: AsyncSession) -> bool:
         try:
             event = webhook_data.get("event")
             if event != "payment.succeeded":
@@ -109,7 +112,8 @@ class YookassaService:
                 logger.error("Payment ID not found in webhook")
                 return False
 
-            user = db.execute(select(WebUser).where(WebUser.yookassa_payment_id == payment_id)).scalars().first()
+            result = await db.execute(select(WebUser).where(WebUser.yookassa_payment_id == payment_id))
+            user = result.scalars().first()
             if not user:
                 logger.warning(f"User not found for payment {payment_id}")
                 return False
@@ -174,7 +178,7 @@ class YookassaService:
                 logger.error(f"Failed to call bot activation API: {e}")
                 return False
 
-    async def check_and_activate(self, payment_id: str, db: Session) -> bool:
+    async def check_and_activate(self, payment_id: str, db: AsyncSession) -> bool:
         try:
             payment = Payment.find_one(payment_id)
             if payment.status == 'succeeded':
@@ -184,7 +188,8 @@ class YookassaService:
                 if metadata and metadata.get('source') == 'web':
                     user_id = metadata.get('user_id')
                     if user_id:
-                        user = db.execute(select(WebUser).where(WebUser.id == user_id)).scalars().first()
+                        result = await db.execute(select(WebUser).where(WebUser.id == user_id))
+                        user = result.scalars().first()
                         if user:
                             plan = metadata.get('plan', 'monthly')
                             if plan == 'monthly':
@@ -203,5 +208,6 @@ class YookassaService:
         except Exception as e:
             logger.error(f"Check and activate error: {e}")
             return False
+
 
 yookassa_service = YookassaService()

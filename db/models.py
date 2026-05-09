@@ -22,16 +22,16 @@ class WebUser(Base):
 
     # Подписка NeuroPrompt
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
-    expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expiry_date = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Платежи Yookassa
     yookassa_payment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     yookassa_customer_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     payment_method_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
 # ---------- Бот-пользователь ----------
 class BotUser(Base):
     __tablename__ = "bot_users"
@@ -43,14 +43,14 @@ class BotUser(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # VPN подписка
-    vpn_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    bypass_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    vpn_subscription_end = mapped_column(DateTime(timezone=True), nullable=True)
+    bypass_subscription_end = mapped_column(DateTime(timezone=True), nullable=True)
     vpn_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
 # ---------- Платёжные логи бота ----------
 class BotPayment(Base):
     __tablename__ = "bot_payments"
@@ -64,8 +64,8 @@ class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    
 class Prompt(Base):
     __tablename__ = "prompts"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -76,7 +76,7 @@ class Prompt(Base):
     is_free: Mapped[bool] = mapped_column(Boolean, default=False)
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
     rating: Mapped[float] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
     category = relationship("Category", backref="prompts")

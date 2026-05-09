@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from db.base import AsyncSessionLocal
 from db.models import BotUser
 from db.crud import set_vpn_client_id
@@ -18,7 +18,7 @@ async def check_expired_subscriptions(bot):
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(BotUser).where(
-                        BotUser.vpn_subscription_end < datetime.utcnow(),
+                        BotUser.vpn_subscription_end < datetime.now(timezone.utc),
                         BotUser.vpn_client_id.isnot(None)
                     )
                 )
@@ -66,7 +66,7 @@ async def send_expiry_reminders(bot):
     while True:
         try:
             async with AsyncSessionLocal() as session:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 result = await session.execute(
                     select(BotUser).where(
                         BotUser.vpn_subscription_end > now,

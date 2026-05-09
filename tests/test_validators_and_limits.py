@@ -1,7 +1,7 @@
 """Unit tests для основных компонентов."""
 import pytest
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from utils.validators import (
     validate_user_id, validate_email, validate_days, 
     validate_currency, validate_uuid, ValidationError
@@ -128,7 +128,7 @@ class TestDateCalculations:
     
     def test_subscription_end_date_calculation(self):
         """Проверяет правильность расчёта даты конца подписки."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         days = 30
         expected_end = now + timedelta(days=days)
         

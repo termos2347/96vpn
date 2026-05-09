@@ -5,9 +5,11 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.base import get_db
+from db.base import AsyncSession, get_async_db, get_db, AsyncSessionLocal
 from db.models import WebUser
 from config import settings
 from web.services.auth import PromptService, SubscriptionService, AuthService
@@ -109,7 +111,7 @@ async def prompts_page(request: Request, current_user: WebUser = Depends(get_cur
     )
 
 @router.get("/pay-choice", response_class=HTMLResponse)
-async def pay_choice(request: Request, db: Session = Depends(get_db),
+async def pay_choice(request: Request, db: AsyncSession = Depends(get_async_db),
                      current_user: WebUser = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/login", status_code=302)
@@ -123,7 +125,7 @@ async def pay_choice(request: Request, db: Session = Depends(get_db),
     )
 
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
-async def payment_telegram(request: Request, tg_id: int, db: Session = Depends(get_db),
+async def payment_telegram(request: Request, tg_id: int, db: AsyncSession = Depends(get_async_db),
                            current_user: WebUser = Depends(get_current_user_optional)):
     template = jinja_env.get_template("payment_telegram.html")
     return template.render(
@@ -141,7 +143,7 @@ async def terms(request: Request, current_user: WebUser = Depends(get_current_us
     return template.render(
         site_name=settings.APP_NAME,
         user=current_user,
-        current_date=datetime.now().strftime("%d.%m.%Y")
+        current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
     )
 
 @router.get("/legal/privacy", response_class=HTMLResponse)
@@ -150,7 +152,7 @@ async def privacy(request: Request, current_user: WebUser = Depends(get_current_
     return template.render(
         site_name=settings.APP_NAME,
         user=current_user,
-        current_date=datetime.now().strftime("%d.%m.%Y")
+        current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
     )
 
 @router.get("/prompt/{prompt_id}", response_class=HTMLResponse)

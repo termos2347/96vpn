@@ -98,3 +98,7 @@ def init_sync_db():
     if sync_engine is None:
         raise RuntimeError("Database not configured")
     Base.metadata.create_all(bind=sync_engine)
+    
+async def get_async_db():
+    async with AsyncSessionLocal() as session:
+        yield session

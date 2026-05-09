@@ -258,7 +258,7 @@ async def cmd_userinfo(message: types.Message):
 
         vpn_end = user.vpn_subscription_end
         bypass_end = user.bypass_subscription_end
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
         bypass_left = (bypass_end - now).days if bypass_end and bypass_end > now else 0
         vpn_active = vpn_left > 0
@@ -301,7 +301,7 @@ async def cmd_grant(message: types.Message):
     try:
         async with AsyncSessionLocal() as session:
             user = await get_or_create_bot_user(tid, session=session)
-            has_active_key = user.vpn_client_id and user.vpn_subscription_end and user.vpn_subscription_end > datetime.utcnow()
+            has_active_key = user.vpn_client_id and user.vpn_subscription_end and user.vpn_subscription_end > datetime.now(timezone.utc)
             if has_active_key:
                 await set_vpn_subscription(tid, days)
                 end_date = user.vpn_subscription_end.strftime('%d.%m.%Y') if user.vpn_subscription_end else "неизвестно"
@@ -353,7 +353,7 @@ async def cmd_revoke(message: types.Message):
             async with AsyncSessionLocal() as session:
                 user = await get_or_create_bot_user(tid, session=session)
                 if user:
-                    user.vpn_subscription_end = datetime.utcnow() - timedelta(days=1)
+                    user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
                     await session.commit()
             await message.answer(f"✅ VPN-подписка для {tid} полностью отозвана (ключ удалён, подписка деактивирована).")
         else:
@@ -370,7 +370,7 @@ async def cmd_stats(message: types.Message):
         await message.answer("❌ Нет доступа.")
         return
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
     month_ago = now - timedelta(days=30)

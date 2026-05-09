@@ -1,31 +1,47 @@
 import logging
 from pathlib import Path
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, staticfiles
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from web.routes import web, auth, payment, prompts
 from config import settings
-from db.base import init_sync_db
+from db.base import init_db  # асинхронная инициализация
+from web.services.auth import PromptService
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация таблиц базы данных (синхронно)
-try:
-    init_sync_db()
-    logger.info("Database tables initialized")
-except Exception as e:
-    logger.error(f"Database initialization error: {e}")
 
-# Инициализация FastAPI приложения
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения."""
+    # Startup
+    logger.info("Starting up...")
+    try:
+        await init_db()
+        logger.info("Database tables initialized (async)")
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+        # В production можно raise, но для отладки продолжим
+    # Предзагрузка кэша промптов
+    await PromptService.init_cache()
+    yield
+    # Shutdown
+    logger.info("Shutting down...")
+    # Здесь можно закрыть глобальные ресурсы, например aiohttp сессию, если добавите
+
+
+# Инициализация FastAPI приложения с lifespan
 app = FastAPI(
     title=settings.APP_NAME,
     description="Платформа для продажи AI-промптов по подписке",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS
@@ -48,10 +64,12 @@ app.include_router(auth.router)
 app.include_router(payment.router)
 app.include_router(prompts.router)
 
+
 @app.get("/health")
 async def health():
     """Health check"""
     return {"status": "ok", "app": settings.APP_NAME}
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
@@ -60,6 +78,7 @@ async def favicon():
     if favicon_path.exists():
         return FileResponse(favicon_path)
     return {"status": "not found"}
+
 
 if __name__ == "__main__":
     import uvicorn
