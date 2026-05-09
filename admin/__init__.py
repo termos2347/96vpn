@@ -1,3 +1,3 @@
-from .bot import send_admin_alert, error_log
+from .bot import dp, send_admin_alert, error_log, startup, shutdown, admin_bot, main_bot
 
-__all__ = ["send_admin_alert", "error_log"]
+__all__ = ["dp", "send_admin_alert", "error_log", "startup", "shutdown", "admin_bot", "main_bot"]

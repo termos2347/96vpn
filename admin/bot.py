@@ -7,33 +7,21 @@ from io import BytesIO
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand, BufferedInputFile
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
 from sqlalchemy import select, text, func
 
 from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
 from db.crud import (
-    get_or_create_bot_user,
-    set_vpn_subscription,
-    get_vpn_end,
-    is_vpn_active,
-    set_vpn_client_id,
-    get_vpn_client_id,
-    add_category,
-    get_all_categories,
-    rename_category,
-    delete_category,
-    add_prompt,
-    get_prompts_by_category,
-    update_prompt,
-    delete_prompt,
-    get_prompt_by_id,
+    get_or_create_bot_user, set_vpn_subscription, set_vpn_client_id,
+    get_vpn_end, is_vpn_active, get_vpn_client_id
 )
 from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
-from web.services.auth import PromptService
+
+# Импортируем наши новые роутеры
+from .categories import router as categories_router
+from .prompts import router as prompts_router
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +29,7 @@ error_log = deque(maxlen=10)
 admin_bot: Bot | None = None
 main_bot: Bot | None = None
 
-# ---------- Функция отправки алертов ----------
+# Функция отправки алертов
 async def send_admin_alert(message: str):
     global admin_bot
     if not admin_bot or not ADMIN_CHAT_ID:
@@ -83,19 +71,12 @@ async def shutdown():
     if main_bot:
         await main_bot.session.close()
         main_bot = None
-    logger.info("Admin bot stopped")
 
 dp = Dispatcher()
+dp.include_router(categories_router)
+dp.include_router(prompts_router)
 
-# ---------- Состояния для FSM (добавление промпта) ----------
-class PromptForm(StatesGroup):
-    category = State()
-    title = State()
-    description = State()
-    content = State()
-    is_free = State()
-
-# ==================== Базовые команды ====================
+# ---------- Базовые команды ----------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer("🛡️ Админ-бот 96VPN. Все команды: /menu")
@@ -144,12 +125,12 @@ async def cmd_errors(message: types.Message):
     if not error_log:
         await message.answer("✅ Нет сохранённых ошибок.")
         return
-    text = "📋 Последние ошибки:\n"
+    text_lines = "📋 Последние ошибки:\n"
     for i, err in enumerate(reversed(error_log), 1):
-        text += f"{i}. {err}\n"
-    await message.answer(text)
+        text_lines += f"{i}. {err}\n"
+    await message.answer(text_lines)
 
-# ==================== Рассылка ====================
+# ---------- Рассылка ----------
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -234,7 +215,7 @@ async def cmd_broadcast(message: types.Message):
 
     await message.answer(f"✅ Рассылка завершена: отправлено {success}, ошибок {fail}.")
 
-# ==================== Управление пользователями ====================
+# ---------- Управление пользователями ----------
 @dp.message(Command("userinfo"))
 async def cmd_userinfo(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -363,7 +344,7 @@ async def cmd_revoke(message: types.Message):
         await send_admin_alert(f"Ошибка при /revoke для {tid}: {e}")
         await message.answer(f"❌ Ошибка: {e}")
 
-# ==================== Статистика ====================
+# ---------- Статистика ----------
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -449,177 +430,3 @@ async def cmd_stats(message: types.Message):
         f"⚪ Без подписки: {no_sub}"
     )
     await message.answer(text)
-
-# ==================== Управление категориями ====================
-@dp.message(Command("addcategory"))
-async def cmd_addcategory(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Используйте: /addcategory <название>")
-        return
-    name = args[1].strip()
-    cat = await add_category(name)
-    if cat:
-        PromptService.invalidate()
-        await message.answer(f"✅ Категория '{name}' создана.")
-    else:
-        await message.answer(f"❌ Категория '{name}' уже существует.")
-
-@dp.message(Command("renamecategory"))
-async def cmd_renamecategory(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split(maxsplit=2)
-    if len(args) < 3:
-        await message.answer("Используйте: /renamecategory <старое> <новое>")
-        return
-    old, new = args[1], args[2]
-    if await rename_category(old, new):
-        PromptService.invalidate()
-        await message.answer(f"✅ Категория переименована в '{new}'.")
-    else:
-        await message.answer("❌ Категория не найдена.")
-
-@dp.message(Command("deletecategory"))
-async def cmd_deletecategory(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Используйте: /deletecategory <название>")
-        return
-    name = args[1].strip()
-    if await delete_category(name):
-        PromptService.invalidate()
-        await message.answer(f"✅ Категория '{name}' и все её промпты удалены.")
-    else:
-        await message.answer("❌ Категория не найдена.")
-
-# ==================== Управление промптами ====================
-@dp.message(Command("addprompt"))
-async def cmd_addprompt(message: types.Message, state: FSMContext):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    await state.set_state(PromptForm.category)
-    await message.answer("Введите название категории:")
-
-@dp.message(PromptForm.category)
-async def process_category(message: types.Message, state: FSMContext):
-    cat_name = message.text.strip()
-    cats = await get_all_categories()
-    if cat_name not in cats:
-        await message.answer("Такой категории нет. Сначала создайте её через /addcategory.")
-        await state.clear()
-        return
-    await state.update_data(category=cat_name)
-    await state.set_state(PromptForm.title)
-    await message.answer("Введите название промпта:")
-
-@dp.message(PromptForm.title)
-async def process_title(message: types.Message, state: FSMContext):
-    await state.update_data(title=message.text.strip())
-    await state.set_state(PromptForm.description)
-    await message.answer("Введите краткое описание:")
-
-@dp.message(PromptForm.description)
-async def process_description(message: types.Message, state: FSMContext):
-    await state.update_data(description=message.text.strip())
-    await state.set_state(PromptForm.content)
-    await message.answer("Введите полный текст промпта:")
-
-@dp.message(PromptForm.content)
-async def process_content(message: types.Message, state: FSMContext):
-    await state.update_data(content=message.text.strip())
-    await state.set_state(PromptForm.is_free)
-    await message.answer("Промпт бесплатный? (да/нет)")
-
-@dp.message(PromptForm.is_free)
-async def process_is_free(message: types.Message, state: FSMContext):
-    answer = message.text.lower().strip()
-    is_free = answer in ("да", "yes", "1", "true")
-    data = await state.get_data()
-    prompt = await add_prompt(
-        title=data["title"],
-        description=data["description"],
-        content=data["content"],
-        category_name=data["category"],
-        is_free=is_free
-    )
-    if prompt:
-        PromptService.invalidate()
-        await message.answer(f"✅ Промпт '{prompt.title}' (ID {prompt.id}) добавлен!")
-    else:
-        await message.answer("❌ Ошибка при добавлении. Проверьте категорию.")
-    await state.clear()
-
-@dp.message(Command("editprompt"))
-async def cmd_editprompt(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Используйте: /editprompt <id> <поле=значение> ...")
-        return
-    try:
-        prompt_id = int(args[1])
-    except ValueError:
-        await message.answer("ID должен быть числом.")
-        return
-    updates = {}
-    for arg in args[2:]:
-        if "=" in arg:
-            key, val = arg.split("=", 1)
-            updates[key] = val
-    if not updates:
-        await message.answer("Укажите поля для обновления, например: /editprompt 5 title=Новый заголовок is_free=true")
-        return
-    if await update_prompt(prompt_id, **updates):
-        PromptService.invalidate()
-        await message.answer("✅ Промпт обновлён.")
-    else:
-        await message.answer("❌ Промпт не найден или ошибка.")
-
-@dp.message(Command("deleteprompt"))
-async def cmd_deleteprompt(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("Используйте: /deleteprompt <id>")
-        return
-    try:
-        prompt_id = int(args[1])
-    except ValueError:
-        await message.answer("ID должен быть числом.")
-        return
-    if await delete_prompt(prompt_id):
-        PromptService.invalidate()
-        await message.answer("✅ Промпт удалён.")
-    else:
-        await message.answer("❌ Промпт не найден.")
-
-@dp.message(Command("listprompts"))
-async def cmd_listprompts(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split(maxsplit=1)
-    category = args[1] if len(args) > 1 else None
-    prompts = await get_prompts_by_category(category)
-    if not prompts:
-        await message.answer("Промптов не найдено.")
-        return
-    lines = []
-    for p in prompts[:20]:
-        lines.append(f"{p['id']}: {p['title']} [{p['category']}] {'(бесплатный)' if p['is_free'] else ''}")
-    await message.answer("📋 Промпты:\n" + "\n".join(lines))
-    if len(prompts) > 20:
-        await message.answer("Показаны первые 20. Уточните категорию.")

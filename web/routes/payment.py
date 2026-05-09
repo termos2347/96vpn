@@ -11,7 +11,7 @@ from web.services.payment import yookassa_service
 from web.services.auth import SubscriptionService, AuthService
 from web.security import get_current_user_optional
 from config import settings
-from db.base import AsyncSession, get_async_db, get_db,  AsyncSessionLocal
+from db.base import AsyncSession, get_async_db,  AsyncSessionLocal
 from db.models import WebUser
 
 logger = logging.getLogger(__name__)
