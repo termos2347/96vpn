@@ -12,27 +12,15 @@ logger = logging.getLogger(__name__)
 
 
 # ---------- BotUser ----------
-async def get_or_create_bot_user(
-    telegram_id: int,
-    username: Optional[str] = None,
-    email: Optional[str] = None,
-    session: Optional[AsyncSession] = None
-) -> Optional[BotUser]:
-    """Получить или создать пользователя бота."""
-    if session is None:
-        async with AsyncSessionLocal() as session:
-            return await _get_or_create_bot_user(session, telegram_id, username, email)
-    else:
-        return await _get_or_create_bot_user(session, telegram_id, username, email)
-
-
 async def _get_or_create_bot_user(
     session: AsyncSession,
     telegram_id: int,
     username: Optional[str],
     email: Optional[str]
 ) -> BotUser:
-    result = await session.execute(select(BotUser).where(BotUser.telegram_id == telegram_id))
+    result = await session.execute(
+        select(BotUser).where(BotUser.telegram_id == telegram_id)
+    )
     user = result.scalars().first()
     if not user:
         user = BotUser(
@@ -44,8 +32,19 @@ async def _get_or_create_bot_user(
         )
         session.add(user)
         await session.commit()
-        await session.refresh(user)
     return user
+
+async def get_or_create_bot_user(
+    telegram_id: int,
+    username: Optional[str] = None,
+    email: Optional[str] = None,
+    session: Optional[AsyncSession] = None
+) -> Optional[BotUser]:
+    if session is None:
+        async with AsyncSessionLocal() as new_session:
+            return await _get_or_create_bot_user(new_session, telegram_id, username, email)
+    else:
+        return await _get_or_create_bot_user(session, telegram_id, username, email)
 
 
 async def set_vpn_subscription(telegram_id: int, days: int) -> None:

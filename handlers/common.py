@@ -1,10 +1,13 @@
 import logging
+from datetime import datetime, timezone
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand
 from aiogram.exceptions import TelegramForbiddenError
-from db.crud import get_vpn_end, get_bypass_end, is_bypass_active, get_or_create_bot_user
-from datetime import datetime, timezone
+from db.crud import get_or_create_bot_user
+from db.base import AsyncSessionLocal
+from db.models import BotUser
+from sqlalchemy import select
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
 from .keyboards import main_keyboard
@@ -57,14 +60,26 @@ async def info(message: types.Message):
         user_id = message.from_user.id
         validate_user_id(user_id)
         
-        vpn_end = await get_vpn_end(user_id)
+        # Оптимизация: один запрос к БД вместо двух
+        async with AsyncSessionLocal() as session:
+            stmt = select(
+                BotUser.vpn_subscription_end,
+                BotUser.bypass_subscription_end
+            ).where(BotUser.telegram_id == user_id)
+            result = await session.execute(stmt)
+            row = result.first()
+        
+        vpn_end = row.vpn_subscription_end if row else None
+        bypass_end = row.bypass_subscription_end if row else None
+        
+        # Формируем статус VPN
         vpn_status = "❌ не активна"
         if vpn_end and vpn_end > datetime.now(timezone.utc):
             days_left = (vpn_end - datetime.now(timezone.utc)).days
             vpn_status = f"✅ активна, осталось {days_left} дн."
         
-        bypass_active = await is_bypass_active(user_id)
-        bypass_status = "✅ активна" if bypass_active else "❌ не активна"
+        # Статус обхода DPI
+        bypass_status = "✅ активна" if (bypass_end and bypass_end > datetime.now(timezone.utc)) else "❌ не активна"
         
         logger.info(f"User {user_id} requested info (VPN: {vpn_status}, Bypass: {bypass_status})")
         
