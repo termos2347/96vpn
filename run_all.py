@@ -8,7 +8,6 @@ from pathlib import Path
 import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.exceptions import TelegramNetworkError
 from aiohttp import web
 from web.services.auth import PromptService
 
@@ -16,23 +15,22 @@ from web.services.auth import PromptService
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# Импорты бота
-from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN
-from handlers import router
+# Импорты
+from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
+from handlers import router as main_router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
 from db.base import init_db, engine
 from utils.logger import setup_logger
 from internal_api import create_internal_app
-
-# Импорты веб-части
 from web.app import app as fastapi_app
-
-# Глобальный провайдер VPN
 from services.vpn_provider import vpn_provider
 
-# Админ-бот
-from admin import start_polling as start_admin_polling, shutdown as shutdown_admin_bot
+# Диспетчер админ-бота (из существующего модуля)
+from admin.bot import dp as admin_dp
+
+# Модуль web.routes.web (для установки глобальных переменных вебхуков)
+from web.routes import web as web_routes
 
 
 async def main():
@@ -40,7 +38,7 @@ async def main():
     logger = logging.getLogger(__name__)
     logger.info("Starting combined server (bot + web)…")
 
-    # Инициализация БД (асинхронная)
+    # Инициализация БД
     try:
         await init_db()
         logger.info("Database initialized")
@@ -48,25 +46,42 @@ async def main():
         logger.error(f"Database init failed: {e}")
         sys.exit(1)
 
-    # Предварительная аутентификация с VPN‑панелью
+    # VPN аутентификация
     try:
         await vpn_provider.login()
         logger.info("VPN provider authenticated")
     except Exception as e:
-        logger.warning(f"VPN provider pre-auth failed (will retry later): {e}")
+        logger.warning(f"VPN pre-auth failed: {e}")
 
-    # --- Настройка бота с увеличенным таймаутом ---
-    # Aiogram 3.x: timeout передаётся как число секунд
+    # --- Настройка основного бота (webhook) ---
     if PROXY_URL:
-        session = AiohttpSession(proxy=PROXY_URL, timeout=180)
-        logger.info(f"Proxy configured: {PROXY_URL} with timeout 180s")
+        main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
+        logger.info(f"Proxy configured: {PROXY_URL}")
     else:
-        session = AiohttpSession(timeout=180)
-        logger.info("No proxy, using extended timeout 180s")
+        main_session = AiohttpSession(timeout=180)
+        logger.info("No proxy, timeout 180s")
 
-    bot = Bot(token=TOKEN, session=session)
-    dp = Dispatcher()
-    dp.include_router(router)
+    main_bot = Bot(token=TOKEN, session=main_session)
+    main_dp = Dispatcher()
+    main_dp.include_router(main_router)
+
+    # Передаём в модуль web.routes.web для обработки вебхука
+    web_routes.webhook_bot = main_bot
+    web_routes.webhook_dp = main_dp
+
+    # --- Админ-бот (webhook) ---
+    admin_bot = None
+    if ADMIN_BOT_TOKEN and settings.ADMIN_WEBHOOK_URL:
+        admin_bot = Bot(token=ADMIN_BOT_TOKEN, session=AiohttpSession(timeout=180))
+        web_routes.webhook_admin_bot = admin_bot
+        web_routes.webhook_admin_dp = admin_dp
+        await admin_bot.set_webhook(
+            url=settings.ADMIN_WEBHOOK_URL,
+            secret_token=settings.ADMIN_WEBHOOK_SECRET or None
+        )
+        logger.info(f"Admin webhook set to {settings.ADMIN_WEBHOOK_URL}")
+    else:
+        logger.warning("ADMIN_BOT_TOKEN or ADMIN_WEBHOOK_URL not set, admin bot disabled")
 
     # --- Внутренний HTTP API бота (порт 8001) ---
     internal_app = create_internal_app()
@@ -76,47 +91,38 @@ async def main():
     await internal_site.start()
     logger.info("Internal API started on http://localhost:8001")
 
-    # --- Запуск FastAPI через uvicorn ---
-    config = uvicorn.Config(
-        app=fastapi_app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-    )
+    # --- Запуск FastAPI (порт 8000) ---
+    config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
     server = uvicorn.Server(config)
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")
 
-    # --- Запуск админ-бота (если настроен) ---
-    if ADMIN_BOT_TOKEN:
-        admin_task = asyncio.create_task(start_admin_polling())
-        logger.info("Admin bot polling started")
-    else:
-        logger.warning("ADMIN_BOT_TOKEN not set, admin bot disabled")
+    # --- Установка вебхука основного бота ---
+    webhook_url = settings.WEBHOOK_URL
+    if not webhook_url:
+        logger.error("WEBHOOK_URL not set in .env")
+        sys.exit(1)
+    webhook_secret = settings.WEBHOOK_SECRET or None
+    await main_bot.set_webhook(url=webhook_url, secret_token=webhook_secret)
+    logger.info(f"Main bot webhook set to {webhook_url}")
+
+    # --- Планировщик фоновых задач ---
+    await start_scheduler(main_bot)
+    await setup_bot_commands(main_bot)
 
     # --- Graceful shutdown ---
     async def shutdown():
-        """Корректное завершение всех сервисов."""
         logger.info("Shutting down…")
-        try:
-            await dp.stop_polling()
-        except Exception:
-            pass
-
-        if bot.session:
-            await bot.session.close()
-        if session:
-            await session.close()
-
+        # Удаляем вебхуки
+        await main_bot.delete_webhook()
+        if admin_bot:
+            await admin_bot.delete_webhook()
+            await admin_bot.session.close()
+        await main_bot.session.close()
         await vpn_provider.close()
-
-        if ADMIN_BOT_TOKEN:
-            await shutdown_admin_bot()
-
         server.should_exit = True
         await web_task
-
         await internal_runner.cleanup()
         await engine.dispose()
         logger.info("Shutdown complete.")
@@ -128,34 +134,8 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # --- Запуск планировщика и бота ---
-    await start_scheduler(bot)
-    await setup_bot_commands(bot)
-
-    # Цикл с переподключением при сетевых ошибках
-    restart_count = 0
-    max_restarts = 20
-    while restart_count < max_restarts:
-        try:
-            logger.info("Bot starting polling…")
-            await dp.start_polling(bot)
-        except asyncio.CancelledError:
-            logger.info("Polling cancelled")
-            break
-        except TelegramNetworkError as e:
-            logger.warning(f"Network error (likely disconnect): {e}")
-            await asyncio.sleep(2)
-            # Не увеличиваем restart_count для сетевых проблем
-            continue
-        except Exception as e:
-            restart_count += 1
-            logger.error(f"Polling error ({restart_count}/{max_restarts}): {e}", exc_info=True)
-            if restart_count < max_restarts:
-                await asyncio.sleep(min(5 * restart_count, 60))
-            else:
-                logger.error("Max restarts reached, stopping bot")
-                break
-    await shutdown()
+    # Бесконечное ожидание (завершится по сигналу)
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":

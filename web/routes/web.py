@@ -15,7 +15,16 @@ from config import settings
 from web.services.auth import PromptService, SubscriptionService, AuthService
 from web.security import get_current_user_optional
 
+from aiogram import Bot, Dispatcher
+from aiogram.types import Update
+from config import settings
+from fastapi.responses import JSONResponse
+
 logger = logging.getLogger(__name__)
+webhook_bot: Bot = None
+webhook_admin_bot: Bot = None
+webhook_admin_dp: Dispatcher = None
+webhook_dp: Dispatcher = None
 
 templates_dir = Path(__file__).parent.parent / "templates"
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
@@ -207,3 +216,47 @@ async def forgot_password_page(request: Request, current_user: WebUser = Depends
 async def reset_password_page(request: Request, token: str, current_user: WebUser = Depends(get_current_user_optional)):
     template = jinja_env.get_template("reset_password.html")
     return template.render(site_name=settings.APP_NAME, token=token, user=current_user)
+
+@router.post("/webhook")
+async def telegram_webhook(request: Request):
+    """Обработчик вебхука от Telegram"""
+    global webhook_bot, webhook_dp
+    if webhook_bot is None or webhook_dp is None:
+        return JSONResponse(status_code=500, content={"error": "Bot not initialized"})
+    
+    # Проверка секрета
+    if settings.WEBHOOK_SECRET:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret != settings.WEBHOOK_SECRET:
+            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
+    
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        await webhook_dp.feed_update(webhook_bot, update)
+        return JSONResponse(content={"status": "ok"})
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    
+@router.post("/webhook/admin")
+async def admin_telegram_webhook(request: Request):
+    """Обработчик вебхука для админ-бота"""
+    global webhook_admin_bot, webhook_admin_dp
+    if webhook_admin_bot is None or webhook_admin_dp is None:
+        return JSONResponse(status_code=500, content={"error": "Admin bot not initialized"})
+    
+    # Проверка секрета
+    if settings.ADMIN_WEBHOOK_SECRET:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret != settings.ADMIN_WEBHOOK_SECRET:
+            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
+    
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        await webhook_admin_dp.feed_update(webhook_admin_bot, update)
+        return JSONResponse(content={"status": "ok"})
+    except Exception as e:
+        logger.error(f"Admin webhook error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

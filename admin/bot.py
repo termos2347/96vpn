@@ -623,16 +623,3 @@ async def cmd_listprompts(message: types.Message):
     await message.answer("📋 Промпты:\n" + "\n".join(lines))
     if len(prompts) > 20:
         await message.answer("Показаны первые 20. Уточните категорию.")
-
-# ---------- Запуск ----------
-async def start_polling():
-    await startup()
-    for attempt in range(5):
-        try:
-            await dp.start_polling(admin_bot)
-            break
-        except Exception as e:
-            logger.warning(f"Admin polling attempt {attempt+1} failed: {e}")
-            await asyncio.sleep(2)
-    else:
-        logger.error("Could not start admin polling after 5 attempts")
