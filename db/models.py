@@ -18,7 +18,7 @@ class WebUser(Base):
 
     # Восстановление пароля
     reset_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Подписка NeuroPrompt
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
