@@ -22,7 +22,7 @@ class WebUser(Base):
 
     # Подписка NeuroPrompt
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
-    expiry_date = mapped_column(DateTime(timezone=True), nullable=True)
+    expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Платежи Yookassa
     yookassa_payment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -31,7 +31,8 @@ class WebUser(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
+
 # ---------- Бот-пользователь ----------
 class BotUser(Base):
     __tablename__ = "bot_users"
@@ -43,14 +44,16 @@ class BotUser(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # VPN подписка
-    vpn_subscription_end = mapped_column(DateTime(timezone=True), nullable=True)
-    bypass_subscription_end = mapped_column(DateTime(timezone=True), nullable=True)
+    vpn_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    bypass_subscription_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     vpn_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    server_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vpn_servers.id"), nullable=True)   # <-- новый внешний ключ
 
+    last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    last_reminder_sent: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
+
 # ---------- Платёжные логи бота ----------
 class BotPayment(Base):
     __tablename__ = "bot_payments"
@@ -59,13 +62,15 @@ class BotPayment(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+
 # ---------- Категории и промпты ----------
 class Category(Base):
     __tablename__ = "categories"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    
+
+
 class Prompt(Base):
     __tablename__ = "prompts"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -78,5 +83,23 @@ class Prompt(Base):
     rating: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
     category = relationship("Category", backref="prompts")
+
+
+# ---------- VPN-серверы ----------
+class VPNServer(Base):
+    __tablename__ = "vpn_servers"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(nullable=False)
+    inbound_id: Mapped[int] = mapped_column(nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
+    api_path: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    sub_port: Mapped[int] = mapped_column(Integer, nullable=False, default=2096)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    weight: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
