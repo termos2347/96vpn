@@ -309,3 +309,9 @@ async def delete_prompt(prompt_id: int) -> bool:
         await session.delete(p)
         await session.commit()
         return True
+    
+async def set_vpn_server_id(telegram_id: int, server_id: Optional[int]) -> None:
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_bot_user(telegram_id, session=session)
+        user.server_id = server_id
+        await session.commit()

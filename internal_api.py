@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from aiohttp import web
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert
 
 from config import INTERNAL_API_SECRET
 from db.crud import (
@@ -15,6 +15,7 @@ from db.models import BotPayment
 from db.base import AsyncSessionLocal
 from services.vpn_manager import VPNManager
 from admin import send_admin_alert
+from handlers import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
@@ -59,26 +60,28 @@ async def handle_activation(request):
                 # Активируем подписку
                 if product_type == "vpn":
                     await set_vpn_subscription(telegram_id, days)
-                    manager = VPNManager()
+                    # Используем глобальный менеджер VPN (с пулом серверов)
+                    vpn_manager = get_vpn_manager()
                     try:
-                        link = await manager.create_key(telegram_id, days)
+                        link = await vpn_manager.create_key(telegram_id, days)
                         if not link:
                             logger.error(f"Failed to create VPN key for {telegram_id}")
                             await send_admin_alert(
                                 f"Не создался VPN-ключ (internal) для telegram_id={telegram_id}, payment_id={payment_id}"
                             )
-                    finally:
-                        pass
+                    except Exception as e:
+                        logger.error(f"VPN key creation error: {e}")
+                        await send_admin_alert(f"Ошибка создания ключа: {e}")
                 elif product_type == "bypass":
                     await set_bypass_subscription(telegram_id, days)
                 else:
                     return web.json_response({"error": "unknown product"}, status=400)
 
-                # Фиксируем платёж
-                if not await log_bot_payment(payment_id, telegram_id):
-                    # Уже существует – значит, другой конкурентный запрос обработал
-                    logger.info(f"Payment {payment_id} already logged concurrently")
-                    return web.json_response({"status": "already_activated"})
+                # Идемпотентная вставка платежа (UPSERT)
+                stmt = insert(BotPayment).values(payment_id=payment_id, telegram_id=telegram_id, created_at=datetime.now(timezone.utc))
+                stmt = stmt.on_conflict_do_nothing(index_elements=['payment_id'])
+                await session.execute(stmt)
+                await session.commit()
 
                 logger.info(f"Subscription activated for {telegram_id}, payment {payment_id}")
                 return web.json_response({"status": "ok"})
@@ -91,20 +94,20 @@ async def handle_activation(request):
                 )
                 return web.json_response({"status": "error", "detail": str(e)}, status=500)
 
-    # --- Старая логика (без payment_id) ---
+    # --- Старая логика (без payment_id) – сохраняем для совместимости ---
     try:
         if product_type == "vpn":
             await set_vpn_subscription(telegram_id, days)
-            manager = VPNManager()
+            vpn_manager = get_vpn_manager()
             try:
-                link = await manager.create_key(telegram_id, days)
+                link = await vpn_manager.create_key(telegram_id, days)
                 if not link:
                     logger.error(f"Failed to create VPN key for {telegram_id}")
                     await send_admin_alert(
                         f"Не создался VPN-ключ (internal, без payment_id) для telegram_id={telegram_id}"
                     )
-            finally:
-                pass
+            except Exception as e:
+                logger.error(f"VPN key creation error: {e}")
         elif product_type == "bypass":
             await set_bypass_subscription(telegram_id, days)
         else:

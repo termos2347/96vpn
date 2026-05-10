@@ -27,3 +27,4 @@ test_async_api.py
 test_manual_api.py
 test_provider.py
 test_vpn_manager.py
+test_server_pool.py

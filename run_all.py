@@ -8,6 +8,7 @@ from pathlib import Path
 import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.exceptions import TelegramNetworkError
 from aiohttp import web
 from web.services.auth import PromptService
 
@@ -17,21 +18,21 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Импорты
 from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
-from handlers import router as main_router
+from handlers import router as main_router, set_server_pool, set_vpn_manager
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
+from services.server_pool import ServerPool
+from services.vpn_manager import VPNManager
 from db.base import init_db, engine
 from utils.logger import setup_logger
 from internal_api import create_internal_app
 from web.app import app as fastapi_app
-from services.vpn_provider import vpn_provider
+from services.vpn_provider import vpn_provider   # пока оставляем для совместимости, но будем заменять
 
-# Импорты из админ-модуля
 from admin import startup as admin_startup, shutdown as admin_shutdown, dp as admin_dp
-
-# Модуль web.routes.web (для установки глобальных переменных вебхуков)
 from web.routes import web as web_routes
 
+logger = logging.getLogger(__name__)
 
 async def main():
     setup_logger()
@@ -46,24 +47,22 @@ async def main():
         logger.error(f"Database init failed: {e}")
         sys.exit(1)
 
-    # VPN аутентификация
-    try:
-        await vpn_provider.login()
-        logger.info("VPN provider authenticated")
-    except Exception as e:
-        logger.warning(f"VPN pre-auth failed: {e}")
+    # Инициализация пула VPN-серверов
+    server_pool = ServerPool()
+    await server_pool.refresh_servers()
+    set_server_pool(server_pool)
+    logger.info("VPN server pool initialized")
 
-    # Инициализация админ-бота (создаёт admin_bot и main_bot, глобальные для рассылки)
+    # Создаём менеджер VPN с пулом
+    vpn_manager = VPNManager(server_pool)
+    # Сохраняем в глобальную переменную для доступа из хендлеров
+    set_vpn_manager(vpn_manager)
+
+    # Авторизация в пуле (логинимся на всех серверах в фоне)
+    asyncio.create_task(_login_all_servers(server_pool))
+
+    # Инициализация админ-бота (рассылка и пр.)
     await admin_startup()
-
-    # Для получения экземпляров ботов, созданных в admin_startup, импортируем их
-    from admin import bot as admin_module
-    admin_bot_instance = admin_module.admin_bot
-    main_bot_for_broadcast = admin_module.main_bot
-
-    if not admin_bot_instance:
-        logger.error("Admin bot not initialized properly")
-        sys.exit(1)
 
     # --- Настройка основного бота (webhook) ---
     if PROXY_URL:
@@ -77,24 +76,24 @@ async def main():
     main_dp = Dispatcher()
     main_dp.include_router(main_router)
 
-    # Передаём в модуль web.routes.web для обработки вебхука
     web_routes.webhook_bot = main_bot
     web_routes.webhook_dp = main_dp
 
-    # --- Админ-бот (webhook) — используем экземпляр, созданный в startup ---
-    admin_bot = admin_bot_instance
+    # --- Админ-бот (webhook) ---
+    from admin import bot as admin_module
+    admin_bot_instance = admin_module.admin_bot
     if ADMIN_BOT_TOKEN and settings.ADMIN_WEBHOOK_URL:
-        web_routes.webhook_admin_bot = admin_bot
-        web_routes.webhook_admin_dp = admin_dp   # диспетчер из admin.bot
-        await admin_bot.set_webhook(
+        web_routes.webhook_admin_bot = admin_bot_instance
+        web_routes.webhook_admin_dp = admin_dp
+        await admin_bot_instance.set_webhook(
             url=settings.ADMIN_WEBHOOK_URL,
             secret_token=settings.ADMIN_WEBHOOK_SECRET or None
         )
         logger.info(f"Admin webhook set to {settings.ADMIN_WEBHOOK_URL}")
     else:
-        logger.warning("ADMIN_BOT_TOKEN or ADMIN_WEBHOOK_URL not set, admin webhook disabled")
+        logger.warning("Admin webhook not configured")
 
-    # --- Внутренний HTTP API бота (порт 8001) ---
+    # --- Внутренний API (порт 8001) ---
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
@@ -102,7 +101,7 @@ async def main():
     await internal_site.start()
     logger.info("Internal API started on http://localhost:8001")
 
-    # --- Запуск FastAPI (порт 8000) ---
+    # --- FastAPI (порт 8000) ---
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
     server = uvicorn.Server(config)
@@ -114,28 +113,26 @@ async def main():
     if not webhook_url:
         logger.error("WEBHOOK_URL not set in .env")
         sys.exit(1)
-    webhook_secret = settings.WEBHOOK_SECRET or None
-    await main_bot.set_webhook(url=webhook_url, secret_token=webhook_secret)
+    await main_bot.set_webhook(
+        url=webhook_url,
+        secret_token=settings.WEBHOOK_SECRET or None
+    )
     logger.info(f"Main bot webhook set to {webhook_url}")
 
-    # --- Планировщик фоновых задач (использует send_admin_alert, которому нужен admin_bot) ---
+    # --- Планировщик ---
     await start_scheduler(main_bot)
-
-    # Остальные команды бота (не админского) – обработчики уже в main_dp
-    await setup_bot_commands(main_bot)
 
     # --- Graceful shutdown ---
     async def shutdown():
         logger.info("Shutting down…")
-        # Удаляем вебхуки
         await main_bot.delete_webhook()
-        if admin_bot:
-            await admin_bot.delete_webhook()
-            await admin_bot.session.close()
+        if admin_bot_instance:
+            await admin_bot_instance.delete_webhook()
+            await admin_bot_instance.session.close()
         await main_bot.session.close()
-        # Закрываем админ-бот (и main_bot для рассылки)
         await admin_shutdown()
-        await vpn_provider.close()
+        await server_pool.close_all()
+        await vpn_provider.close()   # старый провайдер, если используется где-то ещё
         server.should_exit = True
         await web_task
         await internal_runner.cleanup()
@@ -149,8 +146,18 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Бесконечное ожидание (завершится по сигналу)
     await asyncio.Event().wait()
+
+
+async def _login_all_servers(server_pool: ServerPool):
+    """Фоновая авторизация на всех серверах"""
+    await asyncio.sleep(2)  # дадим основному серверу запуститься
+    for provider in server_pool.providers.values():
+        try:
+            await provider.login()
+            logger.debug(f"Logged in to server provider")
+        except Exception as e:
+            logger.warning(f"Failed to login to some server: {e}")
 
 
 if __name__ == "__main__":

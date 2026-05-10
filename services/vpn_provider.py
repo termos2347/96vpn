@@ -15,16 +15,18 @@ class XUIVPNProvider:
     RETRY_DELAY = 1
     REQUEST_TIMEOUT = 10
 
-    def __init__(self):
-        self.base_url = XUI_BASE_URL.rstrip('/') if XUI_BASE_URL else ""
-        self.username = XUI_USERNAME
-        self.password = XUI_PASSWORD
-        self.inbound_id = XUI_INBOUND_ID
-        self.sub_port = XUI_SUB_PORT
+    def __init__(self, base_url=None, username=None, password=None, inbound_id=None, sub_port=None):
+        self.base_url = (base_url or XUI_BASE_URL).rstrip('/') if (base_url or XUI_BASE_URL) else ""
+        self.username = username or XUI_USERNAME
+        self.password = password or XUI_PASSWORD
+        self.inbound_id = inbound_id or XUI_INBOUND_ID
+        self.sub_port = sub_port or XUI_SUB_PORT
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"} if self.base_url else {}
         self.session = None
         self._server_address = self._extract_host(self.base_url) if self.base_url else ""
         self._is_authenticated = False
+
+    # Остальной код (login, create_client, revoke_client, ...) остаётся без изменений
 
     @staticmethod
     def _extract_host(url: str) -> str:

@@ -18,6 +18,8 @@ from db.crud import (
 )
 from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
+from .servers import router as servers_router
+from .server_states import ServerForm
 
 # Импортируем наши новые роутеры
 from .categories import router as categories_router
@@ -59,6 +61,10 @@ async def startup():
         BotCommand(command="editprompt", description="Редактировать промпт (id поле=значение)"),
         BotCommand(command="deleteprompt", description="Удалить промпт (id)"),
         BotCommand(command="listprompts", description="Показать промпты (можно с категорией)"),
+        BotCommand(command="addserver", description="Добавить VPN-сервер в пул"),
+        BotCommand(command="listservers", description="Список всех серверов"),
+        BotCommand(command="removeserver", description="Удалить сервер по ID"),
+        BotCommand(command="serversetactive", description="Включить/отключить сервер"),
         BotCommand(command="menu", description="Показать список команд"),
     ])
     logger.info("Admin bot started")
@@ -75,6 +81,7 @@ async def shutdown():
 dp = Dispatcher()
 dp.include_router(categories_router)
 dp.include_router(prompts_router)
+dp.include_router(servers_router)
 
 # ---------- Базовые команды ----------
 @dp.message(Command("start"))
@@ -99,6 +106,10 @@ async def cmd_menu(message: types.Message):
         "/editprompt <id> <поле=значение> – изменить промпт\n"
         "/deleteprompt <id> – удалить промпт\n"
         "/listprompts [категория] – список промптов\n"
+        "/addserver – добавить VPN-сервер в пул\n"
+        "/listservers – список всех серверов\n"
+        "/removeserver <id> – удалить сервер по ID\n"
+        "/serversetactive <id> <0|1> – включить/отключить сервер\n"
     )
     await message.answer(text)
 
