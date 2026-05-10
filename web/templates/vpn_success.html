@@ -3,7 +3,6 @@
 
 {% block extra_css %}
 <style>
-    /* Спиннер из трёх прыгающих точек */
     .dot-spinner {
         display: flex;
         justify-content: center;
@@ -14,21 +13,16 @@
     .dot-spinner > div {
         width: 10px;
         height: 10px;
-        background: #a78bfa;            /* фиолетовый оттенок, как в дизайне */
+        background: #a78bfa;
         border-radius: 50%;
         animation: bounce 1.2s infinite ease-in-out both;
     }
     .dot-spinner > div:nth-child(1) { animation-delay: -0.32s; }
     .dot-spinner > div:nth-child(2) { animation-delay: -0.16s; }
     .dot-spinner > div:nth-child(3) { animation-delay: 0s; }
-
     @keyframes bounce {
-        0%, 80%, 100% {
-            transform: translateY(0);
-        }
-        40% {
-            transform: translateY(-20px);
-        }
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-20px); }
     }
 </style>
 {% endblock %}
@@ -67,16 +61,18 @@
     }
 
     try {
-        const resp = await fetch('/api/payment/check-payment?payment_id=${encodeURIComponent(paymentId)}');
+        // Используем шаблонную строку с обратными кавычками!
+        const resp = await fetch(`/api/payment/check-payment?payment_id=${encodeURIComponent(paymentId)}`);
         const data = await resp.json();
         if (data.activated) {
             statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p>';
         } else {
             statusArea.innerHTML = '<p class="text-yellow-400 text-xl">⚠️ Подписка уже была активирована ранее или произошла ошибка. Если вы не получили доступ, обратитесь в поддержку.</p>';
         }
-        // Удаляем куку после проверки
+        // Удаляем куку после проверки (только один раз)
         document.cookie = "vpn_payment_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
     } catch(e) {
+        console.error(e);
         statusArea.innerHTML = '<p class="text-red-400 text-xl">Ошибка связи с сервером. Попробуйте позже.</p>';
     }
 })();

@@ -9,6 +9,7 @@ from web.services.auth import AuthService
 from db.base import AsyncSession, get_async_db,  AsyncSessionLocal
 from web.security import create_access_token
 from config import settings
+from utils.email import send_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -79,8 +80,18 @@ async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depend
     token = await AuthService.create_reset_token(db, data.email)
     if token:
         reset_url = f"{settings.SITE_URL}/reset-password?token={token}"
-        logger.info(f"Password reset link for {data.email}: {reset_url}")
-        # В будущем здесь будет отправка email
+        # Отправляем email
+        email_sent = await send_email(
+            to_email=data.email,
+            subject="Восстановление пароля NeuroPrompt",
+            body=f"Перейдите по ссылке для сброса пароля: {reset_url}\n\nСсылка действительна 1 час.",
+            html=f"<p>Перейдите по ссылке для сброса пароля: <a href='{reset_url}'>Восстановить пароль</a></p><p>Ссылка действительна 1 час.</p>"
+        )
+        if email_sent:
+            return {"message": "Инструкции отправлены на ваш email."}
+        else:
+            # Всё равно не показываем пользователю, что email не отправлен (безопасность)
+            logger.error(f"Failed to send reset email to {data.email}")
     return {"message": "Если указанный email зарегистрирован, ссылка для сброса отправлена."}
 
 @router.post("/reset-password")

@@ -63,16 +63,10 @@ class YookassaService:
                     payment_data["payment_method_id"] = user.payment_method_id
                 payment_data["metadata"]["source"] = "web"
                 payment_data["metadata"]["user_id"] = user_id
+                payment_data["metadata"]["plan"] = plan
 
             idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
             payment = Payment.create(payment_data, idempotence_key)
-
-            if user_id:
-                result = await db.execute(select(WebUser).where(WebUser.id == user_id))
-                user = result.scalars().first()
-                if user:
-                    user.yookassa_payment_id = payment.id
-                    await db.commit()
 
             logger.info(f"Payment created: {payment.id}, amount: {amount}")
             return {
@@ -108,31 +102,44 @@ class YookassaService:
             if source == "bot":
                 return await self._activate_bot_subscription(metadata, payment_id)
 
-            if not payment_id:
-                logger.error("Payment ID not found in webhook")
-                return False
+            if source == "web":
+                user_id = metadata.get("user_id")
+                if not user_id:
+                    logger.error("Missing user_id in webhook")
+                    return False
+                try:
+                    user_id = int(user_id)
+                except (ValueError, TypeError):
+                    logger.error(f"Invalid user_id: {user_id}")
+                    return False
 
-            result = await db.execute(select(WebUser).where(WebUser.yookassa_payment_id == payment_id))
-            user = result.scalars().first()
-            if not user:
-                logger.warning(f"User not found for payment {payment_id}")
-                return False
+                result = await db.execute(select(WebUser).where(WebUser.id == user_id))
+                user = result.scalars().first()
+                if not user:
+                    logger.warning(f"User {user_id} not found for payment {payment_id}")
+                    return False
 
-            plan = metadata.get("plan", "monthly")
-            if plan == "monthly":
+                # Защита от повторной обработки (но теперь yookassa_payment_id сохранится только после успеха)
+                if user.yookassa_payment_id == payment_id:
+                    logger.info(f"Payment {payment_id} already processed, skipping webhook")
+                    return True
+
+                plan = metadata.get("plan", "monthly")
                 days = 30
-            elif plan == "quarterly":
-                days = 90
-            elif plan == "semiannual":
-                days = 180
-            else:
-                days = 30
+                if plan == "quarterly":
+                    days = 90
+                elif plan == "semiannual":
+                    days = 180
 
-            await SubscriptionService.renew_subscription(db, user, days)
-            logger.info(f"Subscription activated for user {user.id} after payment {payment_id}")
-            return True
+                await SubscriptionService.renew_subscription(db, user, days)
+                user.yookassa_payment_id = payment_id
+                await db.commit()
+                logger.info(f"Subscription activated via webhook for user {user.id} (+{days} days)")
+                return True
+
+            return False
         except Exception as e:
-            logger.error(f"Error processing webhook: {e}")
+            logger.error(f"Error processing webhook: {e}", exc_info=True)
             return False
 
     async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
@@ -181,33 +188,54 @@ class YookassaService:
     async def check_and_activate(self, payment_id: str, db: AsyncSession) -> bool:
         try:
             payment = Payment.find_one(payment_id)
-            if payment.status == 'succeeded':
-                metadata = payment.metadata
-                if metadata and metadata.get('source') == 'bot':
-                    return await self._activate_bot_subscription(metadata, payment_id)
-                if metadata and metadata.get('source') == 'web':
-                    user_id = metadata.get('user_id')
-                    if user_id:
-                        result = await db.execute(select(WebUser).where(WebUser.id == user_id))
-                        user = result.scalars().first()
-                        if user:
-                            plan = metadata.get('plan', 'monthly')
-                            if plan == 'monthly':
-                                days = 30
-                            elif plan == 'quarterly':
-                                days = 90
-                            elif plan == 'semiannual':
-                                days = 180
-                            else:
-                                days = 30
-                            await SubscriptionService.renew_subscription(db, user, days)
-                            logger.info(f"Subscription activated via return_url for user {user.id}")
-                            return True
+            if payment.status != 'succeeded':
+                logger.info(f"Payment {payment_id} not succeeded")
+                return False
+
+            metadata = payment.metadata
+            if not metadata:
+                logger.warning(f"No metadata for payment {payment_id}")
+                return False
+
+            source = metadata.get("source")
+            if source == "bot":
+                return await self._activate_bot_subscription(metadata, payment_id)
+
+            if source == "web":
+                user_id = metadata.get("user_id")
+                if not user_id:
+                    return False
+                try:
+                    user_id = int(user_id)
+                except (ValueError, TypeError):
+                    return False
+
+                result = await db.execute(select(WebUser).where(WebUser.id == user_id))
+                user = result.scalars().first()
+                if not user:
+                    logger.warning(f"User not found for payment {payment_id}")
+                    return False
+
+                if user.yookassa_payment_id == payment_id:
+                    logger.info(f"Payment {payment_id} already processed, skipping")
+                    return True
+
+                plan = metadata.get("plan", "monthly")
+                days = 30
+                if plan == "quarterly":
+                    days = 90
+                elif plan == "semiannual":
+                    days = 180
+
+                await SubscriptionService.renew_subscription(db, user, days)
+                user.yookassa_payment_id = payment_id
+                await db.commit()
+                logger.info(f"Subscription activated via return_url for user {user.id} (+{days} days)")
                 return True
+
             return False
         except Exception as e:
-            logger.error(f"Check and activate error: {e}")
+            logger.error(f"Check and activate error: {e}", exc_info=True)
             return False
-
 
 yookassa_service = YookassaService()

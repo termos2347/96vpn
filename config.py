@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # ---------- FastAPI / Web ----------
     APP_NAME: str = "NeuroPrompt Premium"
     DEBUG: bool = False
+        
+    # ---------- SMTP ----------
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
 
     # ---------- Database ----------
     DATABASE_URL: str
