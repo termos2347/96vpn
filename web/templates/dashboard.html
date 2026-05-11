@@ -3,92 +3,51 @@
 {% block title %}{{ site_name }} - Личный кабинет{% endblock %}
 
 {% block content %}
-<main class="min-h-screen px-6 py-20">
+<main class="min-h-screen px-4 sm:px-6 py-12">
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-4xl font-bold mb-8 gradient-text">Личный кабинет</h1>
+        <h1 class="text-3xl sm:text-4xl font-bold mb-8 gradient-text">Личный кабинет</h1>
         
-        <div class="grid md:grid-cols-2 gap-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
             <!-- Профиль -->
             <div class="glass-effect p-6 rounded-lg neon-glow">
-                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center">
-                    <i class="fas fa-user text-purple-400"></i> Профиль
-                </h2>
+                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center"><i class="fas fa-user text-purple-400"></i> Профиль</h2>
                 <div class="space-y-4">
-                    <div>
-                        <p class="text-sm text-gray-400">Email</p>
-                        <p class="text-lg font-bold">{{ user.email }}</p>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-400">Имя пользователя</p>
-                        <p class="text-lg font-bold">{{ user.username }}</p>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-400">Дата регистрации</p>
-                        <p class="text-lg font-bold">{{ user.created_at.strftime('%d.%m.%Y') }}</p>
-                    </div>
-                    <!-- Кнопка выхода с подтверждением -->
+                    <div><p class="text-sm text-gray-400">Email</p><p class="text-lg font-bold break-words">{{ user.email }}</p></div>
+                    <div><p class="text-sm text-gray-400">Имя пользователя</p><p class="text-lg font-bold">{{ user.username }}</p></div>
+                    <div><p class="text-sm text-gray-400">Дата регистрации</p><p class="text-lg font-bold">{{ user.created_at.strftime('%d.%m.%Y') }}</p></div>
                     <div class="pt-4 border-t border-purple-500 border-opacity-20">
-                        <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition">
-                            <i class="fas fa-sign-out-alt mr-2"></i>Выйти
-                        </button>
+                        <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition w-full sm:w-auto"> <i class="fas fa-sign-out-alt mr-2"></i>Выйти</button>
                     </div>
                 </div>
             </div>
             
             <!-- Статус подписки -->
             <div class="glass-effect p-6 rounded-lg neon-glow">
-                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center">
-                    <i class="fas fa-certificate text-yellow-400"></i> Подписка
-                </h2>
-                
+                <h2 class="text-2xl font-bold mb-6 flex gap-2 items-center"><i class="fas fa-certificate text-yellow-400"></i> Подписка</h2>
                 {% if is_active %}
-                    <div class="bg-green-500 bg-opacity-10 border border-green-500 rounded p-4 mb-4">
-                        <p class="text-green-400 font-bold flex gap-2 items-center">
-                            <i class="fas fa-check-circle"></i> Подписка активна
-                        </p>
-                    </div>
+                    <div class="bg-green-500 bg-opacity-10 border border-green-500 rounded p-4 mb-4"><p class="text-green-400 font-bold flex gap-2 items-center"><i class="fas fa-check-circle"></i> Подписка активна</p></div>
                     {% if days_remaining %}
                         <div class="space-y-4">
-                            <div>
-                                <p class="text-sm text-gray-400">Осталось дней</p>
-                                <p class="text-4xl font-bold gradient-text">{{ days_remaining }}</p>
-                            </div>
-                            <div>
-                                <p class="text-sm text-gray-400">Дата окончания</p>
-                                <p class="text-lg font-bold">{{ expiry_date.strftime('%d.%m.%Y') }}</p>
-                            </div>
-                            <a href="#" onclick="renewSubscription()" class="button-primary text-white px-6 py-2 rounded inline-block font-bold">
-                                Продлить подписку
-                            </a>
+                            <div><p class="text-sm text-gray-400">Осталось дней</p><p class="text-4xl font-bold gradient-text">{{ days_remaining }}</p></div>
+                            <div><p class="text-sm text-gray-400">Дата окончания</p><p class="text-lg font-bold">{{ expiry_date.strftime('%d.%m.%Y') }}</p></div>
+                            <a href="#" onclick="renewSubscription()" class="button-primary text-white px-6 py-2 rounded inline-block font-bold text-center">Продлить подписку</a>
                         </div>
                     {% endif %}
                 {% else %}
-                    <div class="bg-red-500 bg-opacity-10 border border-red-500 rounded p-4 mb-4">
-                        <p class="text-red-400 font-bold flex gap-2 items-center">
-                            <i class="fas fa-exclamation-circle"></i> Подписка истекла
-                        </p>
-                    </div>
+                    <div class="bg-red-500 bg-opacity-10 border border-red-500 rounded p-4 mb-4"><p class="text-red-400 font-bold flex gap-2 items-center"><i class="fas fa-exclamation-circle"></i> Подписка истекла</p></div>
                     <p class="text-gray-400 mb-4">Ваша подписка больше не активна. Пожалуйста, продлите её, чтобы продолжать использовать сервис.</p>
-                    <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-3 rounded inline-block font-bold text-lg">
-                        Оформить подписку
-                    </a>
+                    <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-3 rounded inline-block font-bold text-center w-full sm:w-auto">Оформить подписку</a>
                 {% endif %}
             </div>
         </div>
         
-        <!-- Быстрые ссылки -->
-        <div class="mt-8 grid md:grid-cols-2 gap-8">
-            <a href="/prompts" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition">
-                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center">
-                    <i class="fas fa-lightbulb text-yellow-400"></i> Обзор промптов
-                </h3>
+        <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8">
+            <a href="/prompts" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition text-center sm:text-left">
+                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center justify-center sm:justify-start"><i class="fas fa-lightbulb text-yellow-400"></i> Обзор промптов</h3>
                 <p class="text-gray-400">Просмотрите всю базу профессиональных промптов</p>
             </a>
-            
-            <a href="/legal/terms" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition">
-                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center">
-                    <i class="fas fa-file-alt text-blue-400"></i> Договор
-                </h3>
+            <a href="/legal/terms" class="glass-effect p-6 rounded-lg hover:bg-white hover:bg-opacity-10 transition text-center sm:text-left">
+                <h3 class="text-2xl font-bold mb-2 flex gap-2 items-center justify-center sm:justify-start"><i class="fas fa-file-alt text-blue-400"></i> Договор</h3>
                 <p class="text-gray-400">Прочитайте условия использования сервиса</p>
             </a>
         </div>
@@ -98,22 +57,10 @@
 
 {% block extra_js %}
 <script>
-function renewSubscription() {
-    window.location.href = `/pay-choice?user_id={{ user.id }}`;
-}
-
-// Кнопка выхода с подтверждением и реальным разлогином
+function renewSubscription() { window.location.href = `/pay-choice?user_id={{ user.id }}`; }
 document.getElementById('logout-btn').addEventListener('click', async function() {
-    if (!confirm('Вы уверены, что хотите выйти из аккаунта?')) {
-        return;
-    }
-    try {
-        // Серверное удаление куки (на всякий случай)
-        await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (e) {
-        // игнорируем ошибку, если сервер не ответил
-    }
-    // Клиентское удаление куки и редирект
+    if (!confirm('Вы уверены, что хотите выйти из аккаунта?')) return;
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) {}
     document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
     window.location.href = '/';
 });

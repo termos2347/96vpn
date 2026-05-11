@@ -3,18 +3,12 @@
 {% block title %}Ошибка оплаты - {{ site_name }}{% endblock %}
 
 {% block content %}
-<main class="min-h-screen flex items-center justify-center px-6 py-20">
-    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow text-center">
-        <div class="text-red-400 text-6xl mb-4">
-            <i class="fas fa-times-circle"></i>
-        </div>
+<main class="min-h-screen flex items-center justify-center px-4 py-12">
+    <div class="glass-effect p-6 sm:p-8 rounded-lg w-full max-w-md neon-glow text-center">
+        <div class="text-red-400 text-6xl mb-4"><i class="fas fa-times-circle"></i></div>
         <h1 class="text-3xl font-bold mb-4 gradient-text">Ошибка оплаты</h1>
-        <p class="text-gray-400 mb-6">
-            Что-то пошло не так. Пожалуйста, попробуйте снова или свяжитесь с поддержкой.
-        </p>
-        <a href="/pay-choice" class="button-primary text-white px-6 py-2 rounded-lg inline-block">
-            Попробовать снова
-        </a>
+        <p class="text-gray-400 mb-6">Что-то пошло не так. Пожалуйста, попробуйте снова или свяжитесь с поддержкой.</p>
+        <a href="/pay-choice" class="button-primary text-white px-6 py-2 rounded-lg inline-block">Попробовать снова</a>
     </div>
 </main>
 {% endblock %}
