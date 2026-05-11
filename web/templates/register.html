@@ -3,34 +3,34 @@
 {% block title %}{{ site_name }} - Регистрация{% endblock %}
 
 {% block content %}
-<main class="min-h-screen flex items-center justify-center px-6">
-    <div class="glass-effect p-8 rounded-lg w-full max-w-md neon-glow">
+<main class="min-h-screen flex items-center justify-center px-4 py-12">
+    <div class="glass-effect p-6 sm:p-8 rounded-lg w-full max-w-md neon-glow">
         <h1 class="text-3xl font-bold mb-2 text-center gradient-text">Регистрация</h1>
         <p class="text-center text-gray-400 mb-8">Создайте аккаунт и получите доступ к промптам</p>
         
         <form id="registerForm" class="space-y-4">
             <div>
                 <label class="block text-sm font-bold mb-2">Email</label>
-                <input type="email" name="email" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="your@email.com">
+                <input type="email" name="email" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-3 text-white focus:outline-none focus:border-purple-500 text-base" placeholder="your@email.com">
             </div>
             
             <div>
                 <label class="block text-sm font-bold mb-2">Имя пользователя (опционально)</label>
-                <input type="text" name="username" class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 text-white focus:outline-none focus:border-purple-500" placeholder="username">
+                <input type="text" name="username" class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-3 text-white focus:outline-none focus:border-purple-500 text-base" placeholder="username">
             </div>
             
             <div class="relative">
                 <label class="block text-sm font-bold mb-2">Пароль</label>
-                <input type="password" name="password" id="password" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 pr-10 text-white focus:outline-none focus:border-purple-500" placeholder="••••••••" minlength="8">
-                <button type="button" class="toggle-password absolute right-3 top-9 text-gray-400 hover:text-purple-400 focus:outline-none" data-target="password">
+                <input type="password" name="password" id="password" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-3 pr-10 text-white focus:outline-none focus:border-purple-500 text-base" placeholder="••••••••" minlength="8">
+                <button type="button" class="toggle-password absolute right-3 top-10 text-gray-400 hover:text-purple-400 focus:outline-none" data-target="password">
                     <i class="fas fa-eye-slash"></i>
                 </button>
             </div>
             
             <div class="relative">
                 <label class="block text-sm font-bold mb-2">Подтвердите пароль</label>
-                <input type="password" name="password_confirm" id="password_confirm" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-2 pr-10 text-white focus:outline-none focus:border-purple-500" placeholder="••••••••">
-                <button type="button" class="toggle-password absolute right-3 top-9 text-gray-400 hover:text-purple-400 focus:outline-none" data-target="password_confirm">
+                <input type="password" name="password_confirm" id="password_confirm" required class="w-full bg-black bg-opacity-40 border border-purple-500 border-opacity-30 rounded px-4 py-3 pr-10 text-white focus:outline-none focus:border-purple-500 text-base" placeholder="••••••••">
+                <button type="button" class="toggle-password absolute right-3 top-10 text-gray-400 hover:text-purple-400 focus:outline-none" data-target="password_confirm">
                     <i class="fas fa-eye-slash"></i>
                 </button>
             </div>
@@ -42,10 +42,7 @@
                 </label>
             </div>
             
-            <button type="submit" class="button-primary text-white w-full py-2 rounded-lg font-bold">
-                Зарегистрироваться
-            </button>
-            
+            <button type="submit" class="button-primary text-white w-full py-3 rounded-lg font-bold text-lg">Зарегистрироваться</button>
             <div id="message" class="text-center text-sm mt-4"></div>
         </form>
         
@@ -56,7 +53,6 @@
 </main>
 
 <script>
-// Переключение видимости паролей
 document.querySelectorAll('.toggle-password').forEach(button => {
     button.addEventListener('click', function() {
         const targetId = this.getAttribute('data-target');
@@ -74,17 +70,14 @@ document.querySelectorAll('.toggle-password').forEach(button => {
     });
 });
 
-// Отправка формы
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
     const email = document.querySelector('input[name="email"]').value;
     const username = document.querySelector('input[name="username"]').value;
     const password = document.querySelector('input[name="password"]').value;
     const passwordConfirm = document.querySelector('input[name="password_confirm"]').value;
     const messageDiv = document.getElementById('message');
     
-    // Валидация
     if (password !== passwordConfirm) {
         messageDiv.innerHTML = '<span class="text-red-400">Пароли не совпадают</span>';
         return;
@@ -104,39 +97,27 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({email, username, password, source: 'web'})
         });
-        
         const registerData = await registerResponse.json();
-        
         if (!registerResponse.ok) {
             let errorText = registerData.detail || 'Ошибка регистрации';
             if (errorText.includes('уже зарегистрирован')) {
-                messageDiv.innerHTML = `
-                    <div class="text-red-400 mb-2">${errorText}</div>
-                    <div><a href="/login" class="text-purple-400 underline hover:text-purple-300">Войти в аккаунт</a></div>
-                `;
+                messageDiv.innerHTML = `<div class="text-red-400 mb-2">${errorText}</div><div><a href="/login" class="text-purple-400 underline">Войти в аккаунт</a></div>`;
             } else {
                 messageDiv.innerHTML = `<div class="text-red-400">${errorText}</div>`;
             }
             return;
         }
-        
-        // Автоматический логин
         const loginResponse = await fetch('/api/auth/login', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({email, password})
         });
-        
-        const loginData = await loginResponse.json();
-        
-        if (!loginResponse.ok) {
+        if (loginResponse.ok) {
+            window.location.href = '/pay-choice';
+        } else {
             messageDiv.innerHTML = '<span class="text-yellow-400">Регистрация успешна. Пожалуйста, войдите.</span>';
             setTimeout(() => window.location.href = '/login', 1500);
-            return;
         }
-        
-        window.location.href = '/pay-choice';
-        
     } catch (error) {
         messageDiv.innerHTML = '<span class="text-red-400">Ошибка соединения с сервером</span>';
     }

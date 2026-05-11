@@ -3,102 +3,55 @@
 {% block title %}{{ prompt.title }} - {{ site_name }}{% endblock %}
 
 {% block content %}
-<main class="min-h-screen px-6 py-20">
+<main class="min-h-screen px-4 py-12">
     <div class="max-w-4xl mx-auto">
-        <a href="/prompts" class="text-purple-400 hover:text-purple-300 mb-8 inline-flex gap-2 items-center">
-            <i class="fas fa-arrow-left"></i> Вернуться к промптам
-        </a>
+        <a href="/prompts" class="text-purple-400 hover:text-purple-300 mb-6 inline-flex gap-2 items-center"><i class="fas fa-arrow-left"></i> Вернуться к промптам</a>
         
-        <div class="glass-effect p-8 rounded-lg neon-glow">
+        <div class="glass-effect p-6 sm:p-8 rounded-lg neon-glow">
             <div class="mb-8">
-                <div class="flex gap-2 mb-4 flex-wrap">
+                <div class="flex flex-wrap gap-2 mb-4">
                     <span class="inline-block bg-purple-500 bg-opacity-30 px-4 py-2 rounded-full text-purple-300">{{ prompt.category }}</span>
-                    {% if prompt.is_free %}
-                        <span class="inline-block bg-green-500 bg-opacity-30 px-4 py-2 rounded-full text-green-300">Бесплатно</span>
-                    {% endif %}
+                    {% if prompt.is_free %}<span class="inline-block bg-green-500 bg-opacity-30 px-4 py-2 rounded-full text-green-300">Бесплатно</span>{% endif %}
                 </div>
-                <h1 class="text-4xl font-bold mb-4">{{ prompt.title }}</h1>
-                <p class="text-xl text-gray-400">{{ prompt.description }}</p>
+                <h1 class="text-3xl sm:text-4xl font-bold mb-4">{{ prompt.title }}</h1>
+                <p class="text-lg text-gray-400">{{ prompt.description }}</p>
             </div>
             
-            <!-- Статистика -->
-            <div class="grid md:grid-cols-3 gap-4 mb-8 pb-8 border-b border-purple-500 border-opacity-20">
-                <div>
-                    <p class="text-gray-400 text-sm">Использовано</p>
-                    <p class="text-2xl font-bold">{{ prompt.usage_count }}+</p>
-                </div>
-                <div>
-                    <p class="text-gray-400 text-sm">Рейтинг</p>
-                    <div class="flex gap-1 items-center">
-                        <span class="text-2xl font-bold">{{ prompt.rating }}</span>
-                        <span class="text-yellow-400">
-                            {% for i in range(5) %}
-                                <i class="fas fa-star"></i>
-                            {% endfor %}
-                        </span>
-                    </div>
-                </div>
-                <div>
-                    <p class="text-gray-400 text-sm">Обновлено</p>
-                    <p class="text-2xl font-bold">на этой неделе</p>
-                </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 pb-8 border-b border-purple-500 border-opacity-20">
+                <div><p class="text-gray-400 text-sm">Использовано</p><p class="text-2xl font-bold">{{ prompt.usage_count }}+</p></div>
+                <div><p class="text-gray-400 text-sm">Рейтинг</p><div class="flex gap-1 items-center"><span class="text-2xl font-bold">{{ prompt.rating }}</span><span class="text-yellow-400">★★★★★</span></div></div>
+                <div><p class="text-gray-400 text-sm">Обновлено</p><p class="text-2xl font-bold">на этой неделе</p></div>
             </div>
             
-            <!-- Содержимое промпта показываем только если бесплатный или пользователь активен -->
             {% if prompt.is_free or (user and user.is_active) %}
                 <div class="mb-8">
                     <h2 class="text-2xl font-bold mb-4">Содержание промпта</h2>
-                    <div class="bg-black bg-opacity-40 rounded-lg p-6 border border-purple-500 border-opacity-20 font-mono text-sm leading-relaxed">
+                    <div class="bg-black bg-opacity-40 rounded-lg p-4 sm:p-6 border border-purple-500 border-opacity-20 font-mono text-sm leading-relaxed overflow-x-auto">
                         <p class="text-gray-300 whitespace-pre-wrap">{{ prompt.content or "Вы - опытный специалист. Задача: Выполнять работу профессионально..." }}</p>
                     </div>
                 </div>
-                
                 <div class="mb-8">
                     <h2 class="text-2xl font-bold mb-4">Примеры использования</h2>
                     <div class="space-y-4">
-                        <div class="glass-effect p-4 rounded">
-                            <p class="text-sm text-gray-400 mb-2">Пример входных данных:</p>
-                            <p class="text-gray-200">Создай контент для [ниша], целевая аудитория [описание]</p>
-                        </div>
-                        <div class="glass-effect p-4 rounded">
-                            <p class="text-sm text-gray-400 mb-2">Ожидаемый результат:</p>
-                            <p class="text-gray-200">Высокачественный контент, оптимизированный под SEO и целевую аудиторию</p>
-                        </div>
+                        <div class="glass-effect p-4 rounded"><p class="text-sm text-gray-400 mb-2">Пример входных данных:</p><p class="text-gray-200">Создай контент для [ниша], целевая аудитория [описание]</p></div>
+                        <div class="glass-effect p-4 rounded"><p class="text-sm text-gray-400 mb-2">Ожидаемый результат:</p><p class="text-gray-200">Высокачественный контент, оптимизированный под SEO и целевую аудиторию</p></div>
                     </div>
                 </div>
-                
-                <div class="flex gap-4">
-                    <button onclick="copyToClipboard()" class="button-primary text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center">
-                        <i class="fas fa-copy"></i> Копировать промпт
-                    </button>
-                    <button onclick="downloadPrompt()" class="glass-effect text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center hover:bg-white hover:bg-opacity-10 transition">
-                        <i class="fas fa-download"></i> Скачать
-                    </button>
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <button onclick="copyToClipboard()" class="button-primary text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center justify-center"><i class="fas fa-copy"></i> Копировать промпт</button>
+                    <button onclick="downloadPrompt()" class="glass-effect text-white px-8 py-3 rounded-lg font-bold flex gap-2 items-center justify-center hover:bg-white hover:bg-opacity-10 transition"><i class="fas fa-download"></i> Скачать</button>
                 </div>
             {% else %}
-                <!-- Заглушка для платного промпта без подписки -->
                 <div class="text-center py-12">
-                    <div class="text-yellow-400 text-6xl mb-4">
-                        <i class="fas fa-lock"></i>
-                    </div>
+                    <div class="text-yellow-400 text-6xl mb-4"><i class="fas fa-lock"></i></div>
                     <h2 class="text-2xl font-bold mb-4 gradient-text">Доступ к полному тексту ограничен</h2>
-                    <p class="text-gray-400 mb-6">
-                        Этот промпт доступен только для активных подписчиков. Оформите подписку, чтобы получить доступ ко всей базе промптов.
-                    </p>
+                    <p class="text-gray-400 mb-6">Этот промпт доступен только для активных подписчиков. Оформите подписку, чтобы получить доступ ко всей базе промптов.</p>
                     {% if user %}
-                        <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">
-                            Оформить подписку
-                        </a>
-                        <a href="/dashboard" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">
-                            В кабинет
-                        </a>
+                        <a href="/pay-choice?user_id={{ user.id }}" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">Оформить подписку</a>
+                        <a href="/dashboard" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">В кабинет</a>
                     {% else %}
-                        <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">
-                            Войти
-                        </a>
-                        <a href="/register" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">
-                            Зарегистрироваться
-                        </a>
+                        <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg inline-block mr-2">Войти</a>
+                        <a href="/register" class="glass-effect text-white px-6 py-2 rounded-lg inline-block">Зарегистрироваться</a>
                     {% endif %}
                 </div>
             {% endif %}
@@ -108,33 +61,13 @@
 
 <script>
 {% if prompt.is_free or (user and user.is_active) %}
-function copyToClipboard() {
-    const text = `{{ prompt.content or "Вы - опытный специалист. Задача: Выполнять работу профессионально..." }}`;
-    navigator.clipboard.writeText(text).then(() => {
-        alert('Промпт скопирован в буфер обмена!');
-    });
-}
-
+function copyToClipboard() { navigator.clipboard.writeText(`{{ prompt.content or "Текст промпта" }}`).then(() => alert('Промпт скопирован!')); }
 function downloadPrompt() {
-    const text = `{{ prompt.title }}
-
-{{ prompt.description }}
-
-КАТЕГОРИЯ: {{ prompt.category }}
-ИСПОЛЬЗОВАНО: {{ prompt.usage_count }}+
-РЕЙТИНГ: {{ prompt.rating }}
-
----
-
-{{ prompt.content or "Вы - опытный специалист. Задача: Выполнять работу профессионально..." }}`;
-    
-    const element = document.createElement('a');
-    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
-    element.setAttribute('download', '{{ prompt.title }}.txt');
-    element.style.display = 'none';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    const text = `{{ prompt.title }}\n\n{{ prompt.description }}\n\nКАТЕГОРИЯ: {{ prompt.category }}\nИСПОЛЬЗОВАНО: {{ prompt.usage_count }}\nРЕЙТИНГ: {{ prompt.rating }}\n\n---\n\n{{ prompt.content or "Содержимое" }}`;
+    const a = document.createElement('a');
+    a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(text);
+    a.download = '{{ prompt.title }}.txt';
+    a.click();
 }
 {% endif %}
 </script>

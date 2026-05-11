@@ -3,98 +3,21 @@
 {% block title %}Политика конфиденциальности - {{ site_name }}{% endblock %}
 
 {% block content %}
-<main class="min-h-screen px-6 py-20">
+<main class="min-h-screen px-4 py-12">
     <div class="max-w-4xl mx-auto">
-        <h1 class="text-4xl font-bold mb-8 gradient-text">Политика конфиденциальности</h1>
+        <h1 class="text-3xl sm:text-4xl font-bold mb-8 gradient-text">Политика конфиденциальности</h1>
         
-        <div class="glass-effect p-8 rounded-lg space-y-6 text-gray-300">
-            <section>
-                <h2 class="text-2xl font-bold mb-4">1. Введение</h2>
-                <p>{{ site_name }} (далее — "Сервис") уважает конфиденциальность своих пользователей и обязуется защищать их персональные данные. Настоящая Политика конфиденциальности (далее — "Политика") описывает, как Сервис собирает, использует и защищает информацию пользователей.</p>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">2. Какую информацию мы собираем</h2>
-                <p>{{ site_name }} собирает следующую информацию:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li><strong>Информация при регистрации:</strong> электронная почта, имя пользователя, хешированный пароль</li>
-                    <li><strong>Информация о платежах:</strong> номер платежа, тип подписки (через ЮKassa)</li>
-                    <li><strong>Информация об использовании:</strong> история просмотров промптов, статистика использования</li>
-                    <li><strong>Техническая информация:</strong> IP-адрес, тип браузера, операционная система</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">3. Как мы используем информацию</h2>
-                <p>Собираемая информация используется для:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li>Предоставления доступа к Услуге</li>
-                    <li>Обработки платежей</li>
-                    <li>Отправки уведомлений о подписке</li>
-                    <li>Улучшения качества Сервиса</li>
-                    <li>Предотвращения мошенничества</li>
-                    <li>Соответствия законодательству</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">4. Защита данных</h2>
-                <p>{{ site_name }} принимает разумные меры для защиты персональных данных:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li>Использование шифрования SSL/TLS для всех коммуникаций</li>
-                    <li>Хранение пароль в хешированном виде</li>
-                    <li>Ограничение доступа к персональным данным</li>
-                    <li>Регулярные аудиты безопасности</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">5. Передача данных третьим лицам</h2>
-                <p>{{ site_name }} не передаёт персональные данные третьим лицам, за исключением:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li><strong>Платёжные системы:</strong> ЮKassa получает только необходимую информацию для обработки платежа</li>
-                    <li><strong>Требования закона:</strong> если требуется по закону или судебному приказу</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">6. Cookies и отслеживание</h2>
-                <p>{{ site_name }} может использовать cookies для:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li>Аутентификации пользователей</li>
-                    <li>Сохранения предпочтений</li>
-                    <li>Аналитики использования</li>
-                </ul>
-                <p class="mt-4">Вы можете отключить cookies в параметрах вашего браузера.</p>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">7. Права пользователей</h2>
-                <p>В соответствии с законодательством Российской Федерации, Вы имеете право:</p>
-                <ul class="list-disc list-inside mt-2 space-y-1">
-                    <li>Знать, какие данные о вас собраны</li>
-                    <li>Получить копию ваших данных</li>
-                    <li>Исправить неточные данные</li>
-                    <li>Запросить удаление данных</li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">8. Связь с нами</h2>
-                <p>По вопросам конфиденциальности обращайтесь:</p>
-                <ul class="mt-2 space-y-1">
-                    <li><strong>Email:</strong> <a href="mailto:privacy@neuroprompt.ai" class="text-purple-400 hover:text-purple-300">privacy@neuroprompt.ai</a></li>
-                </ul>
-            </section>
-
-            <section>
-                <h2 class="text-2xl font-bold mb-4">9. Изменения в Политике</h2>
-                <p>{{ site_name }} может изменять эту Политику. Важные изменения будут опубликованы на Сайте.</p>
-            </section>
-
-            <div class="border-t border-purple-500 border-opacity-20 pt-8 mt-8">
-                <p class="text-sm text-gray-400">Дата последнего обновления: {{ current_date }}</p>
-            </div>
+        <div class="glass-effect p-6 sm:p-8 rounded-lg space-y-6 text-gray-300">
+            <section><h2 class="text-2xl font-bold mb-4">1. Введение</h2><p>{{ site_name }} (далее — "Сервис") уважает конфиденциальность своих пользователей и обязуется защищать их персональные данные. Настоящая Политика конфиденциальности (далее — "Политика") описывает, как Сервис собирает, использует и защищает информацию пользователей.</p></section>
+            <section><h2 class="text-2xl font-bold mb-4">2. Какую информацию мы собираем</h2><p>{{ site_name }} собирает следующую информацию:</p><ul class="list-disc list-inside mt-2 space-y-1"><li><strong>Информация при регистрации:</strong> электронная почта, имя пользователя, хешированный пароль</li><li><strong>Информация о платежах:</strong> номер платежа, тип подписки (через ЮKassa)</li><li><strong>Информация об использовании:</strong> история просмотров промптов, статистика использования</li><li><strong>Техническая информация:</strong> IP-адрес, тип браузера, операционная система</li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">3. Как мы используем информацию</h2><p>Собираемая информация используется для:</p><ul class="list-disc list-inside mt-2 space-y-1"><li>Предоставления доступа к Услуге</li><li>Обработки платежей</li><li>Отправки уведомлений о подписке</li><li>Улучшения качества Сервиса</li><li>Предотвращения мошенничества</li><li>Соответствия законодательству</li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">4. Защита данных</h2><p>{{ site_name }} принимает разумные меры для защиты персональных данных:</p><ul class="list-disc list-inside mt-2 space-y-1"><li>Использование шифрования SSL/TLS для всех коммуникаций</li><li>Хранение пароль в хешированном виде</li><li>Ограничение доступа к персональным данным</li><li>Регулярные аудиты безопасности</li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">5. Передача данных третьим лицам</h2><p>{{ site_name }} не передаёт персональные данные третьим лицам, за исключением:</p><ul class="list-disc list-inside mt-2 space-y-1"><li><strong>Платёжные системы:</strong> ЮKassa получает только необходимую информацию для обработки платежа</li><li><strong>Требования закона:</strong> если требуется по закону или судебному приказу</li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">6. Cookies и отслеживание</h2><p>{{ site_name }} может использовать cookies для:</p><ul class="list-disc list-inside mt-2 space-y-1"><li>Аутентификации пользователей</li><li>Сохранения предпочтений</li><li>Аналитики использования</li></ul><p class="mt-4">Вы можете отключить cookies в параметрах вашего браузера.</p></section>
+            <section><h2 class="text-2xl font-bold mb-4">7. Права пользователей</h2><p>В соответствии с законодательством Российской Федерации, Вы имеете право:</p><ul class="list-disc list-inside mt-2 space-y-1"><li>Знать, какие данные о вас собраны</li><li>Получить копию ваших данных</li><li>Исправить неточные данные</li><li>Запросить удаление данных</li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">8. Связь с нами</h2><p>По вопросам конфиденциальности обращайтесь:</p><ul class="mt-2 space-y-1"><li><strong>Email:</strong> <a href="mailto:privacy@neuroprompt.ai" class="text-purple-400 hover:text-purple-300">privacy@neuroprompt.ai</a></li></ul></section>
+            <section><h2 class="text-2xl font-bold mb-4">9. Изменения в Политике</h2><p>{{ site_name }} может изменять эту Политику. Важные изменения будут опубликованы на Сайте.</p></section>
+            <div class="border-t border-purple-500 border-opacity-20 pt-8 mt-8"><p class="text-sm text-gray-400">Дата последнего обновления: {{ current_date }}</p></div>
         </div>
     </div>
 </main>

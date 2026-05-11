@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}{{ site_name }}{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -35,17 +35,35 @@
         .neon-glow {
             box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
         }
+        /* Улучшенная кликабельность на мобильных */
+        button, a, .cursor-pointer {
+            touch-action: manipulation;
+        }
+        input, select, textarea {
+            font-size: 16px !important; /* предотвращает зум на iOS */
+        }
+        @media (max-width: 640px) {
+            .container-padding {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <nav class="glass-effect sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
             <div class="flex items-center gap-2">
                 <i class="fas fa-brain text-2xl gradient-text"></i>
-                <h1 class="text-2xl font-bold gradient-text">{{ site_name }}</h1>
+                <h1 class="text-xl sm:text-2xl font-bold gradient-text">{{ site_name }}</h1>
             </div>
-            <div class="flex gap-6 items-center">
+            <!-- Бургер-кнопка для мобильных -->
+            <button id="mobile-menu-button" class="sm:hidden text-white focus:outline-none">
+                <i class="fas fa-bars text-2xl"></i>
+            </button>
+            <!-- Десктопное меню -->
+            <div class="hidden sm:flex gap-6 items-center">
                 <a href="/" class="hover:text-purple-400 transition">Главная</a>
                 <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
                 {% if user %}
@@ -55,13 +73,25 @@
                 {% endif %}
             </div>
         </div>
+        <!-- Мобильное меню (скрыто) -->
+        <div id="mobile-menu" class="hidden sm:hidden glass-effect border-t border-purple-500 border-opacity-20">
+            <div class="flex flex-col space-y-3 p-4">
+                <a href="/" class="hover:text-purple-400 transition py-2 text-center">Главная</a>
+                <a href="/prompts" class="hover:text-purple-400 transition py-2 text-center">Промпты</a>
+                {% if user %}
+                    <a href="/dashboard" class="hover:text-purple-400 transition py-2 text-center">Кабинет</a>
+                {% else %}
+                    <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg text-center">Вход</a>
+                {% endif %}
+            </div>
+        </div>
     </nav>
 
     {% block content %}{% endblock %}
 
     <footer class="glass-effect mt-20 border-t border-purple-500 border-opacity-20">
-        <div class="max-w-7xl mx-auto px-6 py-8">
-            <div class="grid md:grid-cols-4 gap-8 mb-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 mb-8">
                 <div>
                     <h3 class="font-bold mb-4 gradient-text">{{ site_name }}</h3>
                     <p class="text-sm text-gray-400">Профессиональная база промптов для AI-инженеров</p>
@@ -93,6 +123,16 @@
         </div>
     </footer>
 
+    <script>
+        // Бургер-меню
+        const burger = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+        if (burger && mobileMenu) {
+            burger.addEventListener('click', () => {
+                mobileMenu.classList.toggle('hidden');
+            });
+        }
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
