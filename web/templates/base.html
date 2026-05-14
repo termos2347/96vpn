@@ -9,38 +9,50 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e0e0e0;
+            background: #000000;
+            color: #f0f0f0;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            transition: opacity 0.4s ease-out;
+        }
+        body.fade-out {
+            opacity: 0;
+            pointer-events: none;
         }
         .gradient-text {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
         .glass-effect {
-            background: rgba(255, 255, 255, 0.05);
+            background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
         }
         .button-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             transition: all 0.3s ease;
+            color: white;
         }
         .button-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.4);
         }
         .neon-glow {
-            box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
         }
-        /* Улучшенная кликабельность на мобильных */
         button, a, .cursor-pointer {
             touch-action: manipulation;
         }
         input, select, textarea {
-            font-size: 16px !important; /* предотвращает зум на iOS */
+            font-size: 16px !important;
+            background: #111;
+            border-color: #2a2a2a;
+            color: white;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: #10b981;
+            outline: none;
         }
         @media (max-width: 640px) {
             .container-padding {
@@ -48,38 +60,127 @@
                 padding-right: 1rem;
             }
         }
+        
+        /* Бесконечная лента */
+        .infinite-scroll-x {
+            overflow: hidden;
+            white-space: nowrap;
+            position: relative;
+            width: 100%;
+        }
+        .scroll-track {
+            display: inline-block;
+            white-space: nowrap;
+            animation: scrollLeft 30s linear infinite;
+        }
+        .scroll-card {
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: space-between;
+            white-space: normal;
+            width: 280px;
+            height: 320px;
+            margin-right: 1.5rem;
+            vertical-align: top;
+            overflow: hidden;
+            background: #111;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+        .scroll-card p {
+            flex-grow: 1;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            text-overflow: ellipsis;
+            color: #aaa;
+        }
+        .scroll-card i, .scroll-card h3 {
+            flex-shrink: 0;
+            color: #10b981;
+        }
+        @keyframes scrollLeft {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* Анимация появления */
+        .fade-up {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+        .fade-up.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .logo-link {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        /* Кастомные цвета для ссылок и hover */
+        a:not(.button-primary) {
+            color: #10b981;
+        }
+        a:not(.button-primary):hover {
+            color: #34d399;
+        }
+        /* Тени и рамки */
+        .glass-effect, .scroll-card, .prompt-card, .category-item {
+            transition: all 0.2s;
+        }
+        .category-item:hover, .category-item.active {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid #10b981;
+            padding-left: 1rem;
+        }
+        .prompt-card {
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+        .prompt-card:hover {
+            border-color: #10b981;
+        }
+        /* Кнопка выхода */
+        .bg-red-600 {
+            background-color: #dc2626;
+        }
+        .bg-red-600:hover {
+            background-color: #b91c1c;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <nav class="glass-effect sticky top-0 z-50">
+    <nav class="glass-effect sticky top-0 z-50 border-b border-green-500 border-opacity-20">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-            <div class="flex items-center gap-2">
+            <div class="logo-link" id="logoLink">
                 <i class="fas fa-brain text-2xl gradient-text"></i>
                 <h1 class="text-xl sm:text-2xl font-bold gradient-text">{{ site_name }}</h1>
             </div>
-            <!-- Бургер-кнопка для мобильных -->
             <button id="mobile-menu-button" class="sm:hidden text-white focus:outline-none">
                 <i class="fas fa-bars text-2xl"></i>
             </button>
-            <!-- Десктопное меню -->
             <div class="hidden sm:flex gap-6 items-center">
-                <a href="/" class="hover:text-purple-400 transition">Главная</a>
-                <a href="/prompts" class="hover:text-purple-400 transition">Промпты</a>
+                <a href="/" class="hover:text-green-400 transition text-white">Главная</a>
+                <a href="/prompts" class="hover:text-green-400 transition text-white">Промпты</a>
                 {% if user %}
-                    <a href="/dashboard" class="hover:text-purple-400 transition">Кабинет</a>
+                    <a href="/dashboard" class="hover:text-green-400 transition text-white">Кабинет</a>
                 {% else %}
-                    <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg">Вход</a>
+                    <a href="/login" class="button-primary px-6 py-2 rounded-lg">Вход</a>
                 {% endif %}
             </div>
         </div>
-        <!-- Мобильное меню (скрыто) -->
-        <div id="mobile-menu" class="hidden sm:hidden glass-effect border-t border-purple-500 border-opacity-20">
+        <div id="mobile-menu" class="hidden sm:hidden glass-effect border-t border-green-500 border-opacity-20">
             <div class="flex flex-col space-y-3 p-4">
-                <a href="/" class="hover:text-purple-400 transition py-2 text-center">Главная</a>
-                <a href="/prompts" class="hover:text-purple-400 transition py-2 text-center">Промпты</a>
+                <a href="/" class="hover:text-green-400 transition py-2 text-center text-white">Главная</a>
+                <a href="/prompts" class="hover:text-green-400 transition py-2 text-center text-white">Промпты</a>
                 {% if user %}
-                    <a href="/dashboard" class="hover:text-purple-400 transition py-2 text-center">Кабинет</a>
+                    <a href="/dashboard" class="hover:text-green-400 transition py-2 text-center text-white">Кабинет</a>
                 {% else %}
                     <a href="/login" class="button-primary text-white px-6 py-2 rounded-lg text-center">Вход</a>
                 {% endif %}
@@ -89,7 +190,7 @@
 
     {% block content %}{% endblock %}
 
-    <footer class="glass-effect mt-20 border-t border-purple-500 border-opacity-20">
+    <footer class="glass-effect mt-20 border-t border-green-500 border-opacity-20">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 mb-8">
                 <div>
@@ -97,39 +198,62 @@
                     <p class="text-sm text-gray-400">Профессиональная база промптов для AI-инженеров</p>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-4">Продукт</h4>
+                    <h4 class="font-bold mb-4 text-white">Продукт</h4>
                     <ul class="space-y-2 text-sm text-gray-400">
-                        <li><a href="/prompts" class="hover:text-purple-400">Промпты</a></li>
-                        <li><a href="#pricing" class="hover:text-purple-400">Тарифы</a></li>
+                        <li><a href="/prompts" class="hover:text-green-400">Промпты</a></li>
+                        <li><a href="#pricing" class="hover:text-green-400">Тарифы</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-4">Компания</h4>
+                    <h4 class="font-bold mb-4 text-white">Компания</h4>
                     <ul class="space-y-2 text-sm text-gray-400">
-                        <li><a href="/legal/terms" class="hover:text-purple-400">Оферта</a></li>
-                        <li><a href="/legal/privacy" class="hover:text-purple-400">Политика</a></li>
+                        <li><a href="/legal/terms" class="hover:text-green-400">Оферта</a></li>
+                        <li><a href="/legal/privacy" class="hover:text-green-400">Политика</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="font-bold mb-4">Контакты</h4>
+                    <h4 class="font-bold mb-4 text-white">Контакты</h4>
                     <p class="text-sm text-gray-400">
-                        Email: <a href="mailto:support@neuroprompt.ai" class="text-purple-400">support@neuroprompt.ai</a>
+                        Email: <a href="mailto:support@neuroprompt.ai" class="text-green-400">support@neuroprompt.ai</a>
                     </p>
                 </div>
             </div>
-            <div class="border-t border-purple-500 border-opacity-20 pt-8 text-center text-sm text-gray-500">
+            <div class="border-t border-green-500 border-opacity-20 pt-8 text-center text-sm text-gray-500">
                 <p>&copy; 2024 {{ site_name }}. Все права защищены.</p>
             </div>
         </div>
     </footer>
 
     <script>
-        // Бургер-меню
         const burger = document.getElementById('mobile-menu-button');
         const mobileMenu = document.getElementById('mobile-menu');
         if (burger && mobileMenu) {
             burger.addEventListener('click', () => {
                 mobileMenu.classList.toggle('hidden');
+            });
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            const fadeElements = document.querySelectorAll('.fade-up');
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                    }
+                });
+            }, { threshold: 0.1 });
+            fadeElements.forEach(el => observer.observe(el));
+        });
+        
+        const logoLink = document.getElementById('logoLink');
+        if (logoLink) {
+            logoLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (window.location.pathname === '/' || window.location.pathname === '') return;
+                document.body.classList.add('fade-out');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 400);
             });
         }
     </script>
