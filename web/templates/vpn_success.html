@@ -3,12 +3,27 @@
 
 {% block extra_css %}
 <style>
-    .dot-spinner { display: flex; justify-content: center; align-items: center; gap: 8px; height: 60px; }
-    .dot-spinner > div { width: 10px; height: 10px; background: #a78bfa; border-radius: 50%; animation: bounce 1.2s infinite ease-in-out both; }
+    .dot-spinner {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        height: 60px;
+    }
+    .dot-spinner > div {
+        width: 10px;
+        height: 10px;
+        background: #10b981;  /* зелёный */
+        border-radius: 50%;
+        animation: bounce 1.2s infinite ease-in-out both;
+    }
     .dot-spinner > div:nth-child(1) { animation-delay: -0.32s; }
     .dot-spinner > div:nth-child(2) { animation-delay: -0.16s; }
     .dot-spinner > div:nth-child(3) { animation-delay: 0s; }
-    @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-20px); } }
+    @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-20px); }
+    }
 </style>
 {% endblock %}
 
@@ -18,7 +33,11 @@
         <h1 class="text-3xl font-bold gradient-text mb-6">Платёж выполнен</h1>
         <div id="status-area">
             <p class="text-gray-400 mb-6">Проверяем статус и активируем подписку...</p>
-            <div class="dot-spinner"><div></div><div></div><div></div></div>
+            <div class="dot-spinner">
+                <div></div>
+                <div></div>
+                <div></div>
+            </div>
         </div>
     </div>
 </main>
@@ -27,18 +46,30 @@
 {% block extra_js %}
 <script>
 (async () => {
-    function getCookie(name) { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); }
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+    }
     const urlParams = new URLSearchParams(window.location.search);
     let paymentId = urlParams.get('payment_id') || urlParams.get('orderId') || getCookie('vpn_payment_id');
     const statusArea = document.getElementById('status-area');
-    if (!paymentId) { statusArea.innerHTML = '<p class="text-red-400 text-xl">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>'; return; }
+    if (!paymentId) {
+        statusArea.innerHTML = '<p class="text-red-400 text-xl">Не найден идентификатор платежа. Попробуйте оплатить снова.</p>';
+        return;
+    }
     try {
         const resp = await fetch(`/api/payment/check-payment?payment_id=${encodeURIComponent(paymentId)}`);
         const data = await resp.json();
-        if (data.activated) statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p>';
-        else statusArea.innerHTML = '<p class="text-yellow-400 text-xl">⚠️ Подписка уже была активирована ранее или произошла ошибка. Если вы не получили доступ, обратитесь в поддержку.</p>';
+        if (data.activated) {
+            statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p><div class="mt-4"><a href="/dashboard" class="button-primary px-6 py-2 rounded-lg inline-block">Перейти в кабинет</a></div>';
+        } else {
+            statusArea.innerHTML = '<p class="text-yellow-400 text-xl">⚠️ Подписка уже была активирована ранее или произошла ошибка. Если вы не получили доступ, обратитесь в поддержку.</p>';
+        }
         document.cookie = "vpn_payment_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-    } catch(e) { statusArea.innerHTML = '<p class="text-red-400 text-xl">Ошибка связи с сервером. Попробуйте позже.</p>'; }
+    } catch(e) {
+        statusArea.innerHTML = '<p class="text-red-400 text-xl">Ошибка связи с сервером. Попробуйте позже.</p>';
+    }
 })();
 </script>
 {% endblock %}
