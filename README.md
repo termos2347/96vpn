@@ -67,24 +67,76 @@ python main.py
 ## Структура проекта
 ```
 96vpn/
-├── main.py                 # Точка входа
-├── config.py              # Конфигурация
-├── requirements.txt       # Зависимости
-├── alembic.ini           # Настройки миграций
-├── db/
-│   ├── base.py           # Настройка БД
-│   ├── models.py         # Модели SQLAlchemy
-│   └── crud.py           # Функции работы с БД
-├── handlers/             # Обработчики команд
-│   ├── common.py         # Общие команды
-│   ├── keyboards.py      # Клавиатуры
-│   └── ...
-├── services/             # Бизнес-логика
-│   ├── vpn_manager.py    # Управление VPN
-│   ├── vpn_provider.py   # Интеграция с 3x-ui
-│   └── scheduler.py      # Фоновые задачи
-├── utils/                # Утилиты
-└── migrations/           # Миграции БД
+├── config.py                # Pydantic‑settings, загрузка .env
+├── .env.example             # Шаблон переменных окружения
+├── requirements.txt
+├── alembic.ini
+│
+├── db/                      # Модели, CRUD, миграции
+│   ├── base.py              # async/sync engine, сессии
+│   ├── models.py            # WebUser, BotUser, VPNServer, Category, Prompt, BotPayment
+│   ├── crud.py              # операции с BotUser, платежами, категориями, промптами
+│   └── crud_servers.py      # операции с VPNServer
+│
+├── handlers/                # Обработчики основного бота
+│   ├── common.py            # /start, кнопка "Инфо"
+│   ├── keyboards.py         # Reply‑ и Inline‑клавиатуры
+│   ├── payment.py           # Оплата VPN / обхода (JWT‑токен -> ссылка на сайт)
+│   ├── subscription.py      # "Подключить VPN" – отдать ссылку
+│   ├── proxy.py             # Бесплатный прокси
+│   └── __init__.py          # Сборка всех роутеров, глобальный VPNManager
+│
+├── handlers/admin/          # Административный бот (отдельный)
+│   ├── bot.py               # Команды /health, /broadcast, /grant, /revoke, /stats
+│   ├── categories.py        # /addcategory, /renamecategory, /deletecategory
+│   ├── prompts.py           # /addprompt (FSM), /editprompt, /deleteprompt, /listprompts
+│   ├── servers.py           # /addserver (FSM), /listservers, /removeserver, /serversetactive
+│   ├── server_states.py     # FSM‑состояния для добавления сервера
+│   └── __init__.py          # Роутер для админ‑бота
+│
+├── services/                # Бизнес‑логика
+│   ├── vpn_provider.py      # XUIVPNProvider – работа с API 3x‑UI
+│   ├── vpn_manager.py       # VPNManager – создание/отзыв ключей через ServerPool
+│   ├── server_pool.py       # ServerPool – загрузка серверов из БД, round‑robin
+│   ├── scheduler.py         # Фоновая проверка подписок и отзыв ключей
+│   └── (ещё: dpi_bypass.py, payment_gateway.py – заглушки)
+│
+├── utils/                   # Вспомогательные модули
+│   ├── validators.py        # Валидация user_id, email, days, currency, uuid
+│   ├── decorators.py        # rate_limit для бота
+│   ├── logger.py            # Настройка логгирования с ротацией
+│   └── email.py             # Отправка писем (заглушка/реальный SMTP)
+│
+├── web/                     # FastAPI веб‑приложение
+│   ├── app.py               # Создание app, lifespan, CORS, статика
+│   ├── rate_limit.py        # SlowAPI лимитер
+│   ├── security.py          # JWT (create_access_token, get_current_user_optional)
+│   ├── schemas/schemas.py   # Pydantic‑схемы
+│   ├── services/            # Сервисы для веба
+│   │   ├── auth.py          # AuthService (регистрация, логин, сброс пароля)
+│   │   └── payment.py       # YookassaService (create_payment, webhook, check_and_activate)
+│   ├── routes/              # Маршруты
+│   │   ├── auth.py          # /api/auth/register, /login, /forgot‑password и т.д.
+│   │   ├── payment.py       # /api/payment/create, /initiate‑vpn, webhook
+│   │   ├── prompts.py       # /api/prompts/all, /categories
+│   │   └── web.py           # HTML‑страницы: /, /dashboard, /prompts, /pay/subscription ...
+│   └── templates/           # Jinja2 шаблоны (все 15+ файлов)
+│       ├── base.html
+│       ├── index.html, login.html, register.html
+│       ├── dashboard.html, prompts.html, prompt_detail.html
+│       ├── payment_telegram.html, pay_choice.html
+│       ├── vpn_payment.html, vpn_success.html
+│       ├── terms.html, privacy.html
+│       ├── forgot_password.html, reset_password.html
+│       └── subscribe_required.html, payment_success.html, payment_failed.html
+│
+├── internal_api.py          # HTTP API на aiohttp (порт 8001) – активация подписки бота
+├── run_web.py               # Запуск только веба (через uvicorn)
+├── run_all.py               # Запуск всего: веб (FastAPI) + внутреннее API + боты (webhook)
+├── main.py                  # Запуск только бота (polling, для разработки)
+├── init.py                  # Скрипт инициализации проекта
+│
+└── tests/                   # Юнит‑тесты (test_vpn_manager, test_validators и др.)
 ```
 
 ## Тестирование
