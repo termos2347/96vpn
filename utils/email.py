@@ -3,16 +3,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Флаг: если True – используем реальную отправку через SMTP,
-# если False – просто логируем (для локальной разработки).
 USE_REAL_SMTP = False   # <- поменяйте на True, когда купите домен и настроите SMTP
 
-
 async def send_email(to_email: str, subject: str, body: str, html: Optional[str] = None) -> bool:
-    """
-    Отправляет email. В режиме разработки – только логирует.
-    При USE_REAL_SMTP = True – реальная отправка.
-    """
     if not USE_REAL_SMTP:
         # Режим разработки: логируем всю информацию
         logger.info("=" * 50)

@@ -6,11 +6,14 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 
 from web.routes import web, auth, payment, prompts
 from config import settings
-from db.base import init_db  # асинхронная инициализация
+from db.base import init_db
 from web.services.auth import PromptService
+from web.rate_limit import limiter  # наш отдельный модуль с лимитером
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +30,6 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables initialized (async)")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
-        # В production можно raise, но для отладки продолжим
     # Предзагрузка кэша промптов
     await PromptService.init_cache()
     yield
@@ -44,10 +46,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+# Подключение лимитера к приложению
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — разрешён только ваш домен
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[settings.SITE_URL],  # конкретный домен из настроек
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

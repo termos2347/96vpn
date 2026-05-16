@@ -10,13 +10,16 @@ from db.base import AsyncSession, get_async_db,  AsyncSessionLocal
 from web.security import create_access_token
 from config import settings
 from utils.email import send_email
+from web.rate_limit import limiter
+from fastapi import Request
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # ---------- Регистрация ----------
 @router.post("/register")
-async def register(user_data: UserRegister, db: AsyncSession = Depends(get_async_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, user_data: UserRegister, db: AsyncSession = Depends(get_async_db)):
     user = await AuthService.create_user(
         db=db,
         email=user_data.email,
