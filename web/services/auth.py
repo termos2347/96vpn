@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from config import settings
 from db.models import WebUser
-from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories
+from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories, get_prompt_by_id
+from web.services.cache_service import cache
 
 logger = logging.getLogger(__name__)
 
@@ -161,37 +162,46 @@ class SubscriptionService:
         await db.commit()
         return len(expired_users)
 
-
 class PromptService:
+    PROMPTS_CACHE_KEY = "prompts:data"
+    CATEGORIES_CACHE_KEY = "categories:list"
+
     @staticmethod
     async def get_prompts_data():
-        global _cached_data, _cache_valid
-        if not _cache_valid or _cached_data is None:
-            logger.info("Loading prompts data from database...")
-            _cached_data = await get_prompts_data()
-            _cache_valid = True
-        return _cached_data
-
-    @staticmethod
-    async def get_prompt_by_id(prompt_id: int):
-        return await get_p(prompt_id)
+        cached = await cache.get(PromptService.PROMPTS_CACHE_KEY)
+        if cached:
+            logger.debug("Returning from CACHE")
+            return cached
+        logger.debug("Loading from DATABASE")
+        data = await get_prompts_data()
+        await cache.set(PromptService.PROMPTS_CACHE_KEY, data, ttl_seconds=300)
+        return data
 
     @staticmethod
     async def get_categories():
-        data = await PromptService.get_prompts_data()
-        return data["categories"]
+        cached = await cache.get(PromptService.CATEGORIES_CACHE_KEY)
+        if cached:
+            logger.debug("Returning from CACHE")
+            return cached
+        logger.debug("Loading from DATABASE")
+        data = await get_all_categories()
+        await cache.set(PromptService.CATEGORIES_CACHE_KEY, data, ttl_seconds=300)
+        return data
 
     @staticmethod
-    def invalidate():
-        global _cache_valid
-        _cache_valid = False
+    async def get_prompt_by_id(prompt_id: int):
+        # Можно кэшировать отдельные промпты, но для простоты пока без кэша
+        return await get_prompt_by_id(prompt_id)
+
+    @staticmethod
+    async def invalidate():
+        """Сбросить кэш промптов (например, после добавления/изменения)."""
+        await cache.delete(PromptService.PROMPTS_CACHE_KEY)
+        await cache.delete(PromptService.CATEGORIES_CACHE_KEY)
         logger.info("Prompts cache invalidated")
-        
+
     @staticmethod
     async def init_cache():
-        global _cached_data, _cache_valid
-        if not _cache_valid or _cached_data is None:
-            logger.info("Preloading prompts data at startup...")
-            _cached_data = await get_prompts_data()
-            _cache_valid = True
-            logger.info("Prompts cache initialized")
+        """Предзагрузка при старте (опционально)."""
+        await PromptService.get_prompts_data()
+        await PromptService.get_categories()

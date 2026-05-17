@@ -5,19 +5,26 @@ import sys
 import io
 from pathlib import Path
 
-import uvicorn
-from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.exceptions import TelegramNetworkError
-from aiohttp import web
-from db.migrate import run_migrations
-from web.services.auth import PromptService
-
 # === Настройка вывода в UTF-8 ===
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# Импорты
+# === Настройка логирования ДО всех остальных импортов ===
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Импортируем наш модуль настройки логов (он добавит файловый вывод)
+from utils.logger import setup_logger
+setup_logger()  # <-- вызов до импорта остальных модулей
+
+# --- Теперь все остальные импорты (они будут использовать настроенный логгер) ---
+import uvicorn
+from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiohttp import web
+from db.migrate import run_migrations
+from web.services.auth import PromptService
+
+# Импорты из проекта
 from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
 from handlers import router as main_router, set_server_pool, set_vpn_manager
 from handlers.common import setup_bot_commands
@@ -25,19 +32,17 @@ from services.scheduler import start_scheduler
 from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
 from db.base import init_db, engine
-from utils.logger import setup_logger
+from utils.logger import setup_logger  # уже импортирован выше, но повтор не страшен
 from internal_api import create_internal_app
 from web.app import app as fastapi_app
-from services.vpn_provider import vpn_provider   # пока оставляем для совместимости, но будем заменять
-
+from services.vpn_provider import vpn_provider   # пока оставляем для совместимости
 from admin import startup as admin_startup, shutdown as admin_shutdown, dp as admin_dp
 from web.routes import web as web_routes
-
 import sentry_sdk
-from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Инициализация Sentry (если настроен)
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
@@ -46,10 +51,8 @@ if settings.SENTRY_DSN:
         release="1.0.0",
     )
     logger.info("Sentry initialized for bot")
-    
+
 async def main():
-    setup_logger()
-    logger = logging.getLogger(__name__)
     logger.info("Starting combined server (bot + web)…")
 
     # Инициализация БД
@@ -160,6 +163,7 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # Бесконечное ожидание (пока процесс не остановят)
     await asyncio.Event().wait()
 
 

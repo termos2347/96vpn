@@ -110,3 +110,13 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.DEBUG
     )
+    
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up...")
+    await init_db()
+    await PromptService.init_cache()   # предзагружаем промпты в кэш
+    yield
+    # Shutdown
+    logger.info("Shutting down...")

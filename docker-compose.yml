@@ -2,20 +2,38 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: neuroprompt_db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: neuroprompt
-      POSTGRES_USER: neuroprompt_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD?err}   # обязательно задать в .env
+      POSTGRES_DB: ${DB_NAME:-neuroprompt}
+      POSTGRES_USER: ${DB_USER:-neuroprompt_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?err}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U neuroprompt_user -d neuroprompt"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-neuroprompt_user} -d ${DB_NAME:-neuroprompt}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - neuroprompt_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: neuroprompt_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - neuroprompt_net
 
   app:
     build: .
@@ -28,13 +46,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./logs:/app/logs   # опционально, для сохранения логов на хост
+      - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - neuroprompt_net
+
+networks:
+  neuroprompt_net:
+    driver: bridge
 
 volumes:
   postgres_data:
+  redis_data:

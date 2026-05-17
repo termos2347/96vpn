@@ -1,23 +1,23 @@
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Установка системных зависимостей (для bcrypt, cryptography и др.)
+# Установка системных зависимостей (curl для healthcheck, netcat для проверки БД)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libffi-dev \
-    libssl-dev \
+    curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем requirements и устанавливаем зависимости
+WORKDIR /app
+
+# Копируем только requirements сначала (для кэширования слоёв)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копируем весь проект
 COPY . .
 
-# Открываем порты: 8000 (веб), 8001 (внутренний API)
-EXPOSE 8000 8001
+# Создаём непривилегированного пользователя
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
-# Запуск единой точки входа (бота + веб + internal API)
+# Команда запуска (используем run_all.py, который поднимает и бота, и веб)
 CMD ["python", "run_all.py"]
