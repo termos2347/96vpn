@@ -37,6 +37,7 @@ tenacity>=8.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 redis[hiredis]>=5.0.0
+sentry-sdk>=2.0.0
 
 # ================== Продакшен ==================
 gunicorn>=23.0.0

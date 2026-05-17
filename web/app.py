@@ -18,12 +18,18 @@ from web.rate_limit import limiter  # наш отдельный модуль с 
 import sentry_sdk
 from config import settings
 
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
-        traces_sample_rate=0.1,
-        environment="production" if not settings.DEBUG else "development"
+        traces_sample_rate=0.1,          # 10% запросов для performance мониторинга
+        environment="production" if not settings.DEBUG else "development",
+        release="1.0.0",                 # можно указать версию из git или другую
     )
+    logger.info("Sentry initialized")
     
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
