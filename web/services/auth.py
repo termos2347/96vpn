@@ -1,42 +1,45 @@
 import logging
 import secrets
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-
 import bcrypt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from config import settings
 from db.models import WebUser
 from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories
 
 logger = logging.getLogger(__name__)
 
-# Функции хеширования пароля без passlib
+# ========== Хеширование паролей ==========
 def hash_password(password: str) -> str:
-    """Хеширует пароль с помощью bcrypt (обрезает до 72 байт)."""
-    # bcrypt принимает только байты, обрезаем до 72 байт
-    password_bytes = password.encode('utf-8')[:72]
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password_bytes, salt)
-    return hashed.decode('utf-8')
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль (обрезает до 72 байт)."""
-    plain_bytes = plain_password.encode('utf-8')[:72]
-    hashed_bytes = hashed_password.encode('utf-8')
-    return bcrypt.checkpw(plain_bytes, hashed_bytes)
+def verify_password(plain_password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed.encode('utf-8'))
 
-# ========== In‑memory кэш ==========
+def validate_password_strength(password: str) -> bool:
+    """Проверяет сложность пароля: минимум 8 символов, только латиница и цифры."""
+    if len(password) < 8:
+        return False
+    if not re.match(r'^[a-zA-Z0-9]+$', password):
+        return False
+    return True
+
+# ========== Кэш промптов ==========
 _cached_data: Optional[Dict[str, Any]] = None
 _cache_valid = False
 
-class AuthService:
-    """Сервис аутентификации и управления пользователями"""
 
+class AuthService:
     @staticmethod
     async def create_user(db: AsyncSession, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[WebUser]:
+        # Серверная валидация пароля
+        if not validate_password_strength(password):
+            logger.warning(f"Password validation failed for email {email}")
+            return None
+
         stmt = select(WebUser).where(WebUser.email == email)
         result = await db.execute(stmt)
         existing = result.scalars().first()
@@ -101,6 +104,9 @@ class AuthService:
 
     @staticmethod
     async def reset_password(db: AsyncSession, token: str, new_password: str) -> bool:
+        if not validate_password_strength(new_password):
+            logger.warning("Reset password: weak password rejected")
+            return False
         stmt = select(WebUser).where(WebUser.reset_token == token)
         result = await db.execute(stmt)
         user = result.scalars().first()
@@ -111,6 +117,7 @@ class AuthService:
         user.reset_token_expires = None
         await db.commit()
         return True
+
 
 class SubscriptionService:
     @staticmethod
@@ -153,6 +160,7 @@ class SubscriptionService:
             logger.info(f"User {user.id} deactivated due to expired subscription")
         await db.commit()
         return len(expired_users)
+
 
 class PromptService:
     @staticmethod

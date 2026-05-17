@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from db.base import AsyncSessionLocal
 from db.models import BotUser
 from db.crud import set_vpn_client_id
+from services import vpn_manager
 from services.vpn_provider import vpn_provider
 from sqlalchemy import select
 from admin import send_admin_alert
@@ -29,7 +30,7 @@ async def check_expired_subscriptions(bot):
                     success = False
                     for attempt in range(retry_count):
                         try:
-                            success = await vpn_provider.revoke_client(client_uuid)
+                            success = await vpn_manager.revoke_key(client_uuid)
                             if success:
                                 break
                         except Exception as e:
