@@ -4,9 +4,9 @@ from db.base import AsyncSessionLocal
 from db.models import VPNServer
 from typing import Optional, List
 import logging
+from utils.encryption import encrypt_password, decrypt_password
 
 logger = logging.getLogger(__name__)
-
 
 async def add_server(
     name: str,
@@ -24,9 +24,10 @@ async def add_server(
         existing = await session.execute(select(VPNServer).where(VPNServer.name == name))
         if existing.scalars().first():
             return None
+        encrypted_password = encrypt_password(password)   # <-- шифрование
         server = VPNServer(
             name=name, host=host, port=port, inbound_id=inbound_id,
-            username=username, password=password, api_path=api_path,
+            username=username, password=encrypted_password, api_path=api_path,
             sub_port=sub_port, is_active=is_active, weight=weight
         )
         session.add(server)
@@ -38,13 +39,15 @@ async def add_server(
 async def get_all_servers() -> List[VPNServer]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(VPNServer).order_by(VPNServer.name))
-        return result.scalars().all()
+        servers = result.scalars().all()
+        return servers
 
 
 async def get_active_servers() -> List[VPNServer]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(VPNServer).where(VPNServer.is_active == True))
-        return result.scalars().all()
+        servers = result.scalars().all()
+        return servers
 
 
 async def get_server_by_id(server_id: int) -> Optional[VPNServer]:
@@ -55,6 +58,8 @@ async def get_server_by_id(server_id: int) -> Optional[VPNServer]:
 
 async def update_server(server_id: int, **kwargs) -> bool:
     async with AsyncSessionLocal() as session:
+        if 'password' in kwargs and kwargs['password'] is not None:
+            kwargs['password'] = encrypt_password(kwargs['password'])
         stmt = update(VPNServer).where(VPNServer.id == server_id).values(**kwargs)
         result = await session.execute(stmt)
         await session.commit()

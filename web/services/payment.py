@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from yookassa import Configuration, Payment
@@ -66,7 +67,8 @@ class YookassaService:
                 payment_data["metadata"]["plan"] = plan
 
             idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
-            payment = Payment.create(payment_data, idempotence_key)
+            # Асинхронный вызов SDK в отдельном потоке
+            payment = await asyncio.to_thread(Payment.create, payment_data, idempotence_key)
 
             logger.info(f"Payment created: {payment.id}, amount: {amount}")
             return {
@@ -81,7 +83,7 @@ class YookassaService:
 
     async def get_payment_status(self, payment_id: str) -> Optional[str]:
         try:
-            payment = Payment.find_one(payment_id)
+            payment = await asyncio.to_thread(Payment.find_one, payment_id)
             return payment.status
         except Exception as e:
             logger.error(f"Error getting payment status: {e}")
@@ -119,7 +121,6 @@ class YookassaService:
                     logger.warning(f"User {user_id} not found for payment {payment_id}")
                     return False
 
-                # Защита от повторной обработки (но теперь yookassa_payment_id сохранится только после успеха)
                 if user.yookassa_payment_id == payment_id:
                     logger.info(f"Payment {payment_id} already processed, skipping webhook")
                     return True
@@ -187,7 +188,7 @@ class YookassaService:
 
     async def check_and_activate(self, payment_id: str, db: AsyncSession) -> bool:
         try:
-            payment = Payment.find_one(payment_id)
+            payment = await asyncio.to_thread(Payment.find_one, payment_id)
             if payment.status != 'succeeded':
                 logger.info(f"Payment {payment_id} not succeeded")
                 return False

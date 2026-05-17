@@ -207,36 +207,6 @@ payment_url = f"{SITE_URL}/pay/{user_telegram_id}"
 - SQL-injection защита через SQLAlchemy ORM
 - CORS настроена для безопасности
 
-## 📝 Переменные окружения
-
-```env
-# FastAPI
-APP_NAME=NeuroPrompt Premium
-DEBUG=False
-
-# Database
-DATABASE_URL=sqlite:///./neuroprompt.db
-
-# JWT
-SECRET_KEY=your-secret-key
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# Yookassa
-YOOKASSA_SHOP_ID=your_shop_id
-YOOKASSA_API_KEY=your_api_key
-YOOKASSA_RETURN_URL=http://localhost:8000/dashboard
-
-# Application
-SITE_URL=http://localhost:8000
-ADMIN_EMAIL=admin@neuroprompt.ai
-
-# Subscription
-MONTHLY_PRICE=290.0
-QUARTERLY_PRICE=790.0
-SUBSCRIPTION_DAYS=30
-```
-
 ## 🚀 Развёртывание на Production
 
 ### Через Gunicorn + Uvicorn:
