@@ -2,7 +2,7 @@ import logging
 import jwt
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
 from sqlalchemy import select, text
@@ -16,16 +16,20 @@ from web.security import get_current_user_optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+# Переменные для вебхуков (устанавливаются из run_all.py)
 webhook_bot: Bot = None
 webhook_admin_bot: Bot = None
 webhook_admin_dp: Dispatcher = None
 webhook_dp: Dispatcher = None
 
+# Jinja2 окружение
 templates_dir = Path(__file__).parent.parent / "templates"
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+# Глобальная переменная для email поддержки (из .env)
+jinja_env.globals['admin_email'] = settings.ADMIN_EMAIL
 
 router = APIRouter(tags=["web"])
 
@@ -44,12 +48,9 @@ async def vpn_payment_page(request: Request, token: str):
             algorithms=["HS256"],
             leeway=60
         )
-        logger.info(f"Token decoded, exp: {payload.get('exp')}, now: {datetime.now(timezone.utc).timestamp()}")
     except jwt.ExpiredSignatureError:
-        logger.warning("Token expired")
         return HTMLResponse("Ссылка истекла", status_code=410)
     except jwt.InvalidTokenError:
-        logger.warning("Invalid token")
         return HTMLResponse("Недействительная ссылка", status_code=400)
 
     template = jinja_env.get_template("vpn_payment.html")
@@ -68,7 +69,7 @@ async def vpn_success_page(request: Request, orderId: str = None, current_user: 
     template = jinja_env.get_template("vpn_success.html")
     return template.render(site_name=settings.APP_NAME, payment_id=orderId, user=current_user)
 
-# ---------- Остальные маршруты ----------
+# ---------- Основные страницы ----------
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     request.state.user = current_user
@@ -118,8 +119,7 @@ async def prompts_page(request: Request, current_user: WebUser = Depends(get_cur
     )
 
 @router.get("/pay-choice", response_class=HTMLResponse)
-async def pay_choice(request: Request, db: AsyncSession = Depends(get_async_db),
-                     current_user: WebUser = Depends(get_current_user_optional)):
+async def pay_choice(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/login", status_code=302)
     template = jinja_env.get_template("pay_choice.html")
@@ -132,8 +132,7 @@ async def pay_choice(request: Request, db: AsyncSession = Depends(get_async_db),
     )
 
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
-async def payment_telegram(request: Request, tg_id: int, db: AsyncSession = Depends(get_async_db),
-                           current_user: WebUser = Depends(get_current_user_optional)):
+async def payment_telegram(request: Request, tg_id: int, current_user: WebUser = Depends(get_current_user_optional)):
     template = jinja_env.get_template("payment_telegram.html")
     return template.render(
         site_name=settings.APP_NAME,
@@ -163,11 +162,7 @@ async def privacy(request: Request, current_user: WebUser = Depends(get_current_
     )
 
 @router.get("/prompt/{prompt_id}", response_class=HTMLResponse)
-async def prompt_detail(
-    request: Request,
-    prompt_id: int,
-    current_user: WebUser = Depends(get_current_user_optional)
-):
+async def prompt_detail(request: Request, prompt_id: int, current_user: WebUser = Depends(get_current_user_optional)):
     prompt = await PromptService.get_prompt_by_id(prompt_id)
     if not prompt:
         return HTMLResponse("Prompt not found", status_code=404)
@@ -215,50 +210,7 @@ async def reset_password_page(request: Request, token: str, current_user: WebUse
     template = jinja_env.get_template("reset_password.html")
     return template.render(site_name=settings.APP_NAME, token=token, user=current_user)
 
-@router.post("/webhook")
-async def telegram_webhook(request: Request):
-    """Обработчик вебхука от Telegram"""
-    global webhook_bot, webhook_dp
-    if webhook_bot is None or webhook_dp is None:
-        return JSONResponse(status_code=500, content={"error": "Bot not initialized"})
-    
-    # Проверка секрета
-    if settings.WEBHOOK_SECRET:
-        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if secret != settings.WEBHOOK_SECRET:
-            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
-    
-    try:
-        update_data = await request.json()
-        update = Update(**update_data)
-        await webhook_dp.feed_update(webhook_bot, update)
-        return JSONResponse(content={"status": "ok"})
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-    
-@router.post("/webhook/admin")
-async def admin_telegram_webhook(request: Request):
-    """Обработчик вебхука для админ-бота"""
-    global webhook_admin_bot, webhook_admin_dp
-    if webhook_admin_bot is None or webhook_admin_dp is None:
-        return JSONResponse(status_code=500, content={"error": "Admin bot not initialized"})
-    
-    # Проверка секрета
-    if settings.ADMIN_WEBHOOK_SECRET:
-        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if secret != settings.ADMIN_WEBHOOK_SECRET:
-            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
-    
-    try:
-        update_data = await request.json()
-        update = Update(**update_data)
-        await webhook_admin_dp.feed_update(webhook_admin_bot, update)
-        return JSONResponse(content={"status": "ok"})
-    except Exception as e:
-        logger.error(f"Admin webhook error: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
-    
+# ---------- Health checks ----------
 @router.get("/health")
 async def health():
     db_ok = True
@@ -288,3 +240,60 @@ async def health():
         "bot": {"status": bot_status, "info": bot_info},
         "app": settings.APP_NAME,
     }
+
+@router.get("/health/bot")
+async def bot_health():
+    if not webhook_bot:
+        return {"status": "error", "detail": "Bot not initialized"}
+    try:
+        me = await webhook_bot.get_me()
+        return {
+            "status": "ok",
+            "bot_username": me.username,
+            "is_bot": me.is_bot,
+            "webhook": webhook_bot.session is not None
+        }
+    except Exception as e:
+        logger.error(f"Health check bot error: {e}")
+        return {"status": "error", "detail": str(e)}
+
+# ---------- Webhooks для Telegram ----------
+@router.post("/webhook")
+async def telegram_webhook(request: Request):
+    global webhook_bot, webhook_dp
+    if webhook_bot is None or webhook_dp is None:
+        return JSONResponse(status_code=500, content={"error": "Bot not initialized"})
+
+    if settings.WEBHOOK_SECRET:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret != settings.WEBHOOK_SECRET:
+            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
+
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        await webhook_dp.feed_update(webhook_bot, update)
+        return JSONResponse(content={"status": "ok"})
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.post("/webhook/admin")
+async def admin_telegram_webhook(request: Request):
+    global webhook_admin_bot, webhook_admin_dp
+    if webhook_admin_bot is None or webhook_admin_dp is None:
+        return JSONResponse(status_code=500, content={"error": "Admin bot not initialized"})
+
+    if settings.ADMIN_WEBHOOK_SECRET:
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if secret != settings.ADMIN_WEBHOOK_SECRET:
+            return JSONResponse(status_code=403, content={"error": "Invalid secret"})
+
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        await webhook_admin_dp.feed_update(webhook_admin_bot, update)
+        return JSONResponse(content={"status": "ok"})
+    except Exception as e:
+        logger.error(f"Admin webhook error: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})

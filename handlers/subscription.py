@@ -4,6 +4,7 @@ from db.crud import is_vpn_active
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
 from utils.cache import get_cache, set_cache
+from config import settings
 from handlers import get_vpn_manager
 
 logger = logging.getLogger(__name__)
@@ -12,17 +13,15 @@ router = Router()
 @router.message(F.text == "🚀 Подключить VPN")
 @rate_limit(max_per_minute=10)
 async def connect_vpn(message: types.Message):
-    """Показывает ссылку подписки пользователю."""
     try:
         user_id = message.from_user.id
         validate_user_id(user_id)
 
-        # Проверяем активность подписки (с кэшем)
         cache_key_status = f"vpn_status:{user_id}"
         active = get_cache(cache_key_status)
         if active is None:
             active = await is_vpn_active(user_id)
-            set_cache(cache_key_status, active, 300)   # 5 минут
+            set_cache(cache_key_status, active, 300)
 
         if not active:
             logger.info(f"User {user_id} tried to connect without active subscription")
@@ -32,7 +31,6 @@ async def connect_vpn(message: types.Message):
             )
             return
 
-        # Пытаемся получить ссылку из кэша
         cache_key_link = f"vpn_link:{user_id}"
         link = get_cache(cache_key_link)
 
@@ -44,13 +42,12 @@ async def connect_vpn(message: types.Message):
 
             link = await vpn_manager.get_or_create_link(user_id)
             if link:
-                # Кэшируем ссылку на 1 час
                 set_cache(cache_key_link, link, 3600)
             else:
                 logger.error(f"Failed to get/create VPN link for user {user_id}")
                 await message.answer(
                     "⚠️ Не удалось получить ключ VPN.\n\n"
-                    "Попробуйте позже или обратитесь в поддержку: @support_username"
+                    f"Попробуйте позже или обратитесь в поддержку: @{settings.SUPPORT_USERNAME}"
                 )
                 return
 
