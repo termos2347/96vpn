@@ -35,15 +35,17 @@ from web.routes import web as web_routes
 import sentry_sdk
 from config import settings
 
+logger = logging.getLogger(__name__)
+
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         traces_sample_rate=0.1,
-        environment="production" if not settings.DEBUG else "development"
+        environment="production" if not settings.DEBUG else "development",
+        release="1.0.0",
     )
+    logger.info("Sentry initialized for bot")
     
-logger = logging.getLogger(__name__)
-
 async def main():
     setup_logger()
     logger = logging.getLogger(__name__)

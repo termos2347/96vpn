@@ -5,11 +5,10 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.base import AsyncSession, get_async_db, AsyncSessionLocal
+from db.base import get_async_db, AsyncSessionLocal
 from db.models import WebUser
 from config import settings
 from web.services.auth import PromptService, SubscriptionService, AuthService
@@ -17,7 +16,6 @@ from web.security import get_current_user_optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-from config import settings
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -260,3 +258,33 @@ async def admin_telegram_webhook(request: Request):
     except Exception as e:
         logger.error(f"Admin webhook error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+    
+@router.get("/health")
+async def health():
+    db_ok = True
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception as e:
+        db_ok = False
+        logger.error(f"Health check DB error: {e}")
+
+    bot_status = "unknown"
+    bot_info = None
+    if webhook_bot:
+        try:
+            me = await webhook_bot.get_me()
+            bot_status = "ok"
+            bot_info = {"username": me.username}
+        except Exception as e:
+            bot_status = "error"
+            bot_info = {"error": str(e)}
+    else:
+        bot_status = "not_initialized"
+
+    return {
+        "status": "ok" if (db_ok and bot_status == "ok") else "degraded",
+        "database": "ok" if db_ok else "error",
+        "bot": {"status": bot_status, "info": bot_info},
+        "app": settings.APP_NAME,
+    }

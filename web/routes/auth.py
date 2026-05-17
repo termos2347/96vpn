@@ -42,18 +42,19 @@ async def login(credentials: UserLogin, response: Response, db: AsyncSession = D
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     access_token = create_access_token(user_id=user.id)
-    
-    max_age = settings.ACCESS_TOKEN_EXPIRE_DAYS * 24 * 3600   # переводим дни в секунды
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,            # для продакшена True, для localhost можно False
+        secure=True,
         samesite="lax",
-        max_age=max_age,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_DAYS * 24 * 3600,
         path="/"
     )
-    return {"user_id": user.id, "is_active": user.is_active}
+    return {
+        "user_id": user.id,
+        "is_active": user.is_active
+    }
 
 # ---------- Выход ----------
 @router.post("/logout")
