@@ -106,11 +106,9 @@ async def get_payment_status(payment_id: str):
 @router.post("/webhook/yookassa")
 async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_async_db)):
     try:
-        # 1. Разбираем уведомление
         webhook_data = await request.json()
         event = webhook_data.get("event")
         if event != "payment.succeeded":
-            # Нас интересуют только успешные платежи
             return {"status": "ignored"}
 
         payment_obj = webhook_data.get("object", {})
@@ -119,13 +117,12 @@ async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_asyn
             logger.warning("Webhook without payment_id")
             return {"status": "error", "detail": "missing payment_id"}
 
-        # 2. Критически важно: перепроверяем статус через API ЮKassa
+        # Единственная защита: перепроверяем статус через API Yookassa
         status = await yookassa_service.get_payment_status(payment_id)
         if status != "succeeded":
             logger.info(f"Payment {payment_id} status from API: {status}, webhook ignored")
             return {"status": "ignored", "reason": "payment not succeeded"}
 
-        # 3. Платёж подтверждён – передаём в обработку
         success = await yookassa_service.process_webhook(webhook_data, db)
         return {"status": "ok" if success else "error"}
 

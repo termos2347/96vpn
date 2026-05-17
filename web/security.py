@@ -4,15 +4,12 @@ from typing import Optional
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from db.models import WebUser
-from db.base import AsyncSession, get_async_db, AsyncSessionLocal
+from db.base import get_async_db
 from config import settings
 from web.services.auth import AuthService
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
