@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     SITE_URL: str
     ADMIN_EMAIL: str
     ENCRYPTION_KEY: str
+    
+    # ---------- Support ----------
+    SUPPORT_USERNAME: str = "support_username"   # значение по умолчанию
 
     # ---------- Subscription (веб-подписки AI) ----------
     MONTHLY_PRICE: float = 200.0

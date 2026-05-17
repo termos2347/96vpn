@@ -12,6 +12,7 @@ from db.crud import get_or_create_bot_user
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, ValidationError
 from utils.cache import get_cache, set_cache
+from config import settings
 from .keyboards import main_keyboard
 
 logger = logging.getLogger(__name__)
@@ -62,14 +63,12 @@ async def info(message: types.Message):
         user_id = message.from_user.id
         validate_user_id(user_id)
 
-        # Пытаемся получить из кэша статусы подписок
         cache_key_vpn = f"vpn_status:{user_id}"
         cache_key_bypass = f"bypass_status:{user_id}"
         vpn_active = get_cache(cache_key_vpn)
         bypass_active = get_cache(cache_key_bypass)
 
         if vpn_active is None or bypass_active is None:
-            # Если нет в кэше — идём в БД
             async with AsyncSessionLocal() as session:
                 stmt = select(
                     BotUser.vpn_subscription_end,
@@ -84,14 +83,10 @@ async def info(message: types.Message):
             vpn_active = vpn_end and vpn_end > datetime.now(timezone.utc)
             bypass_active = bypass_end and bypass_end > datetime.now(timezone.utc)
 
-            # Сохраняем в кэш на 5 минут
             set_cache(cache_key_vpn, vpn_active, 300)
             set_cache(cache_key_bypass, bypass_active, 300)
 
-        # Формируем текст
         if vpn_active:
-            # Для количества оставшихся дней всё равно нужна дата — можно получить из БД или тоже кэшировать
-            # Для простоты получаем из БД только если нужно показать дни
             async with AsyncSessionLocal() as session:
                 stmt = select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == user_id)
                 end = (await session.execute(stmt)).scalar()
@@ -116,7 +111,7 @@ async def info(message: types.Message):
             "— Протоколы: VLESS, Shadowsocks, WireGuard\n"
             "— Защита от утечек DNS и IPv6\n"
             "— Круглосуточная поддержка\n\n"
-            "📞 По вопросам: @support_username"
+            f"📞 По вопросам: @{settings.SUPPORT_USERNAME}"
         )
     except ValidationError as e:
         logger.warning(f"Validation error in info: {e}")

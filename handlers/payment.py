@@ -7,10 +7,11 @@ from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, 
 from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
 from .keyboards import (
     vpn_currency_keyboard, vpn_period_keyboard,
-    bypass_currency_keyboard, bypass_period_keyboard,
+    # bypass_currency_keyboard, bypass_period_keyboard,  # временно отключено
     period_to_text, currency_symbol
 )
-from config import PAYMENT_LINK_TTL_MINUTES, VPN_PRICES, BYPASS_PRICES, INTERNAL_API_SECRET, SITE_URL
+# from config import BYPASS_PRICES
+from config import PAYMENT_LINK_TTL_MINUTES, VPN_PRICES, INTERNAL_API_SECRET, SITE_URL
 from services.vpn_provider import XUIVPNProvider
 from services.vpn_provider import vpn_provider
 from utils.decorators import rate_limit
@@ -114,7 +115,7 @@ async def vpn_payment_link(callback: types.CallbackQuery):
 
 
 # ---------- Bypass Payment Handlers ----------
-
+"""
 @router.message(F.text == "💰 Оплатить обход")
 @rate_limit(max_per_minute=10)
 async def pay_bypass(message: types.Message):
@@ -183,7 +184,7 @@ async def bypass_payment_link(callback: types.CallbackQuery):
         disable_web_page_preview=True
     )
     await callback.answer()
-
+"""
 # ---------- Платежи Telegram Stars ----------
 
 @router.pre_checkout_query()
