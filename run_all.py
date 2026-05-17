@@ -32,6 +32,16 @@ from services.vpn_provider import vpn_provider   # пока оставляем �
 from admin import startup as admin_startup, shutdown as admin_shutdown, dp as admin_dp
 from web.routes import web as web_routes
 
+import sentry_sdk
+from config import settings
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        traces_sample_rate=0.1,
+        environment="production" if not settings.DEBUG else "development"
+    )
+    
 logger = logging.getLogger(__name__)
 
 async def main():

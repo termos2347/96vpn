@@ -15,6 +15,16 @@ from db.base import init_db
 from web.services.auth import PromptService
 from web.rate_limit import limiter  # наш отдельный модуль с лимитером
 
+import sentry_sdk
+from config import settings
+
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        traces_sample_rate=0.1,
+        environment="production" if not settings.DEBUG else "development"
+    )
+    
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

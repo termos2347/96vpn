@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # ---------- Proxy (опционально) ----------
     PROXY_URL: Optional[str] = None
     
+    # ---------- SENTRY ----------
+    SENTRY_DSN: Optional[str] = None
+    
     # Webhook (Telegram)
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = ""
@@ -36,6 +39,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
         
     # ---------- SMTP ----------
+    SMTP_ENABLED: bool = False
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
@@ -48,8 +52,8 @@ class Settings(BaseSettings):
     # ---------- JWT ----------
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-
+    ACCESS_TOKEN_EXPIRE_DAYS: int = 30
+    
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
     YOOKASSA_API_KEY: str
@@ -59,6 +63,7 @@ class Settings(BaseSettings):
     # ---------- Application ----------
     SITE_URL: str
     ADMIN_EMAIL: str
+    ENCRYPTION_KEY: str
 
     # ---------- Subscription (веб-подписки AI) ----------
     MONTHLY_PRICE: float = 200.0

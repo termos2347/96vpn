@@ -62,7 +62,7 @@
         const resp = await fetch(`/api/payment/check-payment?payment_id=${encodeURIComponent(paymentId)}`);
         const data = await resp.json();
         if (data.activated) {
-            statusArea.innerHTML = '<p class="text-green-400 text-2xl font-bold">✅ Подписка активирована!</p><div class="mt-4"><a href="/dashboard" class="button-primary px-6 py-2 rounded-lg inline-block">Перейти в кабинет</a></div>';
+            statusArea.innerHTML = '<p class="text-2xl font-bold gradient-text mt-4">Подписка активирована!</p><div class="mt-6"><a href="/dashboard" class="button-primary px-6 py-2 rounded-lg inline-block">Перейти в кабинет</a></div>';
         } else {
             statusArea.innerHTML = '<p class="text-yellow-400 text-xl">⚠️ Подписка уже была активирована ранее или произошла ошибка. Если вы не получили доступ, обратитесь в поддержку.</p>';
         }

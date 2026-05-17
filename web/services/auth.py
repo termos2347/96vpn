@@ -3,20 +3,34 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
+import bcrypt
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from passlib.context import CryptContext
+
 from config import settings
 from db.models import WebUser
 from db.crud import get_prompts_data, get_prompt_by_id as get_p, get_all_categories
 
 logger = logging.getLogger(__name__)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Функции хеширования пароля без passlib
+def hash_password(password: str) -> str:
+    """Хеширует пароль с помощью bcrypt (обрезает до 72 байт)."""
+    # bcrypt принимает только байты, обрезаем до 72 байт
+    password_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверяет пароль (обрезает до 72 байт)."""
+    plain_bytes = plain_password.encode('utf-8')[:72]
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(plain_bytes, hashed_bytes)
 
 # ========== In‑memory кэш ==========
 _cached_data: Optional[Dict[str, Any]] = None
 _cache_valid = False
-
 
 class AuthService:
     """Сервис аутентификации и управления пользователями"""
@@ -30,7 +44,7 @@ class AuthService:
             logger.warning(f"User with email {email} already exists")
             return None
 
-        hashed = pwd_context.hash(password)
+        hashed = hash_password(password)
 
         user = WebUser(
             email=email,
@@ -56,7 +70,7 @@ class AuthService:
             return None
         if not user.hashed_password:
             return None
-        if not pwd_context.verify(password, user.hashed_password):
+        if not verify_password(password, user.hashed_password):
             return None
         return user
 
@@ -92,12 +106,11 @@ class AuthService:
         user = result.scalars().first()
         if not user or user.reset_token_expires is None or user.reset_token_expires < datetime.now(timezone.utc):
             return False
-        user.hashed_password = pwd_context.hash(new_password)
+        user.hashed_password = hash_password(new_password)
         user.reset_token = None
         user.reset_token_expires = None
         await db.commit()
         return True
-
 
 class SubscriptionService:
     @staticmethod
@@ -140,7 +153,6 @@ class SubscriptionService:
             logger.info(f"User {user.id} deactivated due to expired subscription")
         await db.commit()
         return len(expired_users)
-
 
 class PromptService:
     @staticmethod

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from db.models import VPNServer
 from db.crud_servers import get_active_servers
 from services.vpn_provider import XUIVPNProvider
+from utils.encryption import decrypt_password
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,14 @@ class ServerPool:
             self.servers = await get_active_servers()
             for s in self.servers:
                 if s.id not in self.providers:
+                    # Расшифровываем пароль перед использованием
+                    real_password = decrypt_password(s.password)
                     # Собираем полный URL панели
                     base_url = f"https://{s.host}:{s.port}{s.api_path or ''}"
                     self.providers[s.id] = XUIVPNProvider(
                         base_url=base_url,
                         username=s.username,
-                        password=s.password,
+                        password=real_password,
                         inbound_id=s.inbound_id,
                         sub_port=s.sub_port
                     )
