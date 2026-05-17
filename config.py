@@ -1,5 +1,6 @@
 import os
-from typing import Optional
+import sys
+from typing import Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 

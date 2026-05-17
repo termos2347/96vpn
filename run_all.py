@@ -10,6 +10,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import TelegramNetworkError
 from aiohttp import web
+from db.migrate import run_migrations
 from web.services.auth import PromptService
 
 # === Настройка вывода в UTF-8 ===
@@ -54,6 +55,7 @@ async def main():
     # Инициализация БД
     try:
         await init_db()
+        await run_migrations()
         logger.info("Database initialized")
     except Exception as e:
         logger.error(f"Database init failed: {e}")
