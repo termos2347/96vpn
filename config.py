@@ -58,11 +58,12 @@ class Settings(BaseSettings):
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
     YOOKASSA_API_KEY: str
-    YOOKASSA_RETURN_URL: str = "http://localhost:8000/dashboard"
+    YOOKASSA_RETURN_URL: str = ""
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
 
     # ---------- Application ----------
     SITE_URL: str
+    INTERNAL_API_URL: str = "http://localhost:8001"
     ADMIN_EMAIL: str
     ENCRYPTION_KEY: str
     
