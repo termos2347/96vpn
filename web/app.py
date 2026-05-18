@@ -1,11 +1,14 @@
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
+import secrets
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
@@ -13,48 +16,82 @@ from web.routes import web, auth, payment, prompts
 from config import settings
 from db.base import init_db
 from web.services.auth import PromptService
-from web.rate_limit import limiter  # наш отдельный модуль с лимитером
+from web.rate_limit import limiter
 
 import sentry_sdk
-from config import settings
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Sentry
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
-        traces_sample_rate=0.1,          # 10% запросов для performance мониторинга
+        traces_sample_rate=0.1,
         environment="production" if not settings.DEBUG else "development",
-        release="1.0.0",                 # можно указать версию из git или другую
+        release="1.0.0",
     )
     logger.info("Sentry initialized")
-    
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+
+# === CSRF Middleware ===
+class CSRFMiddleware(BaseHTTPMiddleware):
+    EXEMPT_PATHS = {
+        "/webhook",
+        "/webhook/admin",
+        "/api/payment/webhook/yookassa",
+        "/health",
+        "/health/bot",
+    }
+
+    async def dispatch(self, request: Request, call_next):
+        # Пропускаем проверку для исключённых путей
+        if request.url.path in self.EXEMPT_PATHS:
+            return await call_next(request)
+
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            csrf_token_header = request.headers.get("X-CSRF-Token")
+            csrf_token_cookie = request.cookies.get("csrf_token")
+            if not csrf_token_header or not csrf_token_cookie or csrf_token_header != csrf_token_cookie:
+                return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
+
+        response = await call_next(request)
+        if "csrf_token" not in request.cookies:
+            token = secrets.token_urlsafe(32)
+            response.set_cookie(
+                key="csrf_token",
+                value=token,
+                secure=True,
+                httponly=False,
+                samesite="lax",
+                max_age=3600
+            )
+        return response
+
+
+# === Cache-Control для статики ===
+class CacheControlStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения."""
-    # Startup
     logger.info("Starting up...")
     try:
         await init_db()
         logger.info("Database tables initialized (async)")
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
-    # Предзагрузка кэша промптов
     await PromptService.init_cache()
     yield
-    # Shutdown
     logger.info("Shutting down...")
-    # Здесь можно закрыть глобальные ресурсы, например aiohttp сессию, если добавите
 
 
-# Инициализация FastAPI приложения с lifespan
+# Инициализация FastAPI приложения
 app = FastAPI(
     title=settings.APP_NAME,
     description="Платформа для продажи AI-промптов по подписке",
@@ -62,23 +99,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Подключение лимитера к приложению
+# Подключение лимитера
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS — разрешён только ваш домен
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.SITE_URL],  # конкретный домен из настроек
+    allow_origins=[settings.SITE_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# CSRF защита (после CORS)
+app.add_middleware(CSRFMiddleware)
+
+# Gzip сжатие (после CSRF, до статики)
+app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
+
 # Статические файлы
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Кэширование статики (должен быть после монтирования StaticFiles)
+app.add_middleware(CacheControlStaticMiddleware)
 
 # Подключаем маршруты
 app.include_router(web.router)
@@ -95,7 +141,6 @@ async def health():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    """Favicon"""
     favicon_path = Path(__file__).parent / "static" / "favicon.ico"
     if favicon_path.exists():
         return FileResponse(favicon_path)
@@ -110,13 +155,3 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.DEBUG
     )
-    
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting up...")
-    await init_db()
-    await PromptService.init_cache()   # предзагружаем промпты в кэш
-    yield
-    # Shutdown
-    logger.info("Shutting down...")
