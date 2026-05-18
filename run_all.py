@@ -92,9 +92,9 @@ async def main():
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
-    internal_site = web.TCPSite(internal_runner, 'localhost', 8001)
+    internal_site = web.TCPSite(internal_runner, '0.0.0.0', 8001)
     await internal_site.start()
-    logger.info("Internal API started on http://localhost:8001")
+    logger.info("Internal API started on 0.0.0.0:8001")
 
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
@@ -128,30 +128,3 @@ async def main():
         await vpn_provider.close()          # <-- закрываем сессию провайдера
         server.should_exit = True
         await web_task
-        await internal_runner.cleanup()
-        await engine.dispose()
-        logger.info("Shutdown complete.")
-        stop_event.set()
-
-    def signal_handler(signum, frame):
-        logger.info(f"Received signal {signum}, exiting…")
-        asyncio.create_task(shutdown())
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    await stop_event.wait()
-
-
-async def _login_all_servers(server_pool: ServerPool):
-    await asyncio.sleep(2)
-    for provider in server_pool.providers.values():
-        try:
-            await provider.login()
-            logger.debug(f"Logged in to server provider")
-        except Exception as e:
-            logger.warning(f"Failed to login to some server: {e}")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

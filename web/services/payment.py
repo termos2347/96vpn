@@ -165,7 +165,7 @@ class YookassaService:
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(
-                    "http://localhost:8001/activate",
+                    f"{settings.INTERNAL_API_URL}/activate",
                     json={
                         "telegram_id": telegram_id,
                         "product_type": product_type,
