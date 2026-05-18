@@ -1,14 +1,15 @@
-import os
 import uuid
 import json
 import logging
 import asyncio
 import aiohttp
+from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 from config import XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
 
 class XUIVPNProvider:
     MAX_RETRIES = 3
@@ -25,8 +26,6 @@ class XUIVPNProvider:
         self.session = None
         self._server_address = self._extract_host(self.base_url) if self.base_url else ""
         self._is_authenticated = False
-
-    # Остальной код (login, create_client, revoke_client, ...) остаётся без изменений
 
     @staticmethod
     def _extract_host(url: str) -> str:
@@ -55,7 +54,7 @@ class XUIVPNProvider:
             await self.session.close()
             logger.info("XUI provider session closed")
 
-    async def _retry_request(self, method: str, url: str, **kwargs) -> dict | None:
+    async def _retry_request(self, method: str, url: str, **kwargs) -> Optional[Dict[str, Any]]:
         session = await self._get_session()
         attempt = 0
         while attempt < self.MAX_RETRIES:
@@ -69,11 +68,9 @@ class XUIVPNProvider:
                             logger.warning(f"Failed to parse JSON from {url}")
                             return None
                     elif resp.status == 401:
-                        # Сессия истекла – пробуем перелогиниться и повторяем запрос
                         self._is_authenticated = False
                         if await self.login():
                             logger.info("Re-authenticated after 401, retrying request")
-                            # Не увеличиваем attempt, чтобы не расходовать попытки
                             continue
                         else:
                             logger.error("Re-authentication failed after 401")
@@ -83,9 +80,11 @@ class XUIVPNProvider:
             except asyncio.TimeoutError:
                 logger.warning(f"Timeout on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except aiohttp.ClientError as e:
-                logger.warning(f"Client error on {url}: {e}, attempt {attempt+1}/{self.MAX_RETRIES}")
-            except Exception as e:
-                logger.error(f"Unexpected error on {url}: {e}")
+                # Не логируем детали e, чтобы избежать утечки паролей
+                logger.warning(f"Client error on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
+            except Exception:
+                # Не передаём исключение в сообщение – только traceback
+                logger.exception(f"Unexpected error on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
 
             attempt += 1
             if attempt < self.MAX_RETRIES:
@@ -112,11 +111,11 @@ class XUIVPNProvider:
             else:
                 logger.error(f"Authentication failed: {result.get('msg') if result else 'No response'}")
                 return False
-        except Exception as e:
-            logger.error(f"Login exception: {e}")
+        except Exception:
+            logger.exception("Login exception")
             return False
 
-    async def create_client(self, email: str) -> dict | None:
+    async def create_client(self, email: str) -> Optional[Dict[str, str]]:
         if not await self.login():
             logger.error("Cannot create client: not authenticated")
             return None
@@ -156,11 +155,11 @@ class XUIVPNProvider:
             else:
                 logger.error(f"Failed to create client: {result.get('msg') if result else 'No response'}")
                 return None
-        except Exception as e:
-            logger.error(f"Exception creating client: {e}")
+        except Exception:
+            logger.exception("Exception creating client")
             return None
 
-    async def get_client_by_email(self, email: str) -> dict | None:
+    async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
         if not await self.login():
             logger.error("Cannot search client: not authenticated")
             return None
@@ -182,8 +181,8 @@ class XUIVPNProvider:
                     }
             logger.debug(f"Client with email {email} not found")
             return None
-        except Exception as e:
-            logger.error(f"Exception searching client: {e}")
+        except Exception:
+            logger.exception("Exception searching client")
             return None
 
     def get_subscription_link(self, sub_id: str) -> str:
@@ -211,6 +210,6 @@ class XUIVPNProvider:
                 continue
         logger.error(f"Failed to revoke client {client_uuid}")
         return False
-    
-# Глобальный экземпляр провайдера (использовать во всём проекте)
+
+# Глобальный экземпляр провайдера (для обратной совместимости)
 vpn_provider = XUIVPNProvider()

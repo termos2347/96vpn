@@ -5,18 +5,13 @@ import sys
 import io
 from pathlib import Path
 
-# === Настройка вывода в UTF-8 ===
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# === Настройка логирования ДО всех остальных импортов ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# Импортируем наш модуль настройки логов (он добавит файловый вывод)
 from utils.logger import setup_logger
-setup_logger()  # <-- вызов до импорта остальных модулей
+setup_logger()
 
-# --- Теперь все остальные импорты (они будут использовать настроенный логгер) ---
 import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -24,7 +19,6 @@ from aiohttp import web
 from db.migrate import run_migrations
 from web.services.auth import PromptService
 
-# Импорты из проекта
 from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
 from handlers import router as main_router, set_server_pool, set_vpn_manager
 from handlers.common import setup_bot_commands
@@ -34,27 +28,20 @@ from services.vpn_manager import VPNManager
 from db.base import init_db, engine
 from internal_api import create_internal_app
 from web.app import app as fastapi_app
-from services.vpn_provider import vpn_provider   # пока оставляем для совместимости
+from services.vpn_provider import vpn_provider
 from admin import startup as admin_startup, shutdown as admin_shutdown, dp as admin_dp
 from web.routes import web as web_routes
 import sentry_sdk
 
 logger = logging.getLogger(__name__)
 
-# Инициализация Sentry (если настроен)
 if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        traces_sample_rate=0.1,
-        environment="production" if not settings.DEBUG else "development",
-        release="1.0.0",
-    )
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1, environment="production" if not settings.DEBUG else "development", release="1.0.0")
     logger.info("Sentry initialized for bot")
 
 async def main():
     logger.info("Starting combined server (bot + web)…")
 
-    # Инициализация БД
     try:
         await init_db()
         await run_migrations()
@@ -63,23 +50,18 @@ async def main():
         logger.error(f"Database init failed: {e}")
         sys.exit(1)
 
-    # Инициализация пула VPN-серверов
     server_pool = ServerPool()
     await server_pool.refresh_servers()
     set_server_pool(server_pool)
     logger.info("VPN server pool initialized")
 
-    # Создаём менеджер VPN с пулом
     vpn_manager = VPNManager(server_pool)
     set_vpn_manager(vpn_manager)
 
-    # Авторизация в пуле (логинимся на всех серверах в фоне)
     asyncio.create_task(_login_all_servers(server_pool))
 
-    # Инициализация админ-бота (рассылка и пр.)
     await admin_startup()
 
-    # --- Настройка основного бота (webhook) ---
     if PROXY_URL:
         main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
         logger.info(f"Proxy configured: {PROXY_URL}")
@@ -94,7 +76,6 @@ async def main():
     web_routes.webhook_bot = main_bot
     web_routes.webhook_dp = main_dp
 
-    # --- Админ-бот (webhook) ---
     from admin import bot as admin_module
     admin_bot_instance = admin_module.admin_bot
     if ADMIN_BOT_TOKEN and settings.ADMIN_WEBHOOK_URL:
@@ -108,7 +89,6 @@ async def main():
     else:
         logger.warning("Admin webhook not configured")
 
-    # --- Внутренний API (порт 8001) ---
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
@@ -116,14 +96,12 @@ async def main():
     await internal_site.start()
     logger.info("Internal API started on http://localhost:8001")
 
-    # --- FastAPI (порт 8000) ---
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
     server = uvicorn.Server(config)
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")
 
-    # --- Установка вебхука основного бота ---
     webhook_url = settings.WEBHOOK_URL
     if not webhook_url:
         logger.error("WEBHOOK_URL not set in .env")
@@ -134,11 +112,9 @@ async def main():
     )
     logger.info(f"Main bot webhook set to {webhook_url}")
 
-    # --- Планировщик ---
     await start_scheduler(main_bot)
 
-    # --- Graceful shutdown ---
-    stop_event = asyncio.Event()   # <-- событие для остановки
+    stop_event = asyncio.Event()
 
     async def shutdown():
         logger.info("Shutting down…")
@@ -149,13 +125,13 @@ async def main():
         await main_bot.session.close()
         await admin_shutdown()
         await server_pool.close_all()
-        await vpn_provider.close()
+        await vpn_provider.close()          # <-- закрываем сессию провайдера
         server.should_exit = True
         await web_task
         await internal_runner.cleanup()
         await engine.dispose()
         logger.info("Shutdown complete.")
-        stop_event.set()   # <-- сигнализируем, что всё завершено
+        stop_event.set()
 
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, exiting…")
@@ -164,18 +140,18 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Ожидаем сигнал остановки (вместо бесконечного цикла)
     await stop_event.wait()
 
+
 async def _login_all_servers(server_pool: ServerPool):
-    """Фоновая авторизация на всех серверах"""
-    await asyncio.sleep(2)  # дадим основному серверу запуститься
+    await asyncio.sleep(2)
     for provider in server_pool.providers.values():
         try:
             await provider.login()
             logger.debug(f"Logged in to server provider")
         except Exception as e:
             logger.warning(f"Failed to login to some server: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

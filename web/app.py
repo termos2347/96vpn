@@ -22,7 +22,6 @@ import sentry_sdk
 
 logger = logging.getLogger(__name__)
 
-# Sentry
 if settings.SENTRY_DSN:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
@@ -33,7 +32,6 @@ if settings.SENTRY_DSN:
     logger.info("Sentry initialized")
 
 
-# === CSRF Middleware ===
 class CSRFMiddleware(BaseHTTPMiddleware):
     EXEMPT_PATHS = {
         "/webhook",
@@ -44,14 +42,35 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     }
 
     async def dispatch(self, request: Request, call_next):
-        # Пропускаем проверку для исключённых путей
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            csrf_token_header = request.headers.get("X-CSRF-Token")
-            csrf_token_cookie = request.cookies.get("csrf_token")
-            if not csrf_token_header or not csrf_token_cookie or csrf_token_header != csrf_token_cookie:
+            # Получаем CSRF-токен из заголовка
+            csrf_header = request.headers.get("X-CSRF-Token")
+            # Пытаемся получить токен из тела запроса (form, json)
+            csrf_form = None
+            content_type = request.headers.get("content-type", "")
+
+            if content_type.startswith("application/x-www-form-urlencoded"):
+                form = await request.form()
+                csrf_form = form.get("csrf_token")
+            elif content_type.startswith("multipart/form-data"):
+                form = await request.form()
+                csrf_form = form.get("csrf_token")
+            elif content_type == "application/json":
+                body = await request.json()
+                csrf_form = body.get("csrf_token")
+
+            csrf_cookie = request.cookies.get("csrf_token")
+
+            is_valid = False
+            if csrf_header and csrf_cookie and csrf_header == csrf_cookie:
+                is_valid = True
+            elif csrf_form and csrf_cookie and csrf_form == csrf_cookie:
+                is_valid = True
+
+            if not is_valid:
                 return JSONResponse(status_code=403, content={"detail": "CSRF token missing or invalid"})
 
         response = await call_next(request)
@@ -60,7 +79,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             response.set_cookie(
                 key="csrf_token",
                 value=token,
-                secure=True,
+                secure=not settings.DEBUG,   # в production secure=True
                 httponly=False,
                 samesite="lax",
                 max_age=3600
@@ -68,7 +87,6 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# === Cache-Control для статики ===
 class CacheControlStaticMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -79,7 +97,6 @@ class CacheControlStaticMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения."""
     logger.info("Starting up...")
     try:
         await init_db()
@@ -91,7 +108,6 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
 
 
-# Инициализация FastAPI приложения
 app = FastAPI(
     title=settings.APP_NAME,
     description="Платформа для продажи AI-промптов по подписке",
@@ -99,11 +115,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Подключение лимитера
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.SITE_URL],
@@ -112,21 +126,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# CSRF защита (после CORS)
 app.add_middleware(CSRFMiddleware)
-
-# Gzip сжатие (после CSRF, до статики)
 app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
 
-# Статические файлы
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# Кэширование статики (должен быть после монтирования StaticFiles)
 app.add_middleware(CacheControlStaticMiddleware)
 
-# Подключаем маршруты
 app.include_router(web.router)
 app.include_router(auth.router)
 app.include_router(payment.router)
@@ -135,7 +143,6 @@ app.include_router(prompts.router)
 
 @app.get("/health")
 async def health():
-    """Health check"""
     return {"status": "ok", "app": settings.APP_NAME}
 
 
