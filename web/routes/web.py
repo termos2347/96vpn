@@ -1,60 +1,62 @@
 import logging
 import jwt
 from datetime import datetime, timezone
+from pathlib import Path
+
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader
-from pathlib import Path
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from db.base import get_async_db, AsyncSessionLocal
-from db.models import WebUser
-from config import settings
-from web.services.auth import PromptService, SubscriptionService, AuthService
-from web.security import get_current_user_optional
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 
+from config import settings
+from db.base import get_async_db, AsyncSessionLocal
+from db.models import WebUser
+from web.services.auth import PromptService, SubscriptionService
+from web.security import get_current_user_optional
+
 logger = logging.getLogger(__name__)
 
-# Переменные для вебхуков (устанавливаются из run_all.py)
+# ---------- Jinja2 окружение ----------
+templates_dir = Path(__file__).parent.parent / "templates"
+jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+jinja_env.globals['admin_email'] = settings.ADMIN_EMAIL
+
+# ---------- Глобальные переменные для вебхуков (устанавливаются из run_all.py) ----------
 webhook_bot: Bot = None
 webhook_admin_bot: Bot = None
 webhook_admin_dp: Dispatcher = None
 webhook_dp: Dispatcher = None
 
-# Jinja2 окружение
-templates_dir = Path(__file__).parent.parent / "templates"
-jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
-# Глобальная переменная для email поддержки (из .env)
-jinja_env.globals['admin_email'] = settings.ADMIN_EMAIL
-
 router = APIRouter(tags=["web"])
 
-def _render_template(template_name: str, request: Request, **kwargs):
-    current_user = getattr(request.state, "user", None)
+# ---------- Вспомогательная функция рендеринга ----------
+def render_template(request: Request, template_name: str, **context) -> HTMLResponse:
+    """
+    Рендерит HTML-шаблон через Jinja2, автоматически добавляя csrf_token в контекст.
+    """
+    csrf_token = request.cookies.get("csrf_token", "")
     template = jinja_env.get_template(template_name)
-    return template.render(site_name=settings.APP_NAME, user=current_user, **kwargs)
+    context["request"] = request
+    context["csrf_token"] = csrf_token
+    return HTMLResponse(content=template.render(**context))
 
 # ---------- VPN оплата (из бота) ----------
 @router.get("/pay/subscription", response_class=HTMLResponse)
 async def vpn_payment_page(request: Request, token: str):
     try:
-        payload = jwt.decode(
-            token,
-            settings.INTERNAL_API_SECRET,
-            algorithms=["HS256"],
-            leeway=60
-        )
+        payload = jwt.decode(token, settings.INTERNAL_API_SECRET, algorithms=["HS256"], leeway=60)
     except jwt.ExpiredSignatureError:
         return HTMLResponse("Ссылка истекла", status_code=410)
     except jwt.InvalidTokenError:
         return HTMLResponse("Недействительная ссылка", status_code=400)
 
-    template = jinja_env.get_template("vpn_payment.html")
-    return template.render(
+    return render_template(
+        request,
+        "vpn_payment.html",
         site_name=settings.APP_NAME,
         token=token,
         amount=payload["amount"],
@@ -63,18 +65,27 @@ async def vpn_payment_page(request: Request, token: str):
         user=None
     )
 
-# ---------- Страница успеха VPN ----------
 @router.get("/payment/success", response_class=HTMLResponse)
-async def vpn_success_page(request: Request, orderId: str = None, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("vpn_success.html")
-    return template.render(site_name=settings.APP_NAME, payment_id=orderId, user=current_user)
+async def vpn_success_page(
+    request: Request,
+    orderId: str = None,
+    current_user: WebUser = Depends(get_current_user_optional)
+):
+    return render_template(
+        request,
+        "vpn_success.html",
+        site_name=settings.APP_NAME,
+        payment_id=orderId,
+        user=current_user
+    )
 
 # ---------- Основные страницы ----------
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     request.state.user = current_user
-    template = jinja_env.get_template("index.html")
-    return template.render(
+    return render_template(
+        request,
+        "index.html",
         site_name=settings.APP_NAME,
         user=current_user,
         monthly_price=int(settings.MONTHLY_PRICE),
@@ -84,21 +95,20 @@ async def index(request: Request, current_user: WebUser = Depends(get_current_us
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("login.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return render_template(request, "login.html", site_name=settings.APP_NAME, user=current_user)
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("register.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return render_template(request, "register.html", site_name=settings.APP_NAME, user=current_user)
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/login", status_code=302)
     days_remaining = SubscriptionService.get_days_remaining(current_user)
-    template = jinja_env.get_template("dashboard.html")
-    return template.render(
+    return render_template(
+        request,
+        "dashboard.html",
         site_name=settings.APP_NAME,
         user=current_user,
         is_active=current_user.is_active,
@@ -109,8 +119,9 @@ async def dashboard(request: Request, current_user: WebUser = Depends(get_curren
 @router.get("/prompts", response_class=HTMLResponse)
 async def prompts_page(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     data = await PromptService.get_prompts_data()
-    template = jinja_env.get_template("prompts.html")
-    return template.render(
+    return render_template(
+        request,
+        "prompts.html",
         site_name=settings.APP_NAME,
         prompts=data["prompts"],
         categories=data["categories"],
@@ -122,8 +133,9 @@ async def prompts_page(request: Request, current_user: WebUser = Depends(get_cur
 async def pay_choice(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
     if not current_user:
         return RedirectResponse(url="/login", status_code=302)
-    template = jinja_env.get_template("pay_choice.html")
-    return template.render(
+    return render_template(
+        request,
+        "pay_choice.html",
         site_name=settings.APP_NAME,
         monthly_price=int(settings.MONTHLY_PRICE),
         quarterly_price=int(settings.QUARTERLY_PRICE),
@@ -133,8 +145,9 @@ async def pay_choice(request: Request, current_user: WebUser = Depends(get_curre
 
 @router.get("/pay/{tg_id}", response_class=HTMLResponse)
 async def payment_telegram(request: Request, tg_id: int, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("payment_telegram.html")
-    return template.render(
+    return render_template(
+        request,
+        "payment_telegram.html",
         site_name=settings.APP_NAME,
         tg_id=tg_id,
         monthly_price=int(settings.MONTHLY_PRICE),
@@ -145,8 +158,9 @@ async def payment_telegram(request: Request, tg_id: int, current_user: WebUser =
 
 @router.get("/legal/terms", response_class=HTMLResponse)
 async def terms(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("terms.html")
-    return template.render(
+    return render_template(
+        request,
+        "terms.html",
         site_name=settings.APP_NAME,
         user=current_user,
         current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
@@ -154,8 +168,9 @@ async def terms(request: Request, current_user: WebUser = Depends(get_current_us
 
 @router.get("/legal/privacy", response_class=HTMLResponse)
 async def privacy(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("privacy.html")
-    return template.render(
+    return render_template(
+        request,
+        "privacy.html",
         site_name=settings.APP_NAME,
         user=current_user,
         current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
@@ -167,23 +182,26 @@ async def prompt_detail(request: Request, prompt_id: int, current_user: WebUser 
     if not prompt:
         return HTMLResponse("Prompt not found", status_code=404)
     if prompt.get("is_free", False):
-        template = jinja_env.get_template("prompt_detail.html")
-        return template.render(
+        return render_template(
+            request,
+            "prompt_detail.html",
             site_name=settings.APP_NAME,
             prompt=prompt,
             user=current_user,
             is_free=True
         )
     if not current_user or not current_user.is_active:
-        template = jinja_env.get_template("subscribe_required.html")
-        return template.render(
+        return render_template(
+            request,
+            "subscribe_required.html",
             site_name=settings.APP_NAME,
             prompt_title=prompt["title"],
             user_id=current_user.id if current_user else None,
             user=current_user
         )
-    template = jinja_env.get_template("prompt_detail.html")
-    return template.render(
+    return render_template(
+        request,
+        "prompt_detail.html",
         site_name=settings.APP_NAME,
         prompt=prompt,
         user=current_user,
@@ -192,23 +210,19 @@ async def prompt_detail(request: Request, prompt_id: int, current_user: WebUser 
 
 @router.get("/payment-success", response_class=HTMLResponse)
 async def payment_success(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("payment_success.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return render_template(request, "payment_success.html", site_name=settings.APP_NAME, user=current_user)
 
 @router.get("/payment-failed", response_class=HTMLResponse)
 async def payment_failed(request: Request, user_id: int = None, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("payment_failed.html")
-    return template.render(site_name=settings.APP_NAME, user_id=user_id, user=current_user)
+    return render_template(request, "payment_failed.html", site_name=settings.APP_NAME, user_id=user_id, user=current_user)
 
 @router.get("/forgot-password", response_class=HTMLResponse)
 async def forgot_password_page(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("forgot_password.html")
-    return template.render(site_name=settings.APP_NAME, user=current_user)
+    return render_template(request, "forgot_password.html", site_name=settings.APP_NAME, user=current_user)
 
 @router.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_page(request: Request, token: str, current_user: WebUser = Depends(get_current_user_optional)):
-    template = jinja_env.get_template("reset_password.html")
-    return template.render(site_name=settings.APP_NAME, token=token, user=current_user)
+    return render_template(request, "reset_password.html", site_name=settings.APP_NAME, token=token, user=current_user)
 
 # ---------- Health checks ----------
 @router.get("/health")

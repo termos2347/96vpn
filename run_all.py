@@ -32,7 +32,6 @@ from services.scheduler import start_scheduler
 from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
 from db.base import init_db, engine
-from utils.logger import setup_logger  # уже импортирован выше, но повтор не страшен
 from internal_api import create_internal_app
 from web.app import app as fastapi_app
 from services.vpn_provider import vpn_provider   # пока оставляем для совместимости
@@ -72,7 +71,6 @@ async def main():
 
     # Создаём менеджер VPN с пулом
     vpn_manager = VPNManager(server_pool)
-    # Сохраняем в глобальную переменную для доступа из хендлеров
     set_vpn_manager(vpn_manager)
 
     # Авторизация в пуле (логинимся на всех серверах в фоне)
@@ -140,6 +138,8 @@ async def main():
     await start_scheduler(main_bot)
 
     # --- Graceful shutdown ---
+    stop_event = asyncio.Event()   # <-- событие для остановки
+
     async def shutdown():
         logger.info("Shutting down…")
         await main_bot.delete_webhook()
@@ -149,12 +149,13 @@ async def main():
         await main_bot.session.close()
         await admin_shutdown()
         await server_pool.close_all()
-        await vpn_provider.close()   # старый провайдер, если используется где-то ещё
+        await vpn_provider.close()
         server.should_exit = True
         await web_task
         await internal_runner.cleanup()
         await engine.dispose()
         logger.info("Shutdown complete.")
+        stop_event.set()   # <-- сигнализируем, что всё завершено
 
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, exiting…")
@@ -163,9 +164,8 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Бесконечное ожидание (пока процесс не остановят)
-    await asyncio.Event().wait()
-
+    # Ожидаем сигнал остановки (вместо бесконечного цикла)
+    await stop_event.wait()
 
 async def _login_all_servers(server_pool: ServerPool):
     """Фоновая авторизация на всех серверах"""
@@ -176,7 +176,6 @@ async def _login_all_servers(server_pool: ServerPool):
             logger.debug(f"Logged in to server provider")
         except Exception as e:
             logger.warning(f"Failed to login to some server: {e}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

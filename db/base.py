@@ -1,10 +1,8 @@
 import os
 from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from config import DATABASE_URL
-from .models import Base, WebUser, BotUser, BotPayment, Category, Prompt
+from .models import Base
 
 is_sqlite = 'sqlite' in DATABASE_URL
 
@@ -36,60 +34,17 @@ if DATABASE_URL:
         engine = create_async_engine(
             async_db_url,
             echo=False,
-            pool_pre_ping=True,          # проверять соединение перед использованием
-            pool_recycle=300,            # пересоздавать соединение через 5 минут (было 600)
-            pool_size=20,                # размер пула (было 5)
-            max_overflow=30,             # доп. соединения при нагрузке (было 10)
-            pool_timeout=30,             # таймаут ожидания соединения из пула
-            pool_use_lifo=True,          # отдавать последнее использованное соединение
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=20,
+            max_overflow=30,
+            pool_timeout=30,
+            pool_use_lifo=True,
         )
 else:
     engine = None
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession) if engine else None
-
-# --- Синхронный движок (веб) ---
-if DATABASE_URL:
-    if is_sqlite:
-        sync_engine = create_engine(
-            DATABASE_URL,
-            connect_args={"check_same_thread": False},
-            echo=False
-        )
-    else:
-        parsed, qs = _split_db_url(DATABASE_URL)
-        if 'ssl' in qs:
-            ssl_value = qs['ssl'][0] if qs['ssl'] else 'require'
-            qs.pop('ssl', None)
-            qs['sslmode'] = [ssl_value]
-        qs.pop('channel_binding', None)
-        new_query = urlencode(qs, doseq=True)
-        sync_url = urlunparse(parsed._replace(query=new_query))
-        sync_engine = create_engine(
-            sync_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            connect_args={
-                "keepalives": 1,
-                "keepalives_idle": 30,
-                "keepalives_interval": 10,
-                "keepalives_count": 5,
-            }
-        )
-else:
-    sync_engine = None
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine) if sync_engine else None
-
-def get_db():
-    if SessionLocal is None:
-        raise RuntimeError("Database not configured")
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 async def init_db():
     if not engine:
@@ -97,11 +52,6 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-def init_sync_db():
-    if sync_engine is None:
-        raise RuntimeError("Database not configured")
-    Base.metadata.create_all(bind=sync_engine)
-    
 async def get_async_db():
     async with AsyncSessionLocal() as session:
         try:

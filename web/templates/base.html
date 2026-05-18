@@ -258,5 +258,39 @@
         }
     </script>
     {% block extra_js %}{% endblock %}
+    <!-- CSRF protection script -->
+    <script>
+        function getCsrfToken() {
+            const match = document.cookie.match(/csrf_token=([^;]+)/);
+            return match ? match[1] : '';
+        }
+
+        // Переопределяем fetch для автоматического добавления заголовка X-CSRF-Token
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            const csrfToken = getCsrfToken();
+            if (csrfToken && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(options.method?.toUpperCase())) {
+                options.headers = {
+                    ...options.headers,
+                    'X-CSRF-Token': csrfToken
+                };
+            }
+            return originalFetch(url, options);
+        };
+
+        // Для обычных форм – автоматически добавляем скрытое поле
+        document.addEventListener('DOMContentLoaded', function() {
+            const forms = document.querySelectorAll('form');
+            forms.forEach(form => {
+                if (!form.querySelector('input[name="csrf_token"]')) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'csrf_token';
+                    input.value = getCsrfToken();
+                    form.appendChild(input);
+                }
+            });
+        });
+    </script>
 </body>
 </html>

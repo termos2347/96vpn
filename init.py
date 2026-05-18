@@ -65,7 +65,7 @@ def main():
     print(f"{'='*60}")
     try:
         os.chdir(root)
-        from db.base import init_db, sync_engine
+        from db.base import init_db
         import asyncio
         
         asyncio.run(init_db())

@@ -1,15 +1,16 @@
 import logging
 import asyncio
+import jwt
+import aiohttp
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from yookassa import Configuration, Payment
 from yookassa.domain.exceptions import ApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import requests.exceptions
-import jwt
-import aiohttp
 
 from db.models import WebUser
 from config import settings
@@ -67,7 +68,6 @@ class YookassaService:
                 payment_data["metadata"]["plan"] = plan
 
             idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
-            # Асинхронный вызов SDK в отдельном потоке
             payment = await asyncio.to_thread(Payment.create, payment_data, idempotence_key)
 
             logger.info(f"Payment created: {payment.id}, amount: {amount}")
@@ -121,6 +121,7 @@ class YookassaService:
                     logger.warning(f"User {user_id} not found for payment {payment_id}")
                     return False
 
+                # Идемпотентность: проверяем, не обработан ли уже этот платёж
                 if user.yookassa_payment_id == payment_id:
                     logger.info(f"Payment {payment_id} already processed, skipping webhook")
                     return True
@@ -134,7 +135,13 @@ class YookassaService:
 
                 await SubscriptionService.renew_subscription(db, user, days)
                 user.yookassa_payment_id = payment_id
-                await db.commit()
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    logger.warning(f"Duplicate payment_id {payment_id} ignored (IntegrityError)")
+                    return True
+
                 logger.info(f"Subscription activated via webhook for user {user.id} (+{days} days)")
                 return True
 
@@ -143,6 +150,11 @@ class YookassaService:
             logger.error(f"Error processing webhook: {e}", exc_info=True)
             return False
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))
+    )
     async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
         try:
             token = metadata.get("token")
@@ -217,6 +229,7 @@ class YookassaService:
                     logger.warning(f"User not found for payment {payment_id}")
                     return False
 
+                # Идемпотентность
                 if user.yookassa_payment_id == payment_id:
                     logger.info(f"Payment {payment_id} already processed, skipping")
                     return True
@@ -230,7 +243,13 @@ class YookassaService:
 
                 await SubscriptionService.renew_subscription(db, user, days)
                 user.yookassa_payment_id = payment_id
-                await db.commit()
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    logger.warning(f"Duplicate payment_id {payment_id} ignored (IntegrityError)")
+                    return True
+
                 logger.info(f"Subscription activated via return_url for user {user.id} (+{days} days)")
                 return True
 
@@ -238,5 +257,6 @@ class YookassaService:
         except Exception as e:
             logger.error(f"Check and activate error: {e}", exc_info=True)
             return False
+
 
 yookassa_service = YookassaService()
