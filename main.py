@@ -54,9 +54,9 @@ async def main():
     internal_app = create_internal_app()
     runner = web.AppRunner(internal_app)
     await runner.setup()
-    site = web.TCPSite(runner, 'localhost', 8001)
+    site = web.TCPSite(runner, '0.0.0.0', 8001)
     await site.start()
-    logger.info("Internal API started on http://localhost:8001")
+    logger.info("Internal API started on 0.0.0.0:8001")
 
     # Обработчик graceful shutdown (работает в Windows)
     loop = asyncio.get_running_loop()
