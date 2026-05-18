@@ -162,6 +162,7 @@ async def terms(request: Request, current_user: WebUser = Depends(get_current_us
         request,
         "terms.html",
         site_name=settings.APP_NAME,
+        site_url=settings.SITE_URL,
         user=current_user,
         current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
     )

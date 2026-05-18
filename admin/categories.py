@@ -20,7 +20,7 @@ async def cmd_addcategory(message: types.Message):
     name = args[1].strip()
     cat = await add_category(name)
     if cat:
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer(f"✅ Категория '{name}' создана.")
     else:
         await message.answer(f"❌ Категория '{name}' уже существует.")
@@ -36,7 +36,7 @@ async def cmd_renamecategory(message: types.Message):
         return
     old, new = args[1], args[2]
     if await rename_category(old, new):
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer(f"✅ Категория переименована в '{new}'.")
     else:
         await message.answer("❌ Категория не найдена.")
@@ -52,7 +52,7 @@ async def cmd_deletecategory(message: types.Message):
         return
     name = args[1].strip()
     if await delete_category(name):
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer(f"✅ Категория '{name}' и все её промпты удалены.")
     else:
         await message.answer("❌ Категория не найдена.")

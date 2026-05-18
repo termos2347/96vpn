@@ -20,8 +20,7 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 pydantic[email]>=2.0.0
-aiosmtplib>=5.1.0
-sentry-sdk>=1.0.0
+aiosmtplib>=3.0.0
 
 # ================== Платежи ==================
 yookassa>=3.3.0
@@ -39,7 +38,6 @@ pytest-asyncio>=0.21.0
 redis[hiredis]>=5.0.0
 sentry-sdk>=2.0.0
 prometheus-client>=0.19.0
-redis>=5.0.0
 aioredis>=2.0.0
 
 # ================== Продакшен ==================
