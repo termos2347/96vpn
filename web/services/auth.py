@@ -28,11 +28,6 @@ def validate_password_strength(password: str) -> bool:
         return False
     return True
 
-# ========== Кэш промптов ==========
-_cached_data: Optional[Dict[str, Any]] = None
-_cache_valid = False
-
-
 class AuthService:
     @staticmethod
     async def create_user(db: AsyncSession, email: str, password: str, username: Optional[str] = None, source: str = "web") -> Optional[WebUser]:

@@ -24,7 +24,7 @@ class HybridCache:
                 import redis.asyncio as redis
                 self._redis_client = redis.from_url(redis_url, decode_responses=True)
                 self._is_redis_available = True
-                logger.info("[INFO]Redis cache backend initialized (URL: %s)", redis_url)
+                logger.info("Redis cache backend initialized (URL: %s)", redis_url)
             except Exception as e:
                 logger.warning("Redis connection failed: %s. Falling back to in-memory cache.", e)
         else:

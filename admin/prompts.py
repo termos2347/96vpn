@@ -68,7 +68,7 @@ async def process_is_free(message: types.Message, state: FSMContext):
         is_free=is_free
     )
     if prompt:
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer(f"✅ Промпт '{prompt.title}' (ID {prompt.id}) добавлен!")
     else:
         await message.answer("❌ Ошибка при добавлении. Проверьте категорию.")
@@ -97,7 +97,7 @@ async def cmd_editprompt(message: types.Message):
         await message.answer("Укажите поля для обновления, например: /editprompt 5 title=Новый заголовок is_free=true")
         return
     if await update_prompt(prompt_id, **updates):
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer("✅ Промпт обновлён.")
     else:
         await message.answer("❌ Промпт не найден или ошибка.")
@@ -117,7 +117,7 @@ async def cmd_deleteprompt(message: types.Message):
         await message.answer("ID должен быть числом.")
         return
     if await delete_prompt(prompt_id):
-        PromptService.invalidate()
+        await PromptService.invalidate()
         await message.answer("✅ Промпт удалён.")
     else:
         await message.answer("❌ Промпт не найден.")

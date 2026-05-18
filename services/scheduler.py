@@ -1,40 +1,47 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select, func
+
 from db.base import AsyncSessionLocal
 from db.models import BotUser
-from db.crud import set_vpn_client_id
-from services import vpn_manager
-from services.vpn_provider import vpn_provider
-from sqlalchemy import select
+from db.crud import set_vpn_client_id, set_vpn_server_id, get_or_create_bot_user
+from handlers import get_vpn_manager
 from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
+
 async def check_expired_subscriptions(bot):
-    """Проверяет истёкшие подписки и отзывает ключи с retry."""
+    """
+    Проверяет истёкшие VPN-подписки и отзывает ключи с retry.
+    """
     retry_count = 3
     while True:
         try:
             async with AsyncSessionLocal() as session:
+                now = datetime.now(timezone.utc)
                 result = await session.execute(
                     select(BotUser).where(
-                        BotUser.vpn_subscription_end < datetime.now(timezone.utc),
+                        BotUser.vpn_subscription_end < now,
                         BotUser.vpn_client_id.isnot(None)
                     )
                 )
                 expired_users = result.scalars().all()
+
+                vpn_manager = get_vpn_manager()  # <-- исправлено: получаем экземпляр менеджера
 
                 for user in expired_users:
                     client_uuid = user.vpn_client_id
                     success = False
                     for attempt in range(retry_count):
                         try:
-                            success = await vpn_manager.revoke_key(client_uuid)
+                            success = await vpn_manager.revoke_key(user.telegram_id)
                             if success:
                                 break
                         except Exception as e:
-                            logger.warning(f"Network error revoking client {client_uuid}, attempt {attempt+1}: {e}")
+                            logger.warning(f"Network error revoking client {client_uuid} for user {user.telegram_id}, attempt {attempt+1}: {e}")
                             if attempt < retry_count - 1:
                                 await asyncio.sleep(2 ** attempt)
                         except Exception as e:
@@ -42,7 +49,9 @@ async def check_expired_subscriptions(bot):
                             break
 
                     if success:
+                        # Клиент уже обнулён внутри revoke_key, но на всякий случай
                         user.vpn_client_id = None
+                        user.server_id = None
                         await session.commit()
                         logger.info(f"Ключ {client_uuid} отозван для user_id={user.telegram_id}")
                         try:
@@ -60,10 +69,13 @@ async def check_expired_subscriptions(bot):
             logger.error(f"Ошибка в фоновой задаче проверки подписок: {e}", exc_info=True)
             await send_admin_alert(f"Ошибка в задаче проверки подписок: {e}")
 
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600)  # раз в час
+
 
 async def send_expiry_reminders(bot):
-    """Отправляет напоминания о скором истечении подписки (за 7, 3, 1 день) с retry."""
+    """
+    Отправляет напоминания о скором истечении подписки (за 7, 3, 1 день) с retry.
+    """
     while True:
         try:
             async with AsyncSessionLocal() as session:
@@ -111,10 +123,13 @@ async def send_expiry_reminders(bot):
         except Exception as e:
             logger.error(f"Ошибка в задаче напоминаний: {e}", exc_info=True)
 
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600)  # раз в час
+
 
 async def start_scheduler(bot):
-    """Запускает обе фоновые задачи."""
+    """
+    Запускает обе фоновые задачи.
+    """
     asyncio.create_task(check_expired_subscriptions(bot))
     asyncio.create_task(send_expiry_reminders(bot))
     logger.info("Фоновые задачи проверки подписок и напоминаний запущены")
