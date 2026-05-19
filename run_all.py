@@ -5,11 +5,9 @@ import sys
 import io
 from pathlib import Path
 
-# === Настройка вывода в UTF-8 ===
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-# === Настройка логирования ДО всех остальных импортов ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 from utils.logger import setup_logger
 setup_logger()
@@ -44,6 +42,19 @@ if settings.SENTRY_DSN:
     logger.info("Sentry initialized for bot")
 
 
+def validate_webhook_url(url: str, bot_name: str = "main") -> bool:
+    """Проверяет корректность URL вебхука."""
+    if not url:
+        logger.error(f"{bot_name} WEBHOOK_URL is empty! Bot will not receive updates.")
+        return False
+    if not url.startswith(("http://", "https://")):
+        logger.error(f"{bot_name} WEBHOOK_URL invalid scheme: {url}")
+        return False
+    if not url.startswith("https://"):
+        logger.warning(f"{bot_name} WEBHOOK_URL should use HTTPS: {url}")
+    return True
+
+
 async def _login_all_servers(server_pool: ServerPool):
     """Фоновая авторизация на всех серверах"""
     await asyncio.sleep(2)
@@ -58,6 +69,12 @@ async def _login_all_servers(server_pool: ServerPool):
 async def main():
     logger.info("Starting combined server (bot + web)…")
     stop_event = asyncio.Event()
+
+    # Валидация WEBHOOK_URL
+    if not validate_webhook_url(settings.WEBHOOK_URL, "main"):
+        sys.exit(1)
+    if settings.ADMIN_WEBHOOK_URL and not validate_webhook_url(settings.ADMIN_WEBHOOK_URL, "admin"):
+        sys.exit(1)
 
     try:
         logger.info("Initializing database...")
@@ -111,9 +128,9 @@ async def main():
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
-    internal_site = web.TCPSite(internal_runner, 'localhost', 8001)
+    internal_site = web.TCPSite(internal_runner, settings.INTERNAL_API_HOST, settings.INTERNAL_API_PORT)
     await internal_site.start()
-    logger.info("Internal API started on http://localhost:8001")
+    logger.info(f"Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
@@ -133,7 +150,6 @@ async def main():
 
     await start_scheduler(main_bot)
 
-    # Регистрация обработчиков сигналов для graceful shutdown
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, shutting down…")
         asyncio.create_task(shutdown(main_bot, admin_bot_instance, internal_runner, server, web_task, server_pool, stop_event))
@@ -143,6 +159,7 @@ async def main():
 
     logger.info("All services started. Waiting for stop signal...")
     await stop_event.wait()
+
 
 async def shutdown(main_bot, admin_bot_instance, internal_runner, server, web_task, server_pool, stop_event):
     logger.info("Shutting down…")
