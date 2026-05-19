@@ -31,16 +31,16 @@ async def main():
         connector = TCPConnector(
             limit=100,
             limit_per_host=30,
-            ttl_dns_cache=600,           # увеличили кэш DNS
+            ttl_dns_cache=600,
             force_close=False,
             enable_cleanup_closed=True,
-            keepalive_timeout=30,        # держим соединение дольше
+            keepalive_timeout=30,
         )
         timeout = ClientTimeout(
-            total=180,                   # общий таймаут 3 минуты
-            connect=30,                  # таймаут подключения
-            sock_read=60,                # чтения данных
-            sock_connect=30,             # соединения сокета
+            total=180,
+            connect=30,
+            sock_read=60,
+            sock_connect=30,
         )
         client_session = ClientSession(connector=connector, timeout=timeout)
         session = AiohttpSession(proxy=PROXY_URL)
@@ -54,9 +54,11 @@ async def main():
     internal_app = create_internal_app()
     runner = web.AppRunner(internal_app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8001)
+    # Используем настройки из config
+    from config import settings
+    site = web.TCPSite(runner, settings.INTERNAL_API_HOST, settings.INTERNAL_API_PORT)
     await site.start()
-    logger.info("Internal API started on 0.0.0.0:8001")
+    logger.info(f"Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
     # Обработчик graceful shutdown (работает в Windows)
     loop = asyncio.get_running_loop()

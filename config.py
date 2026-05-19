@@ -3,8 +3,10 @@ import sys
 from typing import Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -58,17 +60,16 @@ class Settings(BaseSettings):
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
     YOOKASSA_API_KEY: str
-    YOOKASSA_RETURN_URL: str = ""
+    YOOKASSA_RETURN_URL: str = "http://localhost:8000/dashboard"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
 
     # ---------- Application ----------
     SITE_URL: str
-    INTERNAL_API_URL: str = "http://localhost:8001"
     ADMIN_EMAIL: str
     ENCRYPTION_KEY: str
     
     # ---------- Support ----------
-    SUPPORT_USERNAME: str = "support_username"   # значение по умолчанию
+    SUPPORT_USERNAME: str = "support_username"
 
     # ---------- Subscription (веб-подписки AI) ----------
     MONTHLY_PRICE: float = 200.0
@@ -102,6 +103,8 @@ class Settings(BaseSettings):
 
     # ---------- Внутренний API (бот ↔ сайт) ----------
     INTERNAL_API_SECRET: str
+    INTERNAL_API_HOST: str = "localhost"
+    INTERNAL_API_PORT: int = 8001
 
     # Свойства для компактного доступа
     @property
@@ -135,6 +138,20 @@ xui_filled = sum(1 for v in xui_vars if v is not None and str(v).strip())
 if 0 < xui_filled < len(xui_vars):
     raise ValueError("Все переменные XUI должны быть заполнены вместе или оставлены пустыми")
 
+# ---------- Валидация Yookassa ----------
+if settings.YOOKASSA_SHOP_ID or settings.YOOKASSA_API_KEY:
+    if not settings.YOOKASSA_SHOP_ID:
+        raise ValueError("YOOKASSA_SHOP_ID is required when YOOKASSA_API_KEY is set")
+    if not settings.YOOKASSA_API_KEY:
+        raise ValueError("YOOKASSA_API_KEY is required when YOOKASSA_SHOP_ID is set")
+    if not settings.YOOKASSA_SHOP_ID.isdigit():
+        raise ValueError("YOOKASSA_SHOP_ID must be numeric")
+    if len(settings.YOOKASSA_API_KEY) < 20:
+        raise ValueError("YOOKASSA_API_KEY too short, seems invalid")
+    logger.info("Yookassa credentials validated")
+else:
+    logger.warning("Yookassa credentials not set. Payments will not work.")
+
 # ---------- Экспорт переменных уровня модуля для бота ----------
 TOKEN = settings.BOT_TOKEN
 DATABASE_URL = settings.DATABASE_URL
@@ -153,6 +170,8 @@ BYPASS_PRICES = settings.BYPASS_PRICES
 
 # Внутренний API
 INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
+INTERNAL_API_HOST = settings.INTERNAL_API_HOST
+INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 SITE_URL = settings.SITE_URL
 
 # Админ-бот
