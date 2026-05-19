@@ -5,9 +5,11 @@ import sys
 import io
 from pathlib import Path
 
+# === Настройка вывода в UTF-8 ===
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
+# === Настройка логирования ДО всех остальных импортов ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 from utils.logger import setup_logger
 setup_logger()
@@ -36,20 +38,37 @@ import sentry_sdk
 logger = logging.getLogger(__name__)
 
 if settings.SENTRY_DSN:
-    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1, environment="production" if not settings.DEBUG else "development", release="1.0.0")
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.1,
+                    environment="production" if not settings.DEBUG else "development",
+                    release="1.0.0")
     logger.info("Sentry initialized for bot")
+
+
+async def _login_all_servers(server_pool: ServerPool):
+    """Фоновая авторизация на всех серверах"""
+    await asyncio.sleep(2)
+    for provider in server_pool.providers.values():
+        try:
+            await provider.login()
+            logger.debug("Logged in to server provider")
+        except Exception as e:
+            logger.warning(f"Failed to login to some server: {e}")
+
 
 async def main():
     logger.info("Starting combined server (bot + web)…")
+    stop_event = asyncio.Event()
 
     try:
+        logger.info("Initializing database...")
         await init_db()
         await run_migrations()
         logger.info("Database initialized")
     except Exception as e:
-        logger.error(f"Database init failed: {e}")
+        logger.error(f"Database init failed: {e}", exc_info=True)
         sys.exit(1)
 
+    # Инициализация пула VPN-серверов
     server_pool = ServerPool()
     await server_pool.refresh_servers()
     set_server_pool(server_pool)
@@ -92,9 +111,9 @@ async def main():
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
-    internal_site = web.TCPSite(internal_runner, '0.0.0.0', 8001)
+    internal_site = web.TCPSite(internal_runner, 'localhost', 8001)
     await internal_site.start()
-    logger.info("Internal API started on 0.0.0.0:8001")
+    logger.info("Internal API started on http://localhost:8001")
 
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
@@ -114,17 +133,40 @@ async def main():
 
     await start_scheduler(main_bot)
 
-    stop_event = asyncio.Event()
+    # Регистрация обработчиков сигналов для graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down…")
+        asyncio.create_task(shutdown(main_bot, admin_bot_instance, internal_runner, server, web_task, server_pool, stop_event))
 
-    async def shutdown():
-        logger.info("Shutting down…")
-        await main_bot.delete_webhook()
-        if admin_bot_instance:
-            await admin_bot_instance.delete_webhook()
-            await admin_bot_instance.session.close()
-        await main_bot.session.close()
-        await admin_shutdown()
-        await server_pool.close_all()
-        await vpn_provider.close()          # <-- закрываем сессию провайдера
-        server.should_exit = True
-        await web_task
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    logger.info("All services started. Waiting for stop signal...")
+    await stop_event.wait()
+
+async def shutdown(main_bot, admin_bot_instance, internal_runner, server, web_task, server_pool, stop_event):
+    logger.info("Shutting down…")
+    await main_bot.delete_webhook()
+    if admin_bot_instance:
+        await admin_bot_instance.delete_webhook()
+        await admin_bot_instance.session.close()
+    await main_bot.session.close()
+    await admin_shutdown()
+    await server_pool.close_all()
+    await vpn_provider.close()
+    server.should_exit = True
+    await web_task
+    await internal_runner.cleanup()
+    await engine.dispose()
+    logger.info("Shutdown complete.")
+    stop_event.set()
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Shutdown by user")
+    except Exception as e:
+        logger.exception("Fatal error in main")
+        sys.exit(1)
