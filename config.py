@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     
     # ---------- Support ----------
     SUPPORT_USERNAME: str = "support_username"
+    
+    # ---------- LEGAL ----------
+    LEGAL_TERMS_URL: str = ""   # ссылка на документ с офертой (Google Docs, Yandex Wiki и т.п.)
+    LEGAL_PRIVACY_URL: str = "" # ссылка на политику конфиденциальности
 
     # ---------- Subscription (веб-подписки AI) ----------
     MONTHLY_PRICE: float = 200.0
