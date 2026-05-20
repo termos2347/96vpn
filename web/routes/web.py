@@ -158,6 +158,9 @@ async def payment_telegram(request: Request, tg_id: int, current_user: WebUser =
 
 @router.get("/legal/terms", response_class=HTMLResponse)
 async def terms(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
+    if settings.LEGAL_TERMS_URL:
+        return RedirectResponse(url=settings.LEGAL_TERMS_URL)
+    # fallback на старый шаблон (на случай, если ссылка не задана)
     return render_template(
         request,
         "terms.html",
@@ -169,6 +172,8 @@ async def terms(request: Request, current_user: WebUser = Depends(get_current_us
 
 @router.get("/legal/privacy", response_class=HTMLResponse)
 async def privacy(request: Request, current_user: WebUser = Depends(get_current_user_optional)):
+    if settings.LEGAL_PRIVACY_URL:
+        return RedirectResponse(url=settings.LEGAL_PRIVACY_URL)
     return render_template(
         request,
         "privacy.html",
