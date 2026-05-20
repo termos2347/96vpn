@@ -3,15 +3,15 @@ import sys
 from pathlib import Path
 
 def setup_logger():
-    """Настраивает логирование с ротацией и структурированным выводом."""
+    """Настраивает логирование с единым форматом для всего приложения."""
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
 
-    # Убираем существующие хендлеры
+    # Убираем старые хендлеры
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
 
-    # Форматтер
+    # Единый формат: дата время - имя логгера - уровень - сообщение
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -36,5 +36,17 @@ def setup_logger():
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
+
+    # Перехватываем логи Uvicorn и aiohttp, чтобы они тоже использовали наш формат
+    for name in ["uvicorn", "uvicorn.access", "uvicorn.error", "aiohttp.access", "aiohttp.server"]:
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers = []  # удаляем старые
+        uvicorn_logger.addHandler(console_handler)
+        uvicorn_logger.addHandler(file_handler)
+        uvicorn_logger.propagate = False
+
+    # Настройка уровня для access-логов (можно изменить на WARNING, чтобы не засорять)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    logging.getLogger("aiohttp.access").setLevel(logging.INFO)
 
     return logger

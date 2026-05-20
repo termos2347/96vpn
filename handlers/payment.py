@@ -90,9 +90,22 @@ async def vpn_payment_link(callback: types.CallbackQuery):
 
     try:
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
-        # Экранируем ссылку для безопасности
         payment_url = f"{SITE_URL}/pay/subscription?token={token}"
-        logger.info(f"Generated payment URL: {payment_url}")
+        
+        # --- ВЫВОД ССЫЛКИ В ЛОГ И ОТПРАВКА АДМИНУ ---
+        logger.info(f"🔗 VPN payment link generated for user {telegram_id}: {payment_url}")
+        
+        # Отправляем ссылку админу (если задан ADMIN_CHAT_ID)
+        from config import ADMIN_CHAT_ID
+        if ADMIN_CHAT_ID:
+            try:
+                await callback.bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"🔗 Ссылка на оплату VPN для пользователя {telegram_id}:\n{payment_url}\n\nПериод: {period}, Валюта: {currency}, Сумма: {price}"
+                )
+            except Exception as e:
+                logger.error(f"Не удалось отправить ссылку админу: {e}")
+        
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
@@ -108,7 +121,7 @@ async def vpn_payment_link(callback: types.CallbackQuery):
 
     await callback.message.answer(
         text=msg,
-        parse_mode=ParseMode.HTML, # Используем Enum для надежности
+        parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
     await callback.answer()
