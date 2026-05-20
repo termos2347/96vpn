@@ -1,160 +1,323 @@
-# 96vpn
+96VPN – универсальная платформа для продажи VPN и AI-промптов
+Telegram-бот + веб-сайт с платёжной системой (ЮKassa, Telegram Stars).
+Возможности: управление VPN-подписками (3x‑UI), продажа доступа к базе профессиональных промптов, административный бот для управления контентом и серверами.
 
-Telegram-бот для управления VPN-подписками с интеграцией 3x-ui панели.
+🚀 Основные возможности
+VPN-подписки (протокол VLESS) через пул серверов 3x‑UI.
 
-## Функциональность?
-- Управление VPN-подписками (VLESS протокол)
-- Поддержка нескольких валют (RUB, Telegram Stars, USDT)
-- Автоматическое создание и отзыв ключей
-- Уведомления о истечении подписки
-- DPI bypass для обхода блокировок
+Обход DPI (опционально, в разработке).
 
-## Установка и запуск
+База AI-промптов (ChatGPT, Midjourney) с платной подпиской.
 
-### 1. Клонирование репозитория
-```bash
-git clone <repository-url>
+Платежи: ЮKassa (RUB), Telegram Stars, USDT (через ссылку на сайт).
+
+Административный бот для рассылок, выдачи подписок, управления серверами, категориями и промптами.
+
+Веб-сайт на FastAPI с личным кабинетом, каталогом промптов, оплатой.
+
+Автоматические напоминания об истечении подписки, отзыв ключей.
+
+Docker‑ready (разработка и продакшен с автоматическим SSL).
+
+📦 Технологический стек
+Компонент	Технологии
+Бот	aiogram 3.x, aiohttp
+Веб-приложение	FastAPI, Jinja2, Uvicorn
+База данных	PostgreSQL (asyncpg) / SQLite, SQLAlchemy 2.0, Alembic
+Кэширование	Redis + in‑memory fallback
+Платежи	ЮKassa SDK, Telegram Stars
+VPN-интеграция	3x‑UI API (VLESS)
+Безопасность	JWT, bcrypt, CSRF, Fernet (шифрование паролей серверов)
+Инфраструктура	Docker, nginx‑proxy + Let's Encrypt, Sentry, Prometheus (опционально)
+⚙️ Требования к окружению
+Python 3.9+
+
+PostgreSQL 13+ (или SQLite для разработки)
+
+Redis (рекомендуется, но не обязательно)
+
+Docker и Docker Compose (для контейнеризации)
+
+3x‑UI панель (одна или несколько) с настроенным inbound (VLESS)
+
+🛠 Установка и настройка
+1. Клонирование репозитория
+bash
+git clone https://github.com/your-org/96vpn.git
 cd 96vpn
-```
-
-### 2. Создание виртуального окружения
-```bash
+2. Виртуальное окружение
+bash
 python -m venv venv
-venv\Scripts\activate  # Windows
-# или
-source venv/bin/activate  # Linux/Mac
-```
-
-### 3. Установка зависимостей
-```bash
+source venv/bin/activate      # Linux/Mac
+venv\Scripts\activate          # Windows
+3. Установка зависимостей
+bash
 pip install -r requirements.txt
-```
+4. Переменные окружения (файл .env)
+Скопируйте .env.example в .env и заполните обязательные поля:
 
-### 4. Настройка переменных окружения
-Создайте файл `.env` в корне проекта:
-```env
-# Telegram Bot
-BOT_TOKEN=your_bot_token_here
+ini
+# Telegram боты
+BOT_TOKEN=123456:ABC...
+ADMIN_BOT_TOKEN=789012:XYZ...
+ADMIN_CHAT_ID=123456789
 
-# Database
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/vpn_db
+# База данных (PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/vpn_db
 
-# Proxy (опционально)
-PROXY_URL=http://proxy.example.com:8080
+# ЮKassa (обязательно для приёма рублёвых платежей)
+YOOKASSA_SHOP_ID=...
+YOOKASSA_API_KEY=...
 
-# 3x-ui Panel
-XUI_BASE_URL=https://your-xui-panel.com
-XUI_USERNAME=admin
-XUI_PASSWORD=your_password
-XUI_INBOUND_ID=1
-XUI_SUB_PORT=2096
-```
+# Внутренний API (для связи бота и сайта)
+INTERNAL_API_SECRET=ваш_секретный_ключ
 
-### 5. Инициализация базы данных
-```bash
-# Создание таблиц
+# Шифрование паролей VPN-серверов (сгенерировать командой: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+ENCRYPTION_KEY=...
+
+# JWT
+SECRET_KEY=super-secret-jwt-key
+
+# URLs
+SITE_URL=https://yourdomain.com
+WEBHOOK_URL=https://yourdomain.com/webhook
+ADMIN_WEBHOOK_URL=https://yourdomain.com/webhook/admin
+
+# Ссылки на юридические документы (Google Docs и т.п.) – опционально
+LEGAL_TERMS_URL=https://docs.google.com/document/d/...
+LEGAL_PRIVACY_URL=https://docs.google.com/document/d/...
+5. Инициализация базы данных
+bash
+# Создание таблиц (автоматически через SQLAlchemy)
 python -c "import asyncio; from db.base import init_db; asyncio.run(init_db())"
 
-# Или через Alembic (рекомендуется для продакшена)
+# Применение миграций Alembic (рекомендуется в продакшене)
 alembic upgrade head
-```
+6. Запуск
+Локально (разработка):
 
-### 6. Запуск бота
-```bash
+bash
+# Только бот (polling)
 python main.py
-```
 
-## Структура проекта
+# Только веб-сервер (FastAPI)
+python run_web.py
+
+# Всё вместе (бот + веб + внутреннее API)
+python run_all.py
+Через Docker (разработка):
+
+bash
+docker-compose up -d
+Продакшен (автоматический SSL через nginx-proxy):
+
+bash
+# Убедитесь, что домен настроен на ваш сервер
+./start_server.sh
+Скрипт запросит домен, настроит SSL и установит вебхуки.
+
+📁 Структура проекта
 ```
 96vpn/
-├── config.py                # Pydantic‑settings, загрузка .env
-├── .env.example             # Шаблон переменных окружения
+├── config.py                 # Pydantic‑settings, загрузка .env
+├── main.py                   # Запуск бота (polling)
+├── run_all.py                # Запуск всех компонентов (веб + боты + внутр. API)
+├── run_web.py                # Запуск только веб-сервера
+├── internal_api.py           # aiohttp API для активации подписок (порт 8001)
+│
+├── db/                       # База данных
+│   ├── base.py               # engine, async session
+│   ├── models.py             # SQLAlchemy модели
+│   ├── crud.py               # CRUD для пользователей, платежей, категорий, промптов
+│   ├── crud_servers.py       # CRUD для VPN-серверов
+│   └── migrate.py            # Автоматические миграции при старте
+│
+├── handlers/                 # Обработчики основного бота
+│   ├── common.py             # /start, ℹ️ Инфо
+│   ├── payment.py            # Оплата VPN (ссылки, Stars)
+│   ├── subscription.py       # Подключить VPN
+│   ├── proxy.py              # Бесплатный прокси (заглушка)
+│   ├── keyboards.py          # Клавиатуры
+│   └── __init__.py           # Сборка роутеров + глобальные менеджеры
+│
+├── handlers/admin/           # Административный бот
+│   ├── bot.py                # Команды: /grant, /revoke, /broadcast, /stats и др.
+│   ├── categories.py         # /addcategory, /renamecategory, /deletecategory
+│   ├── prompts.py            # /addprompt (FSM), /editprompt, /deleteprompt, /listprompts
+│   ├── servers.py            # /addserver (FSM), /listservers, /removeserver, /serversetactive
+│   └── server_states.py      # FSM состояния для сервера
+│
+├── services/                 # Бизнес-логика
+│   ├── vpn_provider.py       # XUIVPNProvider – API 3x‑UI
+│   ├── vpn_manager.py        # VPNManager – создание/отзыв ключей через server_pool
+│   ├── server_pool.py        # ServerPool – загрузка серверов из БД, round‑robin
+│   ├── scheduler.py          # Фоновые задачи (проверка истекших, напоминания)
+│   ├── subscription_service.py  # Единый сервис активации подписок
+│   └── (dpi_bypass.py, payment_gateway.py – заглушки)
+│
+├── web/                      # FastAPI веб-приложение
+│   ├── app.py                # Lifespan, CORS, CSRF, middleware
+│   ├── routes/               # Маршруты: auth, payment, prompts, web
+│   ├── services/             # AuthService, SubscriptionService, YookassaService, CacheService
+│   ├── templates/            # Jinja2 шаблоны (главная, дашборд, промпты, оплата и т.д.)
+│   ├── static/               # CSS, favicon (опционально)
+│   └── schemas/              # Pydantic схемы
+│
+├── utils/                    # Вспомогательные модули
+│   ├── validators.py         # Валидация user_id, email, days, currency, uuid
+│   ├── decorators.py         # rate_limit (с исправленным окном 1 минута)
+│   ├── logger.py             # Настройка логирования с ротацией
+│   ├── email.py              # Отправка email (SMTP / мок)
+│   ├── encryption.py         # Fernet шифрование/дешифрование
+│   ├── cache.py              # Простой in‑memory кэш
+│   └── helpers.py            # Генерация случайного пароля
+│
+├── migrations/               # Alembic миграции
+├── tests/                    # Юнит-тесты (pytest)
+├── docker-compose.yml        # Локальный запуск (Redis + app)
+├── docker-compose.prod.yml   # Продакшен (nginx-proxy + acme-companion + app)
+├── Dockerfile                # Сборка образа
+├── start_local.sh            # Запуск в dev режиме
+├── start_server.sh           # Автодеплой на сервер (с SSL)
+├── healthcheck.sh            # Диагностика всех компонентов
 ├── requirements.txt
-├── alembic.ini
-│
-├── db/                      # Модели, CRUD, миграции
-│   ├── base.py              # async/sync engine, сессии
-│   ├── models.py            # WebUser, BotUser, VPNServer, Category, Prompt, BotPayment
-│   ├── crud.py              # операции с BotUser, платежами, категориями, промптами
-│   └── crud_servers.py      # операции с VPNServer
-│
-├── handlers/                # Обработчики основного бота
-│   ├── common.py            # /start, кнопка "Инфо"
-│   ├── keyboards.py         # Reply‑ и Inline‑клавиатуры
-│   ├── payment.py           # Оплата VPN / обхода (JWT‑токен -> ссылка на сайт)
-│   ├── subscription.py      # "Подключить VPN" – отдать ссылку
-│   ├── proxy.py             # Бесплатный прокси
-│   └── __init__.py          # Сборка всех роутеров, глобальный VPNManager
-│
-├── handlers/admin/          # Административный бот (отдельный)
-│   ├── bot.py               # Команды /health, /broadcast, /grant, /revoke, /stats
-│   ├── categories.py        # /addcategory, /renamecategory, /deletecategory
-│   ├── prompts.py           # /addprompt (FSM), /editprompt, /deleteprompt, /listprompts
-│   ├── servers.py           # /addserver (FSM), /listservers, /removeserver, /serversetactive
-│   ├── server_states.py     # FSM‑состояния для добавления сервера
-│   └── __init__.py          # Роутер для админ‑бота
-│
-├── services/                # Бизнес‑логика
-│   ├── vpn_provider.py      # XUIVPNProvider – работа с API 3x‑UI
-│   ├── vpn_manager.py       # VPNManager – создание/отзыв ключей через ServerPool
-│   ├── server_pool.py       # ServerPool – загрузка серверов из БД, round‑robin
-│   ├── scheduler.py         # Фоновая проверка подписок и отзыв ключей
-│   └── (ещё: dpi_bypass.py, payment_gateway.py – заглушки)
-│
-├── utils/                   # Вспомогательные модули
-│   ├── validators.py        # Валидация user_id, email, days, currency, uuid
-│   ├── decorators.py        # rate_limit для бота
-│   ├── logger.py            # Настройка логгирования с ротацией
-│   └── email.py             # Отправка писем (заглушка/реальный SMTP)
-│
-├── web/                     # FastAPI веб‑приложение
-│   ├── app.py               # Создание app, lifespan, CORS, статика
-│   ├── rate_limit.py        # SlowAPI лимитер
-│   ├── security.py          # JWT (create_access_token, get_current_user_optional)
-│   ├── schemas/schemas.py   # Pydantic‑схемы
-│   ├── services/            # Сервисы для веба
-│   │   ├── auth.py          # AuthService (регистрация, логин, сброс пароля)
-│   │   └── payment.py       # YookassaService (create_payment, webhook, check_and_activate)
-│   ├── routes/              # Маршруты
-│   │   ├── auth.py          # /api/auth/register, /login, /forgot‑password и т.д.
-│   │   ├── payment.py       # /api/payment/create, /initiate‑vpn, webhook
-│   │   ├── prompts.py       # /api/prompts/all, /categories
-│   │   └── web.py           # HTML‑страницы: /, /dashboard, /prompts, /pay/subscription ...
-│   └── templates/           # Jinja2 шаблоны (все 15+ файлов)
-│       ├── base.html
-│       ├── index.html, login.html, register.html
-│       ├── dashboard.html, prompts.html, prompt_detail.html
-│       ├── payment_telegram.html, pay_choice.html
-│       ├── vpn_payment.html, vpn_success.html
-│       ├── terms.html, privacy.html
-│       ├── forgot_password.html, reset_password.html
-│       └── subscribe_required.html, payment_success.html, payment_failed.html
-│
-├── internal_api.py          # HTTP API на aiohttp (порт 8001) – активация подписки бота
-├── run_web.py               # Запуск только веба (через uvicorn)
-├── run_all.py               # Запуск всего: веб (FastAPI) + внутреннее API + боты (webhook)
-├── main.py                  # Запуск только бота (polling, для разработки)
-├── init.py                  # Скрипт инициализации проекта
-│
-└── tests/                   # Юнит‑тесты (test_vpn_manager, test_validators и др.)
+├── .env.example
+└── README.md                 # Данный файл
 ```
 
-## Тестирование
-```bash
-# Запуск всех тестов
-pytest
+🔌 API веб-приложения (основные эндпоинты)
+Метод	Путь	Описание
+POST	/api/auth/register	Регистрация
+POST	/api/auth/login	Вход (устанавливает cookie)
+POST	/api/auth/logout	Выход
+POST	/api/auth/forgot-password	Восстановление пароля
+POST	/api/auth/reset-password	Сброс пароля
+POST	/api/payment/create	Создание платёжной ссылки (подписка на промпты)
+POST	/api/payment/initiate-vpn	Создание платежа для VPN (по JWT‑токену из бота)
+GET	/api/payment/status/{payment_id}	Статус платежа
+POST	/api/payment/webhook/yookassa	Вебхук ЮKassa
+GET	/api/prompts/all	Список промптов (с фильтром по подписке)
+GET	/api/prompts/categories	Список категорий
+GET	/health	Проверка состояния
+POST	/webhook	Вебхук основного бота
+POST	/webhook/admin	Вебхук админ-бота
 
-# С конкретным файлом
-pytest test_vpn_manager.py -v
-```
 
-## Развертывание
-Для продакшена рекомендуется:
-- Использовать PostgreSQL
-- Настроить логирование в файл
-- Добавить мониторинг (health checks)
-- Использовать Docker для контейнеризации
+🤖 Telegram боты
+Основной бот (@YourVPNBot)
+Команды (через Reply‑клавиатуру):
 
-## Юкасса
-чтобы сайт мог получать платжеи необходимо подключить ngrok
-в личном кабинете укажите ссылку котрую выдал ngrok чтобы сайт мог принимать вебхук от Юкассы
+🚀 Подключить VPN – получить ссылку для подключения (VLESS).
+
+💳 Оплатить VPN – выбор валюты (RUB, Stars, USDT) и периода, переход на сайт.
+
+ℹ️ Инфо – статус подписок, контакты.
+
+Оплата через Telegram Stars работает нативно (без сайта).
+
+Административный бот (@YourAdminBot)
+Только для пользователя с ADMIN_CHAT_ID. Команды:
+
+Команда	Описание
+/health	Проверка БД и VPN-панели
+/errors	Последние ошибки из логов
+/broadcast (reply на сообщение)	Рассылка текста/медиа всем пользователям
+/userinfo <id>	Информация о подписке, ключе
+/grant <id> <days>	Выдать/продлить VPN-подписку
+/revoke <id>	Отозвать VPN-ключ и деактивировать подписку
+/stats	Статистика (всего, активных, истекающих и т.д.)
+/addcategory <name>	Создать категорию промптов
+/renamecategory <old> <new>	Переименовать
+/deletecategory <name>	Удалить (вместе с промптами)
+/addprompt	Пошаговое добавление промпта (FSM)
+/editprompt <id> поле=значение	Редактирование (title, description, content, is_free)
+/deleteprompt <id>	Удалить
+/listprompts [категория]	Список промптов
+/addserver	Пошаговое добавление VPN-сервера
+/listservers	Список всех серверов
+/removeserver <id>	Удалить (только если нет привязанных пользователей)
+/serversetactive <id> <0|1>	Вкл/выкл сервер
+🌐 Управление VPN-серверами
+Серверы хранятся в таблице vpn_servers (хост, порт, inbound_id, API‑путь, пароль (зашифрован), вес, активность).
+
+Пароли шифруются через Fernet (ключ ENCRYPTION_KEY).
+
+При старте бот загружает активные серверы, логинится на каждый (фоновая авторизация).
+
+Клиенты создаются на сервере с наименьшим весом (round‑robin с учётом веса).
+
+При отзыве подписки ключ удаляется с того сервера, где был создан.
+
+Добавление нового сервера (через админ-бота):
+
+text
+/addserver → вводим: название, полный URL панели (https://host:port/api_path), inbound_id, логин, пароль, вес.
+После добавления сервер автоматически появится в пуле и начнёт использоваться.
+
+📝 Управление промптами (категории + промпты)
+Категории и промпты хранятся в БД.
+
+Промпты могут быть бесплатными или платными (доступ по активной веб-подписке).
+
+Кэширование списка промптов в Redis (TTL 5 минут). После изменений через админ-бота кэш сбрасывается.
+
+На сайте промпты отображаются с фильтром по категориям и поиском.
+
+💳 Платежи
+ЮKassa (RUB)
+Пользователь на сайте выбирает тариф (месяц, квартал, полгода) → создаётся платёж → редирект на платёжную страницу → после успеха вебхук активирует подписку.
+
+Для VPN используется JWT‑токен с метаданными (telegram_id, продукт, период). Вебхук вызывает внутреннее API бота.
+
+Telegram Stars
+В боте выбирается период → выставляется инвойс → после оплаты напрямую активируется подписка (идемпотентность через таблицу bot_payments).
+
+USDT
+При выборе USDT генерируется ссылка на сайт с JWT‑токеном, где пользователь оплачивает через ЮKassa (сумма в рублях по курсу). В будущем возможна прямая крипто-оплата.
+
+Идемпотентность гарантируется через таблицу bot_payments (уникальный payment_id).
+
+🩺 Healthcheck и мониторинг
+Скрипт ./healthcheck.sh проверяет:
+
+Запущены ли контейнеры/процессы
+
+Доступность веб-сайта (/health)
+
+Подключение к БД и Redis
+
+Установку вебхуков Telegram
+
+Внутреннее API (порт 8001)
+
+Логи на наличие ошибок
+
+Опционально – отправляет тестовое сообщение в чат
+
+Эндпоинты:
+
+GET /health – общий статус (БД, бот)
+
+GET /health/bot – статус основного бота (username, webhook)
+
+🧪 Устранение типичных проблем
+Проблема	Решение
+Бот не отвечает / вебхук не работает	Проверить WEBHOOK_URL и WEBHOOK_SECRET, запустить ./healthcheck.sh
+Платежи не проходят (ЮKassa)	Убедиться, что вебхук https://domain/api/payment/webhook/yookassa доступен снаружи (ngrok для тестов), проверить YOOKASSA_SHOP_ID и API_KEY
+VPN‑ключ не создаётся	Проверить логи: ошибка авторизации на 3x‑UI, неверный inbound_id или URL. Включить XUI_VERIFY_SSL=false для самоподписного сертификата
+Ошибка sqlalchemy.exc.ArgumentError	Убедиться, что миграции применены (alembic upgrade head)
+Rate limit срабатывает слишком часто	Исправлен декоратор в utils/decorators.py (окно 1 минута). Если нужно изменить лимит, передавайте max_per_minute
+Пользователь не может получить ссылку, хотя подписка активна	Выполнить /grant повторно или /revoke / /grant – принудительно пересоздаст ключ
+📄 Лицензия
+Проект распространяется под лицензией MIT. Используйте, модифицируйте, распространяйте свободно.
+
+🙌 Благодарности
+aiogram – асинхронный фреймворк для ботов
+
+FastAPI – современный веб-фреймворк
+
+3x‑UI – панель управления Xray
+
+ЮKassa – платёжная система
+
+Вопросы и предложения: создавайте Issue в репозитории или пишите в поддержку бота.
