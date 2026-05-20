@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     INTERNAL_API_SECRET: str
     INTERNAL_API_HOST: str = "localhost"
     INTERNAL_API_PORT: int = 8001
+    INTERNAL_API_URL: str = "http://localhost:8001"
 
     # Свойства для компактного доступа
     @property

@@ -17,8 +17,15 @@ from web.rate_limit import limiter
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payment", tags=["payment"])
 
+from web.services.cache_service import cache
+
 @router.post("/initiate-vpn")
 async def initiate_vpn_payment(token: str = Query(...), db: AsyncSession = Depends(get_async_db)):
+    cache_key = f"initiate_vpn:{token}"
+    if await cache.get(cache_key):
+        logger.warning(f"Duplicate initiate request for token {token[:20]}...")
+        raise HTTPException(status_code=429, detail="Payment already requested, please wait a few minutes")
+
     try:
         payload = jwt.decode(token, settings.INTERNAL_API_SECRET, algorithms=["HS256"], leeway=60)
     except jwt.ExpiredSignatureError:
@@ -27,7 +34,7 @@ async def initiate_vpn_payment(token: str = Query(...), db: AsyncSession = Depen
         raise HTTPException(status_code=400, detail="Invalid token")
 
     payment = await yookassa_service.create_payment(
-        user_id=None,
+        user_id=None,                         # для бота user_id нет
         amount=payload["amount"],
         plan=f"{payload['product_type']}_{payload['period']}_{payload['currency']}",
         db=db,
@@ -43,6 +50,8 @@ async def initiate_vpn_payment(token: str = Query(...), db: AsyncSession = Depen
     )
     if not payment:
         raise HTTPException(status_code=500, detail="Failed to create payment")
+
+    await cache.set(cache_key, True, ttl_seconds=300)
 
     confirmation_url = payment["confirmation_url"]
     if "?" in confirmation_url:

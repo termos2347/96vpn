@@ -9,7 +9,7 @@
         <p class="text-xl mb-2">{{ product }}</p>
         <p class="text-2xl font-bold mb-6">{{ amount }} {{ currency }}</p>
         <p class="text-gray-400 mb-8">После оплаты подписка активируется автоматически.</p>
-        <button id="payButton" class="button-primary text-white px-8 py-3 rounded-lg font-bold w-full">Оплатить</button>
+        <button id="payButton" class="button-primary text-white px-8 py-3 rounded-lg font-bold w-full" onclick="pay()">Оплатить</button>
         <p class="text-gray-500 text-sm mt-4">Вы будете перенаправлены на платёжную систему.</p>
     </div>
 </main>
@@ -17,15 +17,39 @@
 
 {% block extra_js %}
 <script>
-document.getElementById('payButton').addEventListener('click', async () => {
+let paying = false;
+async function pay() {
+    if (paying) return;
+    paying = true;
+    const btn = document.getElementById('payButton');
+    btn.disabled = true;
+    btn.textContent = 'Обработка...';
+    
     const token = new URLSearchParams(window.location.search).get('token');
-    if (!token) { alert('Ошибка: отсутствует токен'); return; }
+    if (!token) { 
+        alert('Ошибка: отсутствует токен'); 
+        paying = false;
+        btn.disabled = false;
+        btn.textContent = 'Оплатить';
+        return; 
+    }
     try {
         const resp = await fetch(`/api/payment/initiate-vpn?token=${token}`, { method: 'POST' });
         const data = await resp.json();
-        if (data.confirmation_url) window.location.href = data.confirmation_url;
-        else alert('Ошибка при создании платежа: ' + (data.detail || 'неизвестная ошибка'));
-    } catch(e) { alert('Ошибка соединения с сервером'); }
-});
+        if (data.confirmation_url) {
+            window.location.href = data.confirmation_url;
+        } else {
+            alert('Ошибка при создании платежа: ' + (data.detail || 'неизвестная ошибка'));
+            paying = false;
+            btn.disabled = false;
+            btn.textContent = 'Оплатить';
+        }
+    } catch(e) {
+        alert('Ошибка соединения с сервером');
+        paying = false;
+        btn.disabled = false;
+        btn.textContent = 'Оплатить';
+    }
+}
 </script>
 {% endblock %}

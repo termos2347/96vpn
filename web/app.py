@@ -46,9 +46,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            # Получаем CSRF-токен из заголовка
             csrf_header = request.headers.get("X-CSRF-Token")
-            # Пытаемся получить токен из тела запроса (form, json)
             csrf_form = None
             content_type = request.headers.get("content-type", "")
 
@@ -59,11 +57,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 form = await request.form()
                 csrf_form = form.get("csrf_token")
             elif content_type == "application/json":
-                body = await request.json()
-                csrf_form = body.get("csrf_token")
+                try:
+                    body = await request.body()
+                    if body:
+                        data = await request.json()
+                        csrf_form = data.get("csrf_token")
+                    else:
+                        csrf_form = None
+                except Exception:
+                    csrf_form = None
 
             csrf_cookie = request.cookies.get("csrf_token")
-
             is_valid = False
             if csrf_header and csrf_cookie and csrf_header == csrf_cookie:
                 is_valid = True
