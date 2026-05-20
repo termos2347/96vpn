@@ -5,10 +5,11 @@ import sys
 import io
 from pathlib import Path
 
+# Устанавливаем кодировку stdout
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Настраиваем логгер ПЕРВЫМ делом
 from utils.logger import setup_logger
 setup_logger()
 
@@ -16,6 +17,7 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiohttp import web
+
 from db.migrate import run_migrations
 from web.services.auth import PromptService
 
@@ -41,7 +43,6 @@ if settings.SENTRY_DSN:
                     release="1.0.0")
     logger.info("Sentry initialized for bot")
 
-
 def validate_webhook_url(url: str, bot_name: str = "main") -> bool:
     """Проверяет корректность URL вебхука."""
     if not url:
@@ -54,9 +55,8 @@ def validate_webhook_url(url: str, bot_name: str = "main") -> bool:
         logger.warning(f"{bot_name} WEBHOOK_URL should use HTTPS: {url}")
     return True
 
-
 async def _login_all_servers(server_pool: ServerPool):
-    """Фоновая авторизация на всех серверах"""
+    """Фоновая авторизация на всех серверах."""
     await asyncio.sleep(2)
     for provider in server_pool.providers.values():
         try:
@@ -65,9 +65,8 @@ async def _login_all_servers(server_pool: ServerPool):
         except Exception as e:
             logger.warning(f"Failed to login to some server: {e}")
 
-
 async def main():
-    logger.info("Starting combined server (bot + web)…")
+    logger.info("Starting combined server (bot + web)...")
     stop_event = asyncio.Event()
 
     # Валидация WEBHOOK_URL
@@ -98,9 +97,10 @@ async def main():
 
     await admin_startup()
 
+    # Настройка сессии бота с прокси (без костылей)
     if PROXY_URL:
         main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
-        logger.info(f"Proxy configured: {PROXY_URL}")
+        logger.info(f"Proxy configured: {PROXY_URL} with timeout 180s")
     else:
         main_session = AiohttpSession(timeout=180)
         logger.info("No proxy, timeout 180s")
@@ -125,6 +125,7 @@ async def main():
     else:
         logger.warning("Admin webhook not configured")
 
+    # Внутренний API
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
@@ -132,12 +133,14 @@ async def main():
     await internal_site.start()
     logger.info(f"Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
+    # Веб-сервер FastAPI
     config = uvicorn.Config(app=fastapi_app, host="0.0.0.0", port=8000, log_level="info")
     await PromptService.init_cache()
     server = uvicorn.Server(config)
     web_task = asyncio.create_task(server.serve())
     logger.info("Web server started on http://0.0.0.0:8000")
 
+    # Установка вебхука основного бота
     webhook_url = settings.WEBHOOK_URL
     if not webhook_url:
         logger.error("WEBHOOK_URL not set in .env")
@@ -160,7 +163,6 @@ async def main():
     logger.info("All services started. Waiting for stop signal...")
     await stop_event.wait()
 
-
 async def shutdown(main_bot, admin_bot_instance, internal_runner, server, web_task, server_pool, stop_event):
     logger.info("Shutting down…")
     await main_bot.delete_webhook()
@@ -177,7 +179,6 @@ async def shutdown(main_bot, admin_bot_instance, internal_runner, server, web_ta
     await engine.dispose()
     logger.info("Shutdown complete.")
     stop_event.set()
-
 
 if __name__ == "__main__":
     try:

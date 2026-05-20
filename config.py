@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # ---------- LEGAL ----------
     LEGAL_TERMS_URL: str = ""   # ссылка на документ с офертой (Google Docs, Yandex Wiki и т.п.)
     LEGAL_PRIVACY_URL: str = "" # ссылка на политику конфиденциальности
+    
+    # ---------- LOG ----------
+    LOG_LEVEL: str = "INFO"
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024   # 10 MB
+    LOG_BACKUP_COUNT: int = 5
+    LOG_ACCESS_LEVEL: str = "WARNING"       # для access-логов (можно "INFO" если надо)
 
     # ---------- Subscription (веб-подписки AI) ----------
     MONTHLY_PRICE: float = 200.0
