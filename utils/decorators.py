@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # Rate limiting хранилище: {user_id: [timestamps]}
 _user_actions = defaultdict(list)
 RATE_LIMIT_SECONDS = 1  # 1 секунда между командами
-RATE_LIMIT_THRESHOLD = 5  # 5 команд за 60 секунд
+RATE_LIMIT_THRESHOLD = 20  # 5 команд за 60 секунд
 
 def check_subscription(func):
     @wraps(func)
@@ -34,7 +34,7 @@ def rate_limit(max_per_minute: int = 5):
                 return await func(message_or_callback, *args, **kwargs)
             
             now = datetime.now(timezone.utc)
-            cutoff_time = now - timedelta(seconds=1)
+            cutoff_time = now - timedelta(minutes=1)
             
             # Чистим старые записи
             _user_actions[user_id] = [
