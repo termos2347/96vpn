@@ -20,6 +20,7 @@ from web.services.auth import SubscriptionService
 
 logger = logging.getLogger(__name__)
 
+
 class YookassaService:
     def __init__(self):
         Configuration.account_id = settings.YOOKASSA_SHOP_ID
@@ -40,7 +41,6 @@ class YookassaService:
         description: str = "Подписка на NeuroPrompt Premium",
         metadata: dict = None
     ) -> Optional[Dict[str, Any]]:
-        """Создаёт платёж в ЮKassa. Для ботов использует хэш токена как ключ идемпотентности."""
         try:
             payment_data = {
                 "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
@@ -50,14 +50,14 @@ class YookassaService:
                 "metadata": metadata or {}
             }
 
-            # ---- Идемпотентность: короткий ключ ----
+            # ---- Идемпотентность: короткий ключ (хеш токена) ----
             if metadata and metadata.get("source") == "bot" and metadata.get("token"):
                 token_hash = hashlib.sha256(metadata['token'].encode()).hexdigest()[:50]
                 idempotence_key = f"vpn_{token_hash}"
             else:
                 idempotence_key = f"payment_{user_id or 'bot'}_{datetime.now(timezone.utc).timestamp()}"
 
-            logger.info(f"Idempotence key length: {len(idempotence_key)}")
+            logger.info(f"Creating payment, idempotence_key length: {len(idempotence_key)}")
 
             # ---- Данные веб-пользователя ----
             if user_id is not None:
@@ -74,10 +74,10 @@ class YookassaService:
                 payment_data["metadata"]["user_id"] = user_id
                 payment_data["metadata"]["plan"] = plan
 
-            # ---- Создание платежа (синхронный вызов) ----
+            # ---- Создание платежа ----
             payment = await asyncio.to_thread(Payment.create, payment_data, idempotence_key)
 
-            logger.info(f"Payment created: {payment.id}, amount: {amount}")
+            logger.info(f"✅ Payment created: {payment.id}, amount={amount}, plan={plan}")
             return {
                 "payment_id": payment.id,
                 "status": payment.status,
@@ -89,7 +89,6 @@ class YookassaService:
             return None
 
     async def get_payment_status(self, payment_id: str) -> Optional[str]:
-        """Возвращает статус платежа из ЮKassa."""
         try:
             payment = await asyncio.to_thread(Payment.find_one, payment_id)
             return payment.status
@@ -99,7 +98,6 @@ class YookassaService:
 
     # ---------------------- Обработка вебхука ----------------------
     async def process_webhook(self, webhook_data: Dict[str, Any], db: AsyncSession) -> bool:
-        """Обрабатывает уведомление от ЮKassa (payment.succeeded)."""
         try:
             event = webhook_data.get("event")
             if event != "payment.succeeded":
@@ -119,6 +117,7 @@ class YookassaService:
 
             metadata = payment.get("metadata", {})
             source = metadata.get("source")
+            logger.info(f"📨 Webhook processing: payment_id={payment_id}, source={source}")
 
             if source == "bot":
                 success = await self._activate_bot_subscription(metadata, payment_id)
@@ -140,8 +139,6 @@ class YookassaService:
                 if not user:
                     logger.warning(f"User {user_id} not found for payment {payment_id}")
                     return False
-
-                # Дополнительная защита: если платёж уже привязан к пользователю
                 if user.yookassa_payment_id == payment_id:
                     logger.info(f"Payment {payment_id} already attached to user {user_id}")
                     return True
@@ -154,7 +151,7 @@ class YookassaService:
                 await db.commit()
                 await log_bot_payment(payment_id, user_id)
 
-                logger.info(f"Subscription activated via webhook for user {user.id} (+{days} days)")
+                logger.info(f"✅ Subscription activated via webhook for user {user.id} (+{days} days)")
                 return True
 
             logger.warning(f"Unknown source '{source}' in payment {payment_id}")
@@ -171,7 +168,6 @@ class YookassaService:
         retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))
     )
     async def _activate_bot_subscription(self, metadata: dict, payment_id: str) -> bool:
-        """Вызывает внутреннее API бота для активации VPN/обхода."""
         if await is_bot_payment_processed(payment_id):
             logger.info(f"Bot payment {payment_id} already processed, skipping activation")
             return True
@@ -205,8 +201,7 @@ class YookassaService:
                     if resp.status == 200:
                         data = await resp.json()
                         if data.get("status") in ("ok", "already_activated"):
-                            logger.info(f"Bot activation succeeded for {telegram_id}, payment {payment_id}")
-                            # Платёж уже будет записан вызывающей стороной (process_webhook или check_and_activate)
+                            logger.info(f"✅ Bot activation succeeded for {telegram_id}, payment {payment_id}")
                             return True
                         else:
                             logger.error(f"Bot activation returned unexpected status: {data}")
@@ -220,7 +215,6 @@ class YookassaService:
 
     # ---------------------- Синхронная проверка платежа (check-payment) ----------------------
     async def check_and_activate(self, payment_id: str, db: AsyncSession) -> bool:
-        """Проверяет статус платежа и активирует подписку (используется клиентом)."""
         if await is_bot_payment_processed(payment_id):
             logger.info(f"Payment {payment_id} already processed, skipping check_and_activate")
             return True
@@ -263,6 +257,7 @@ class YookassaService:
                 user.yookassa_payment_id = payment_id
                 await db.commit()
                 await log_bot_payment(payment_id, user_id)
+                logger.info(f"✅ Subscription activated via check_and_activate for user {user.id} (+{days} days)")
                 return True
 
             return False
@@ -270,5 +265,5 @@ class YookassaService:
             logger.error(f"Check and activate error: {e}", exc_info=True)
             return False
 
-# Глобальный экземпляр
+
 yookassa_service = YookassaService()

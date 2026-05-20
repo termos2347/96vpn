@@ -1,21 +1,18 @@
 import logging
-import html  # Добавлено для экранирования ссылок
 from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.enums import ParseMode
-from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from db.crud import set_vpn_subscription, set_bypass_subscription, is_vpn_active, set_vpn_client_id
-from .keyboards import (
-    vpn_currency_keyboard, vpn_period_keyboard,
-    # bypass_currency_keyboard, bypass_period_keyboard,  # временно отключено
-    period_to_text, currency_symbol
+from aiogram.types import PreCheckoutQuery
+from db.crud import (
+    set_vpn_subscription, set_bypass_subscription,
+    log_bot_payment, is_bot_payment_processed
 )
-# from config import BYPASS_PRICES
-from config import PAYMENT_LINK_TTL_MINUTES, VPN_PRICES, INTERNAL_API_SECRET, SITE_URL
-from services.vpn_provider import XUIVPNProvider
-from services.vpn_provider import vpn_provider
+from .keyboards import vpn_currency_keyboard, vpn_period_keyboard
+from config import PAYMENT_LINK_TTL_MINUTES, VPN_PRICES, INTERNAL_API_SECRET, SITE_URL, ADMIN_CHAT_ID
+from services.vpn_manager import VPNManager
 from utils.decorators import rate_limit
-from utils.validators import validate_user_id, validate_currency, validate_days, ValidationError
+from utils.validators import validate_user_id, validate_currency, ValidationError
+from handlers import get_vpn_manager
 import jwt
 
 logger = logging.getLogger(__name__)
@@ -37,7 +34,6 @@ def create_payment_token(telegram_id: int, product_type: str, period: str, curre
     return jwt.encode(payload, INTERNAL_API_SECRET, algorithm="HS256")
 
 # ---------- VPN Payment Handlers ----------
-
 @router.message(F.text == "💳 Оплатить VPN")
 @rate_limit(max_per_minute=10)
 async def pay_vpn(message: types.Message):
@@ -91,12 +87,9 @@ async def vpn_payment_link(callback: types.CallbackQuery):
     try:
         token = create_payment_token(telegram_id, "vpn", period, currency, price)
         payment_url = f"{SITE_URL}/pay/subscription?token={token}"
-        
-        # --- ВЫВОД ССЫЛКИ В ЛОГ И ОТПРАВКА АДМИНУ ---
-        logger.info(f"🔗 VPN payment link generated for user {telegram_id}: {payment_url}")
-        
-        # Отправляем ссылку админу (если задан ADMIN_CHAT_ID)
-        from config import ADMIN_CHAT_ID
+
+        logger.info(f"💰 Payment link generated for user {telegram_id}: {payment_url} (period={period}, currency={currency}, price={price})")
+
         if ADMIN_CHAT_ID:
             try:
                 await callback.bot.send_message(
@@ -105,27 +98,25 @@ async def vpn_payment_link(callback: types.CallbackQuery):
                 )
             except Exception as e:
                 logger.error(f"Не удалось отправить ссылку админу: {e}")
-        
+
     except Exception as e:
         logger.error(f"Failed to create payment token: {e}")
         await callback.answer("❌ Ошибка при формировании ссылки", show_alert=True)
         return
 
     await callback.message.delete()
-    
+
     ttl_text = f"{PAYMENT_LINK_TTL_MINUTES} мин." if PAYMENT_LINK_TTL_MINUTES < 60 else f"{PAYMENT_LINK_TTL_MINUTES // 60} ч."
     msg = (
         f"💳 Для оплаты VPN <a href='{payment_url}'>нажмите здесь</a>\n"
         f"<i>Ссылка действительна {ttl_text}.</i>"
     )
-
     await callback.message.answer(
         text=msg,
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True
     )
     await callback.answer()
-
 
 # ---------- Bypass Payment Handlers ----------
 """
@@ -199,7 +190,6 @@ async def bypass_payment_link(callback: types.CallbackQuery):
     await callback.answer()
 """
 # ---------- Платежи Telegram Stars ----------
-
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
@@ -208,16 +198,41 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def successful_payment(message: types.Message):
     payment = message.successful_payment
-    payload = payment.invoice_payload  # "vpn_1m_123456" или "bypass_1m_123456"
+    payload = payment.invoice_payload          # "vpn_1m_123456"
+    telegram_payment_id = payment.telegram_payment_charge_id
+    logger.info(f"⭐ Successful Stars payment: payload={payload}, payment_id={telegram_payment_id}")
+
+    # Идемпотентность
+    if await is_bot_payment_processed(telegram_payment_id):
+        logger.info(f"Duplicate Stars payment {telegram_payment_id} ignored")
+        await message.answer("✅ Этот платёж уже был обработан.")
+        return
+
     parts = payload.split("_")
     if len(parts) < 3:
+        logger.error(f"Invalid invoice payload: {payload}")
         return
     product_type, period, user_id_str = parts[0], parts[1], parts[2]
     user_id = int(user_id_str)
     days = PERIOD_DAYS.get(period, 0)
+
     if product_type == "vpn":
         await set_vpn_subscription(user_id, days)
-        await message.answer(f"✅ VPN подписка на {days} дней активирована!")
+        await log_bot_payment(telegram_payment_id, user_id)
+
+        # Создаём VPN‑ключ
+        vpn_manager = get_vpn_manager()
+        if vpn_manager:
+            link = await vpn_manager.create_key(user_id, days)
+            if link:
+                await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 Ваша ссылка: {link}")
+            else:
+                await message.answer(f"✅ VPN подписка на {days} дней активирована, но ключ не создан. Обратитесь в поддержку.")
+        else:
+            await message.answer(f"✅ VPN подписка на {days} дней активирована!")
     elif product_type == "bypass":
         await set_bypass_subscription(user_id, days)
+        await log_bot_payment(telegram_payment_id, user_id)
         await message.answer(f"✅ Обход на {days} дней активирован!")
+    else:
+        logger.warning(f"Unknown product type in Stars payment: {product_type}")
