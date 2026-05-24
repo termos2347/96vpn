@@ -21,10 +21,6 @@ from services.vpn_manager import VPNManager
 from .servers import router as servers_router
 from .server_states import ServerForm
 
-# Импортируем наши новые роутеры
-from .categories import router as categories_router
-from .prompts import router as prompts_router
-
 logger = logging.getLogger(__name__)
 
 error_log = deque(maxlen=10)
@@ -54,13 +50,6 @@ async def startup():
         BotCommand(command="grant", description="Выдать/продлить VPN-подписку (telegram_id дни)"),
         BotCommand(command="revoke", description="Отозвать VPN-подписку (telegram_id)"),
         BotCommand(command="stats", description="Статистика по подпискам"),
-        BotCommand(command="addcategory", description="Добавить категорию промптов"),
-        BotCommand(command="renamecategory", description="Переименовать категорию"),
-        BotCommand(command="deletecategory", description="Удалить категорию"),
-        BotCommand(command="addprompt", description="Добавить новый промпт (пошагово)"),
-        BotCommand(command="editprompt", description="Редактировать промпт (id поле=значение)"),
-        BotCommand(command="deleteprompt", description="Удалить промпт (id)"),
-        BotCommand(command="listprompts", description="Показать промпты (можно с категорией)"),
         BotCommand(command="addserver", description="Добавить VPN-сервер в пул"),
         BotCommand(command="listservers", description="Список всех серверов"),
         BotCommand(command="removeserver", description="Удалить сервер по ID"),
@@ -79,8 +68,6 @@ async def shutdown():
         main_bot = None
 
 dp = Dispatcher()
-dp.include_router(categories_router)
-dp.include_router(prompts_router)
 dp.include_router(servers_router)
 
 # ---------- Базовые команды ----------
@@ -99,13 +86,6 @@ async def cmd_menu(message: types.Message):
         "/grant <telegram_id> <days> – выдать/продлить VPN\n"
         "/revoke <telegram_id> – отозвать VPN\n"
         "/stats – статистика по подпискам\n"
-        "/addcategory <название> – создать категорию\n"
-        "/renamecategory <старое> <новое> – переименовать\n"
-        "/deletecategory <название> – удалить категорию\n"
-        "/addprompt – добавление промпта (пошагово)\n"
-        "/editprompt <id> <поле=значение> – изменить промпт\n"
-        "/deleteprompt <id> – удалить промпт\n"
-        "/listprompts [категория] – список промптов\n"
         "/addserver – добавить VPN-сервер в пул\n"
         "/listservers – список всех серверов\n"
         "/removeserver <id> – удалить сервер по ID\n"
