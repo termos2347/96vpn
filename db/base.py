@@ -34,12 +34,18 @@ if DATABASE_URL:
         engine = create_async_engine(
             async_db_url,
             echo=False,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            pool_size=20,
-            max_overflow=30,
+            pool_pre_ping=True,          # уже есть
+            pool_recycle=300,            # уменьшите до 300 или 240
+            pool_size=10,                # можно уменьшить до 5
+            max_overflow=20,
             pool_timeout=30,
             pool_use_lifo=True,
+            # Добавьте:
+            connect_args={
+                "timeout": 10,
+                "command_timeout": 60,
+                "server_settings": {"application_name": "96vpn_bot"}
+            }
         )
 else:
     engine = None
