@@ -50,7 +50,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
     price = settings.VPN_PRICES[currency][period]
     description = f"VPN подписка {period} ({currency})"
 
-    # Создаём платёж в ЮKassa
     metadata = {
         "source": "bot",
         "telegram_id": user_id,
@@ -63,15 +62,19 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
         await callback.answer("❌ Ошибка создания платежа", show_alert=True)
         return
 
-    # Отправляем пользователю ссылку на оплату
-    url = payment["confirmation_url"]
+    url = payment.get("confirmation_url")
+    if not url:
+        await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
+        return
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", url=url)]
     ])
     await callback.message.delete()
     await callback.message.answer(
         f"💳 Ссылка для оплаты VPN ({period}, {price} {currency}):\n\n"
-        f"После оплаты подписка активируется автоматически.",
+        f"После оплаты подписка активируется автоматически.\n"
+        f"Если вы уже оплачивали ранее, новая подписка добавится к текущей.",
         reply_markup=kb
     )
     await callback.answer()

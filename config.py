@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
     YOOKASSA_API_KEY: str
-    YOOKASSA_RETURN_URL: str = "https://t.me/your_bot"   # или пустая строка, не важно
+    YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"   # или пустая строка, не важно
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     
     # Webhook (Telegram)
