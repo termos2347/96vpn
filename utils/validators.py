@@ -15,13 +15,6 @@ def validate_user_id(user_id: int) -> bool:
         raise ValidationError(f"Invalid user_id: {user_id}")
     return True
 
-def validate_email(email: str) -> bool:
-    """Проверяет валидность email."""
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(email_pattern, email):
-        raise ValidationError(f"Invalid email: {email}")
-    return True
-
 def validate_days(days: int) -> bool:
     """Проверяет валидность количества дней подписки."""
     valid_days = [30, 90, 180]
@@ -42,12 +35,3 @@ def validate_uuid(uuid: str) -> bool:
     if not re.match(uuid_pattern, uuid.lower()):
         raise ValidationError(f"Invalid UUID: {uuid}")
     return True
-
-def sanitize_email(email: str) -> str:
-    """Санитизирует email для безопасного использования."""
-    # Удаляем опасные символы, оставляем только буквы, цифры, точки, подчеркивания, дефисы
-    return re.sub(r'[^a-zA-Z0-9._-]', '', email)
-
-def sanitize_username(username: str) -> str:
-    """Санитизирует username."""
-    return re.sub(r'[^a-zA-Z0-9._-]', '', username)[:100]

@@ -11,13 +11,6 @@ _user_actions = defaultdict(list)
 RATE_LIMIT_SECONDS = 1  # 1 секунда между командами
 RATE_LIMIT_THRESHOLD = 20  # 5 команд за 60 секунд
 
-def check_subscription(func):
-    @wraps(func)
-    async def wrapper(message: Message, *args, **kwargs):
-        # Заглушка: всегда пропускаем
-        return await func(message, *args, **kwargs)
-    return wrapper
-
 def rate_limit(max_per_minute: int = 5):
     """Декоратор для rate limiting команд пользователя."""
     def decorator(func):

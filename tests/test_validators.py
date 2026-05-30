@@ -6,11 +6,6 @@ def test_validate_user_id():
     with pytest.raises(ValidationError):
         validate_user_id(0)
 
-def test_validate_email():
-    assert validate_email("user@example.com")
-    with pytest.raises(ValidationError):
-        validate_email("invalid")
-
 def test_validate_days():
     assert validate_days(30)
     with pytest.raises(ValidationError):

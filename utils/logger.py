@@ -4,7 +4,6 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from config import settings
 
-
 def setup_logger():
     """Настраивает логирование с ротацией и параметрами из .env."""
     log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
