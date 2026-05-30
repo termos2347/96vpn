@@ -281,7 +281,7 @@ async def cmd_grant(message: types.Message):
                 return
 
         await set_vpn_subscription(tid, days)
-        manager = VPNManager()
+        manager = get_vpn_manager()
         link = await manager.create_key(tid, days)
         await manager.close()
 
@@ -317,7 +317,7 @@ async def cmd_revoke(message: types.Message):
         return
 
     try:
-        manager = VPNManager()
+        manager = get_vpn_manager()
         success = await manager.revoke_key(tid)
         await manager.close()
 

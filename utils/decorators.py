@@ -27,7 +27,7 @@ def rate_limit(max_per_minute: int = 5):
                 return await func(message_or_callback, *args, **kwargs)
             
             now = datetime.now(timezone.utc)
-            cutoff_time = now - timedelta(seconds=10)
+            cutoff_time = now - timedelta(seconds=60)
             
             # Чистим старые записи
             _user_actions[user_id] = [

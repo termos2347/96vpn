@@ -48,7 +48,6 @@ class Settings(BaseSettings):
     WEBHOOK_SECRET: str = ""
     ADMIN_WEBHOOK_URL: str = ""
     ADMIN_WEBHOOK_SECRET: str = ""
-    DEBUG: bool = False
 
     # ---------- Application ----------
     ENCRYPTION_KEY: str

@@ -75,9 +75,6 @@ INTERNAL_API_SECRET=ваш_секретный_ключ
 # Шифрование паролей VPN-серверов (сгенерировать командой: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 ENCRYPTION_KEY=...
 
-# JWT
-SECRET_KEY=super-secret-jwt-key
-
 # URLs
 SITE_URL=https://yourdomain.com
 WEBHOOK_URL=https://yourdomain.com/webhook
@@ -271,9 +268,6 @@ text
 
 Telegram Stars
 В боте выбирается период → выставляется инвойс → после оплаты напрямую активируется подписка (идемпотентность через таблицу bot_payments).
-
-USDT
-При выборе USDT генерируется ссылка на сайт с JWT‑токеном, где пользователь оплачивает через ЮKassa (сумма в рублях по курсу). В будущем возможна прямая крипто-оплата.
 
 Идемпотентность гарантируется через таблицу bot_payments (уникальный payment_id).
 

@@ -27,6 +27,10 @@ class VPNManager:
                         link = provider.get_subscription_link(client["subId"])
                         logger.info(f"Existing key for user {user_id}: {link}")
                         return link
+                    else:
+                        logger.warning(f"Stale client_id {user.vpn_client_id} for user {user_id}, will recreate")
+                        await set_vpn_client_id(user_id, None)
+                        await set_vpn_server_id(user_id, None)
 
             # Выбираем сервер из пула
             server = await self.pool.get_server()
@@ -60,34 +64,18 @@ class VPNManager:
             return None
     
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
-        user = await get_or_create_bot_user(user_id)
-        if not user:
-            return None
-
-        email = f"user_{user_id}@96vpn.bot"
-
-        # Если у пользователя уже есть клиент и известен сервер – пытаемся получить ссылку через провайдера
-        if user.vpn_client_id and user.server_id:
-            provider = await self.pool.get_provider(user.server_id)
-            if provider:
-                client_data = await provider.get_client_by_email(email)
-                if client_data and client_data.get("subId"):
-                    return provider.get_subscription_link(client_data["subId"])
-
-        # Если нет – создаём новый ключ
+        """Получить существующую ссылку или создать новую (для активной подписки)."""
         return await self.create_key(user_id, 30)   # days не важен, подписка уже активна
 
     async def revoke_key(self, user_id: int) -> bool:
         try:
             user = await get_or_create_bot_user(user_id)
             if not user or not user.vpn_client_id:
-                logger.warning(f"User {user_id} has no active key")
+                logger.info(f"User {user_id} has no active key to revoke")
                 return True
 
-            # Определяем сервер, на котором создан ключ
             server_id = user.server_id
             if not server_id:
-                # fallback: пытаемся отозвать на всех? Или выбрасываем ошибку
                 logger.error(f"No server_id for user {user_id}, cannot revoke")
                 return False
 
