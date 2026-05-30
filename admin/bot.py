@@ -20,7 +20,6 @@ from db.crud import (
 from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
 from .servers import router as servers_router
-from .server_states import ServerForm
 
 logger = logging.getLogger(__name__)
 

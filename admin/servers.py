@@ -3,14 +3,24 @@ from urllib.parse import urlparse
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_CHAT_ID
 from db.crud_servers import add_server, get_all_servers, update_server, delete_server
 from handlers import get_server_pool
-from .server_states import ServerForm
 
 logger = logging.getLogger(__name__)
 router = Router()
 
+# ---------- FSM состояния ----------
+class ServerForm(StatesGroup):
+    name = State()
+    base_url = State()
+    inbound_id = State()
+    username = State()
+    password = State()
+    weight = State()
+
+# ---------- Вспомогательные функции ----------
 def is_admin(user_id: int) -> bool:
     return str(user_id) == ADMIN_CHAT_ID
 
@@ -22,7 +32,7 @@ def parse_panel_url(url: str):
     api_path = parsed.path.rstrip('/')
     return host, port, api_path
 
-# ----- Поэтапное добавление сервера -----
+# ---------- Поэтапное добавление сервера ----------
 @router.message(Command("addserver"))
 async def cmd_addserver_start(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -102,7 +112,7 @@ async def process_weight(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Сервер с именем '{data['name']}' уже существует.")
     await state.clear()
 
-# ----- Вспомогательные команды -----
+# ---------- Вспомогательные команды ----------
 @router.message(Command("listservers"))
 async def cmd_listservers(message: types.Message):
     if not is_admin(message.from_user.id):
