@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class XUIVPNProvider:
     MAX_RETRIES = 3
     RETRY_DELAY = 1
-    REQUEST_TIMEOUT = 10
+    REQUEST_TIMEOUT = 30
 
     def __init__(self, base_url=None, username=None, password=None, inbound_id=None, sub_port=None):
         self.base_url = (base_url or XUI_BASE_URL).rstrip('/') if (base_url or XUI_BASE_URL) else ""
