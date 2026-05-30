@@ -58,11 +58,11 @@ class Settings(BaseSettings):
 
     # ---------- LOG ----------
     LOG_LEVEL: str = "INFO"
-    LOG_MAX_BYTES: int = 10 * 1024 * 1024   # 10 MB
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024
     LOG_BACKUP_COUNT: int = 5
     LOG_ACCESS_LEVEL: str = "WARNING"
 
-    # ---------- VPN цены ----------
+    # ---------- Цены ----------
     VPN_PRICE_RUB_1M: float = 199.0
     VPN_PRICE_RUB_3M: float = 499.0
     VPN_PRICE_RUB_6M: float = 899.0
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
 
     # ---------- Внутренний API (бот ↔ сайт) ----------
     INTERNAL_API_SECRET: str
-    INTERNAL_API_HOST: str = "localhost"
+    INTERNAL_API_HOST: str = "0.0.0.0"
     INTERNAL_API_PORT: int = 8001
     INTERNAL_API_URL: str = "http://localhost:8001"
 

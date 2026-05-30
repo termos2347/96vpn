@@ -31,7 +31,7 @@ class VPNManager:
             # Выбираем сервер из пула
             server = await self.pool.get_server()
             if not server:
-                logger.error("No active VPN servers available")
+                logger.error("No active servers available")
                 return None
 
             provider = await self.pool.get_provider(server.id)

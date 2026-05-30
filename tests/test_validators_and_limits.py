@@ -110,14 +110,14 @@ class TestSubscriptionLogic:
     
     @pytest.mark.asyncio
     async def test_set_vpn_subscription_creates_subscription(self):
-        """Проверяет создание VPN подписки."""
+        """Проверяет создание подписки."""
         # Примечание: для полного теста нужна реальная БД или мокирование
         # Это упрощённый пример
         pass
     
     @pytest.mark.asyncio
     async def test_set_vpn_subscription_extends_existing(self):
-        """Проверяет продление существующей VPN подписки."""
+        """Проверяет продление существующей подписки."""
         # Примечание: для полного теста нужна реальная БД
         pass
 

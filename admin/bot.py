@@ -10,6 +10,7 @@ from aiogram.types import BotCommand, BufferedInputFile
 from sqlalchemy import select, text, func
 
 from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
+from handlers import get_vpn_manager
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
 from db.crud import (
