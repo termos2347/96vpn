@@ -120,7 +120,7 @@ bash
 ├── main.py                   # Запуск бота (polling)
 ├── run_all.py                # Запуск всех компонентов (веб + боты + внутр. API)
 ├── run_web.py                # Запуск только веб-сервера
-├── internal_api.py           # aiohttp API для активации подписок (порт 8001)
+├── internal_api.py           # aiohttp API для активации подписок (порт 5001)
 │
 ├── db/                       # База данных
 │   ├── base.py               # engine, async session
@@ -282,7 +282,7 @@ Telegram Stars
 
 Установку вебхуков Telegram
 
-Внутреннее API (порт 8001)
+Внутреннее API (порт 5001)
 
 Логи на наличие ошибок
 

@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 from alembic.config import Config
@@ -13,6 +14,10 @@ async def run_migrations():
     if settings.DEBUG:
         logger.info("DEBUG mode: skipping automatic migrations")
         return
+    
+    # Путь к alembic.ini относительно корня проекта
+    alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
+    alembic_cfg = Config(alembic_ini_path)
 
     logger.info("Running database migrations with advisory lock...")
     alembic_cfg = Config("alembic.ini")

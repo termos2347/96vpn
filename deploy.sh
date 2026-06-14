@@ -87,7 +87,7 @@ sudo systemctl start vpn-bot
 # -------------------- 8. Запуск туннеля (если нужен) --------------------
 if ! grep -q "^WEBHOOK_URL=" .env || [ -z "$(grep "^WEBHOOK_URL=" .env | cut -d '=' -f2)" ]; then
     echo "WEBHOOK_URL not set. Starting cloudflared tunnel in background..."
-    nohup cloudflared tunnel --url http://localhost:8001 > cloudflared.log 2>&1 &
+    nohup cloudflared tunnel --url http://localhost:5001 > cloudflared.log 2>&1 &
     echo "Tunnel started. Check cloudflared.log for URL. Then update .env and restart bot."
 fi
 

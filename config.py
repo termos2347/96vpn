@@ -83,8 +83,8 @@ class Settings(BaseSettings):
     # ---------- Внутренний API (бот ↔ сайт) ----------
     INTERNAL_API_SECRET: str
     INTERNAL_API_HOST: str = "0.0.0.0"
-    INTERNAL_API_PORT: int = 8001
-    INTERNAL_API_URL: str = "http://localhost:8001"
+    INTERNAL_API_PORT: int = 5001
+    INTERNAL_API_URL: str = "http://localhost:5001"
 
     # ---------- Subscription ----------
     SUBSCRIPTION_DAYS: int = 30

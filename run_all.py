@@ -5,6 +5,7 @@ import sys
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
+from sqlalchemy import engine
 
 from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
 from handlers import router as main_router
@@ -12,7 +13,7 @@ from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
 from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
-from db.base import init_db, engine
+from db.migrate import run_migrations
 from internal_api import create_internal_app, set_main_bot, set_main_dp, set_admin_bot, set_admin_dp
 import admin.bot  # импортируем модуль целиком (важно!)
 from utils.logger import setup_logger
@@ -30,8 +31,8 @@ async def on_startup():
     logger.info("Starting VPN bot with webhooks...")
 
     # 1. Инициализация БД
-    await init_db()
-    logger.info("Database initialized")
+    await run_migrations()
+    logger.info("Database migrations applied")
 
     # 2. Пул серверов и VPN менеджер
     server_pool = ServerPool()
