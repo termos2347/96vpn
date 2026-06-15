@@ -1,9 +1,11 @@
-# config.py (новая версия)
 import os
 import sys
+import logging
+import zoneinfo
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
+from cryptography.fernet import Fernet
 
 load_dotenv()
 
@@ -40,7 +42,7 @@ class Settings(BaseSettings):
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
     YOOKASSA_API_KEY: str
-    YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"   # или пустая строка, не важно
+    YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     
     # Webhook (Telegram)
@@ -60,6 +62,9 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = 10 * 1024 * 1024
     LOG_BACKUP_COUNT: int = 5
     LOG_ACCESS_LEVEL: str = "WARNING"
+
+    # ---------- Часовой пояс ----------
+    TIMEZONE: str = "UTC"
 
     # ---------- Цены ----------
     VPN_PRICE_RUB_1M: float = 199.0
@@ -88,7 +93,7 @@ class Settings(BaseSettings):
 
     # ---------- Subscription ----------
     SUBSCRIPTION_DAYS: int = 30
-    PAYMENT_LINK_TTL_MINUTES: int = 120   # для обратной совместимости, можно оставить
+    PAYMENT_LINK_TTL_MINUTES: int = 120
 
     @property
     def VPN_PRICES(self) -> dict:
@@ -108,7 +113,36 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Валидация XUI переменных
+# ==================== ВАЛИДАЦИЯ ENCRYPTION_KEY ====================
+def validate_encryption_key(key: str) -> None:
+    if not key:
+        raise ValueError(
+            "❌ ENCRYPTION_KEY is not set in .env file.\n"
+            "Generate a new key with:\n"
+            "    python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"\n"
+            "Then add it to your .env file."
+        )
+    try:
+        Fernet(key.encode())
+    except Exception as e:
+        raise ValueError(
+            f"❌ ENCRYPTION_KEY is invalid: {e}\n"
+            f"Please generate a valid Fernet key as shown above.\n"
+            f"Current key (first 10 chars): {key[:10]}..."
+        )
+
+validate_encryption_key(settings.ENCRYPTION_KEY)
+
+# ==================== ВАЛИДАЦИЯ TIMEZONE ====================
+try:
+    zoneinfo.ZoneInfo(settings.TIMEZONE)
+except Exception as e:
+    raise ValueError(
+        f"❌ Invalid TIMEZONE '{settings.TIMEZONE}': {e}\n"
+        "Use valid IANA timezone name (e.g., Europe/Moscow, UTC, America/New_York)."
+    )
+
+# ==================== ВАЛИДАЦИЯ XUI ====================
 xui_vars = [
     settings.XUI_BASE_URL,
     settings.XUI_USERNAME,
@@ -120,7 +154,7 @@ xui_filled = sum(1 for v in xui_vars if v is not None and str(v).strip())
 if 0 < xui_filled < len(xui_vars):
     raise ValueError("Все переменные XUI должны быть заполнены вместе или оставлены пустыми")
 
-# Валидация Yookassa
+# ==================== ВАЛИДАЦИЯ Yookassa ====================
 if settings.YOOKASSA_SHOP_ID or settings.YOOKASSA_API_KEY:
     if not settings.YOOKASSA_SHOP_ID:
         raise ValueError("YOOKASSA_SHOP_ID is required when YOOKASSA_API_KEY is set")
@@ -131,10 +165,9 @@ if settings.YOOKASSA_SHOP_ID or settings.YOOKASSA_API_KEY:
     if len(settings.YOOKASSA_API_KEY) < 20:
         raise ValueError("YOOKASSA_API_KEY too short, seems invalid")
 else:
-    import logging
     logging.warning("Yookassa credentials not set. RUB payments will not work.")
 
-# Экспорт переменных для бота
+# ==================== ЭКСПОРТ ПЕРЕМЕННЫХ ДЛЯ БОТА ====================
 TOKEN = settings.BOT_TOKEN
 DATABASE_URL = settings.DATABASE_URL
 PROXY_URL = settings.PROXY_URL

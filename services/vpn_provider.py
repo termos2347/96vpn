@@ -3,7 +3,7 @@ import json
 import logging
 import asyncio
 import aiohttp
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 from dotenv import load_dotenv
 from config import XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT
 
@@ -15,6 +15,7 @@ class XUIVPNProvider:
     MAX_RETRIES = 3
     RETRY_DELAY = 1
     REQUEST_TIMEOUT = 30
+    HEARTBEAT_INTERVAL = 300  # 5 минут
 
     def __init__(self, base_url=None, username=None, password=None, inbound_id=None, sub_port=None):
         self.base_url = (base_url or XUI_BASE_URL).rstrip('/') if (base_url or XUI_BASE_URL) else ""
@@ -23,7 +24,14 @@ class XUIVPNProvider:
         self.inbound_id = inbound_id or XUI_INBOUND_ID
         self.sub_port = sub_port or XUI_SUB_PORT
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"} if self.base_url else {}
-        self.session = None
+        
+        # Управление сессией
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
+        self._session_invalid = False
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._closed = False
+        
         self._server_address = self._extract_host(self.base_url) if self.base_url else ""
         self._is_authenticated = False
 
@@ -39,33 +47,95 @@ class XUIVPNProvider:
             return ""
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self.session is None or self.session.closed:
-            connector = aiohttp.TCPConnector(ssl=False, limit=100)
-            timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
-            self.session = aiohttp.ClientSession(
-                connector=connector,
-                cookie_jar=aiohttp.CookieJar(unsafe=True),
-                timeout=timeout
-            )
-        return self.session
+        """Создаёт или возвращает существующую сессию с защитой от гонок."""
+        if self._closed:
+            raise RuntimeError("Provider is closed")
+        
+        async with self._session_lock:
+            if self._session is None or self._session.closed or self._session_invalid:
+                # Закрываем старую сессию, если она была
+                if self._session and not self._session.closed:
+                    await self._session.close()
+                
+                connector = aiohttp.TCPConnector(
+                    ssl=False,
+                    limit=100,
+                    force_close=True  # Закрывать соединения после каждого запроса
+                )
+                timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
+                self._session = aiohttp.ClientSession(
+                    connector=connector,
+                    cookie_jar=aiohttp.CookieJar(unsafe=True),
+                    timeout=timeout
+                )
+                self._session_invalid = False
+                logger.debug(f"Created new session for {self.base_url}")
+                
+                # Запускаем heartbeat, если ещё не запущен
+                if self._heartbeat_task is None or self._heartbeat_task.done():
+                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            
+            return self._session
+
+    async def _heartbeat_loop(self):
+        """Периодически проверяет доступность панели и поддерживает сессию живой."""
+        while not self._closed:
+            try:
+                await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+                if self._closed:
+                    break
+                # Простой запрос к API, чтобы поддержать сессию и проверить авторизацию
+                if self._is_authenticated:
+                    url = f"{self.base_url}/panel/api/inbounds"
+                    try:
+                        session = await self._get_session()
+                        async with session.get(url, headers=self.headers) as resp:
+                            if resp.status == 401:
+                                logger.warning(f"Heartbeat: got 401 for {self.base_url}, re-authenticating")
+                                self._is_authenticated = False
+                                await self.login()
+                            elif resp.status != 200:
+                                logger.debug(f"Heartbeat: unexpected status {resp.status}")
+                    except Exception as e:
+                        logger.warning(f"Heartbeat failed for {self.base_url}: {e}")
+                        # Пометим сессию как недействительную, при следующем запросе пересоздадим
+                        async with self._session_lock:
+                            self._session_invalid = True
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Heartbeat loop error: {e}")
 
     async def close(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-            logger.info("XUI provider session closed")
+        """Закрывает сессию и останавливает heartbeat."""
+        self._closed = True
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        async with self._session_lock:
+            if self._session and not self._session.closed:
+                await self._session.close()
+                self._session = None
+        logger.info(f"XUI provider closed for {self.base_url}")
 
     async def _retry_request(self, method: str, url: str, **kwargs) -> Optional[Dict[str, Any]]:
-        session = await self._get_session()
+        """Выполняет запрос с повторными попытками и пересозданием сессии при ошибке."""
         attempt = 0
+        last_error = None
+        
         while attempt < self.MAX_RETRIES:
             try:
+                session = await self._get_session()
                 method_func = getattr(session, method.lower())
                 async with method_func(url, **kwargs) as resp:
                     if resp.status == 200:
                         try:
                             return await resp.json()
-                        except Exception:
-                            logger.warning(f"Failed to parse JSON from {url}")
+                        except Exception as parse_err:
+                            logger.warning(f"Failed to parse JSON from {url}: {parse_err}")
                             return None
                     elif resp.status == 401:
                         self._is_authenticated = False
@@ -77,14 +147,16 @@ class XUIVPNProvider:
                             return None
                     else:
                         logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
-            except asyncio.TimeoutError:
-                logger.warning(f"Timeout on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
-            except aiohttp.ClientError as e:
-                # Не логируем детали e, чтобы избежать утечки паролей
-                logger.warning(f"Client error on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
-            except Exception:
-                # Не передаём исключение в сообщение – только traceback
-                logger.exception(f"Unexpected error on {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
+            except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
+                # Ошибка сети — помечаем сессию как недействительную, чтобы пересоздать
+                logger.warning(f"Network error on {url} (attempt {attempt+1}): {type(net_err).__name__}")
+                async with self._session_lock:
+                    self._session_invalid = True
+                last_error = net_err
+            except Exception as e:
+                # Другие ошибки не должны приводить к пересозданию сессии автоматически
+                logger.exception(f"Unexpected error on {url}, attempt {attempt+1}")
+                last_error = e
 
             attempt += 1
             if attempt < self.MAX_RETRIES:
@@ -95,26 +167,38 @@ class XUIVPNProvider:
         return None
 
     async def login(self) -> bool:
+        """Авторизация на панели с пересозданием сессии при необходимости."""
         if self._is_authenticated:
             return True
         if not self.base_url:
             logger.error("XUI_BASE_URL is not set")
             return False
+        
         url = f"{self.base_url}/login"
         payload = {"username": self.username, "password": self.password}
+        
         try:
-            result = await self._retry_request("POST", url, data=payload)
-            if result and result.get("success"):
-                self._is_authenticated = True
-                logger.info("Successfully authenticated with 3x-ui panel")
-                return True
-            else:
-                logger.error(f"Authentication failed: {result.get('msg') if result else 'No response'}")
-                return False
-        except Exception:
-            logger.exception("Login exception")
+            # Прямой запрос без retry, чтобы не зациклиться
+            session = await self._get_session()
+            async with session.post(url, data=payload) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result and result.get("success"):
+                        self._is_authenticated = True
+                        logger.info(f"Successfully authenticated with {self.base_url}")
+                        return True
+                    else:
+                        logger.error(f"Authentication failed: {result.get('msg') if result else 'No success flag'}")
+                        return False
+                else:
+                    logger.error(f"Login HTTP {resp.status}")
+                    return False
+        except Exception as e:
+            logger.exception(f"Login exception for {self.base_url}")
             return False
 
+    # Остальные методы (create_client, get_client_by_email, revoke_client) остаются без изменений,
+    # но используют _retry_request, который теперь управляет сессией корректно.
     async def create_client(self, email: str) -> Optional[Dict[str, str]]:
         if not await self.login():
             logger.error("Cannot create client: not authenticated")
@@ -189,7 +273,9 @@ class XUIVPNProvider:
         if not self._server_address or not sub_id:
             logger.error("Invalid server address or sub_id")
             return ""
-        return f"http://{self._server_address}:{self.sub_port}/sub/{sub_id}"
+        # ВАЖНО: используйте https, если сервер поддерживает SSL
+        # Для самоподписного сертификата можно оставить http, но лучше настроить https
+        return f"https://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
         if not await self.login():

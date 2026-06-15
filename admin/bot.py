@@ -4,9 +4,11 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import BotCommand, BufferedInputFile
+from aiogram import F, Bot, Dispatcher, types
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import BotCommand, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, text, func
 
 from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
@@ -27,7 +29,14 @@ error_log = deque(maxlen=10)
 admin_bot: Bot | None = None
 main_bot: Bot | None = None
 
-# Функция отправки алертов
+# ---------- Состояние для рассылки ----------
+class BroadcastStates(StatesGroup):
+    confirm = State()
+
+# Словарь для флагов отмены рассылки (key: chat_id)
+_broadcast_cancel_flags = {}
+
+# ---------- Вспомогательные функции ----------
 async def send_admin_alert(message: str):
     global admin_bot
     if not admin_bot or not ADMIN_CHAT_ID:
@@ -36,7 +45,7 @@ async def send_admin_alert(message: str):
     try:
         await admin_bot.send_message(ADMIN_CHAT_ID, f"🚨 {message}")
     except Exception as e:
-        logger.error(f"Failed to send admin alert: {e}")
+        logger.error("Failed to send admin alert", exc_info=True)
 
 async def startup():
     global admin_bot, main_bot
@@ -107,8 +116,8 @@ async def cmd_health(message: types.Message):
             status += "• VPN-панель: авторизована\n"
         else:
             status += "• VPN-панель: не авторизована\n"
-    except Exception as e:
-        status += f"• VPN-панель: ошибка ({e})\n"
+    except Exception:
+        status += "• VPN-панель: ошибка\n"
     await message.answer(status)
 
 @dp.message(Command("errors"))
@@ -121,9 +130,9 @@ async def cmd_errors(message: types.Message):
         text_lines += f"{i}. {err}\n"
     await message.answer(text_lines)
 
-# ---------- Рассылка ----------
+# ---------- Рассылка с подтверждением и ограничениями ----------
 @dp.message(Command("broadcast"))
-async def cmd_broadcast(message: types.Message):
+async def cmd_broadcast(message: types.Message, state: FSMContext):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
@@ -132,33 +141,102 @@ async def cmd_broadcast(message: types.Message):
         return
 
     reply = message.reply_to_message
-    text_to_send = reply.text or reply.caption
+    await state.update_data(
+        reply_message_id=reply.message_id,
+        reply_chat_id=reply.chat.id
+    )
+    await state.set_state(BroadcastStates.confirm)
 
-    media_type = None
-    file_id = None
-    filename = "file"
-    if reply.photo:
-        media_type = "photo"
-        file_id = reply.photo[-1].file_id
-        filename = "image.jpg"
-    elif reply.video:
-        media_type = "video"
-        file_id = reply.video.file_id
-        filename = "video.mp4"
-    elif reply.animation:
-        media_type = "animation"
-        file_id = reply.animation.file_id
-        filename = "animation.gif"
-    elif reply.document:
-        media_type = "document"
-        file_id = reply.document.file_id
-        if reply.document.file_name:
-            filename = reply.document.file_name
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, начать рассылку", callback_data="broadcast_confirm")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast_cancel")]
+    ])
+    await message.answer(
+        "⚠️ Вы уверены, что хотите разослать это сообщение ВСЕМ пользователям?\n"
+        "Это действие нельзя отменить.\n\n"
+        "Нажмите 'Да, начать рассылку' для запуска.",
+        reply_markup=kb
+    )
 
-    if not media_type and not text_to_send:
-        await message.answer("❗ В отвечаемом сообщении нет ни текста, ни медиа.")
+@dp.callback_query(StateFilter(BroadcastStates.confirm), F.data.startswith("broadcast_"))
+async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
+    if str(callback.from_user.id) != ADMIN_CHAT_ID:
+        await callback.answer("Нет доступа", show_alert=True)
         return
 
+    action = callback.data.split("_")[1]
+    if action == "cancel":
+        await state.clear()
+        await callback.message.edit_text("❌ Рассылка отменена.")
+        await callback.answer()
+        return
+
+    # action == "confirm"
+    await callback.message.edit_text("⏳ Подготовка к рассылке...")
+    await callback.answer()
+
+    data = await state.get_data()
+    reply_msg_id = data.get("reply_message_id")
+    reply_chat_id = data.get("reply_chat_id")
+    await state.clear()
+
+    # Получаем содержимое сообщения
+    try:
+        # Копируем сообщение в текущий чат, чтобы извлечь медиа
+        original_msg = await callback.bot.forward_message(
+            chat_id=callback.message.chat.id,
+            from_chat_id=reply_chat_id,
+            message_id=reply_msg_id
+        )
+        text = original_msg.text or original_msg.caption
+        media_type = None
+        file_id = None
+        filename = "file"
+        if original_msg.photo:
+            media_type = "photo"
+            file_id = original_msg.photo[-1].file_id
+            filename = "image.jpg"
+        elif original_msg.video:
+            media_type = "video"
+            file_id = original_msg.video.file_id
+            filename = "video.mp4"
+        elif original_msg.animation:
+            media_type = "animation"
+            file_id = original_msg.animation.file_id
+            filename = "animation.gif"
+        elif original_msg.document:
+            media_type = "document"
+            file_id = original_msg.document.file_id
+            if original_msg.document.file_name:
+                filename = original_msg.document.file_name
+        await original_msg.delete()
+    except Exception as e:
+        logger.error("Failed to fetch original message for broadcast", exc_info=True)
+        await callback.message.answer(f"❌ Не удалось получить сообщение для рассылки: {e}")
+        return
+
+    # Получаем список пользователей
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(BotUser.telegram_id))
+        user_ids = [row[0] for row in result.all()]
+
+    if not user_ids:
+        await callback.message.answer("Нет пользователей для рассылки.")
+        return
+
+    total = len(user_ids)
+    cancel_flag_key = callback.message.chat.id
+    _broadcast_cancel_flags[cancel_flag_key] = False
+
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛑 Остановить рассылку", callback_data=f"stop_broadcast_{cancel_flag_key}")]
+    ])
+    status_msg = await callback.message.answer(
+        f"📡 Начинаю рассылку {total} пользователям... (0/{total})",
+        reply_markup=cancel_kb
+    )
+
+    # Скачиваем медиа (если есть) один раз
     media_bytes = None
     if media_type:
         try:
@@ -166,45 +244,76 @@ async def cmd_broadcast(message: types.Message):
             await admin_bot.download(file_id, destination=buf)
             media_bytes = buf.getvalue()
         except Exception as e:
-            logger.error(f"Failed to download media: {e}")
-            await message.answer("❌ Не удалось скачать файл для рассылки.")
+            logger.error("Failed to download media for broadcast", exc_info=True)
+            await status_msg.edit_text(f"❌ Не удалось скачать файл: {e}")
+            _broadcast_cancel_flags.pop(cancel_flag_key, None)
             return
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(BotUser.telegram_id).where(BotUser.telegram_id.isnot(None))
-        )
-        user_ids = [row[0] for row in result.all()]
+    # Параметры ограничения скорости
+    SEMAPHORE_LIMIT = 5
+    DELAY_BETWEEN_BATCH = 1
+    semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
 
-    if not user_ids:
-        await message.answer("Нет клиентов для рассылки.")
-        return
+    async def send_to_user(uid: int, bot_instance: Bot):
+        async with semaphore:
+            try:
+                if media_type == "photo":
+                    await bot_instance.send_photo(uid, BufferedInputFile(media_bytes, filename=filename), caption=text)
+                elif media_type == "video":
+                    await bot_instance.send_video(uid, BufferedInputFile(media_bytes, filename=filename), caption=text)
+                elif media_type == "animation":
+                    await bot_instance.send_animation(uid, BufferedInputFile(media_bytes, filename=filename), caption=text)
+                elif media_type == "document":
+                    await bot_instance.send_document(uid, BufferedInputFile(media_bytes, filename=filename), caption=text)
+                else:
+                    await bot_instance.send_message(uid, text)
+                return True
+            except Exception as e:
+                logger.debug(f"Broadcast failed for {uid}: {e}")
+                return False
 
-    await message.answer(f"Рассылка на {len(user_ids)} клиентов началась...")
     success = 0
     fail = 0
+    # Отправляем пачками
+    for i in range(0, total, SEMAPHORE_LIMIT):
+        if _broadcast_cancel_flags.get(cancel_flag_key, False):
+            await status_msg.edit_text(f"🛑 Рассылка остановлена пользователем. Отправлено: {success}, ошибок: {fail}")
+            _broadcast_cancel_flags.pop(cancel_flag_key, None)
+            return
 
-    for uid in user_ids:
-        try:
-            if media_type:
-                input_file = BufferedInputFile(media_bytes, filename=filename)
-                if media_type == "photo":
-                    await main_bot.send_photo(uid, input_file, caption=text_to_send)
-                elif media_type == "video":
-                    await main_bot.send_video(uid, input_file, caption=text_to_send)
-                elif media_type == "animation":
-                    await main_bot.send_animation(uid, input_file, caption=text_to_send)
-                elif media_type == "document":
-                    await main_bot.send_document(uid, input_file, caption=text_to_send)
-            else:
-                await main_bot.send_message(uid, text_to_send)
-            success += 1
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.info(f"Broadcast could not deliver to {uid}: {e}")
-            fail += 1
+        batch = user_ids[i:i+SEMAPHORE_LIMIT]
+        tasks = [send_to_user(uid, main_bot) for uid in batch]
+        results = await asyncio.gather(*tasks)
+        success += sum(results)
+        fail += len(results) - sum(results)
 
-    await message.answer(f"✅ Рассылка завершена: отправлено {success}, ошибок {fail}.")
+        if (i + SEMAPHORE_LIMIT) % 50 == 0 or i + SEMAPHORE_LIMIT >= total:
+            try:
+                await status_msg.edit_text(
+                    f"📡 Рассылка: {success+fail}/{total} (✅ {success}, ❌ {fail})",
+                    reply_markup=cancel_kb
+                )
+            except Exception:
+                pass  # если сообщение не изменилось, игнорируем
+        await asyncio.sleep(DELAY_BETWEEN_BATCH)
+
+    _broadcast_cancel_flags.pop(cancel_flag_key, None)
+    await status_msg.edit_text(
+        f"✅ Рассылка завершена.\n"
+        f"📤 Отправлено: {success}\n"
+        f"❌ Ошибок: {fail}\n"
+        f"👥 Всего пользователей: {total}"
+    )
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("stop_broadcast_"))
+async def stop_broadcast(callback: types.CallbackQuery):
+    if str(callback.from_user.id) != ADMIN_CHAT_ID:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    key = int(callback.data.split("_")[2])
+    _broadcast_cancel_flags[key] = True
+    await callback.answer("⏳ Останавливаю рассылку...")
+    await callback.message.edit_reply_markup(reply_markup=None)
 
 # ---------- Управление пользователями ----------
 @dp.message(Command("userinfo"))

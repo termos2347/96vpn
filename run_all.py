@@ -5,7 +5,6 @@ import sys
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
-from sqlalchemy import engine
 
 from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
 from handlers import router as main_router
@@ -14,8 +13,9 @@ from services.scheduler import start_scheduler
 from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
 from db.migrate import run_migrations
+from db.base import engine
 from internal_api import create_internal_app, set_main_bot, set_main_dp, set_admin_bot, set_admin_dp
-import admin.bot  # импортируем модуль целиком (важно!)
+import admin.bot
 from utils.logger import setup_logger
 
 setup_logger()
@@ -107,7 +107,10 @@ async def on_shutdown():
     await admin.bot.shutdown()
     if internal_runner:
         await internal_runner.cleanup()
-    await engine.dispose()
+    if engine:
+        await engine.dispose()
+    else:
+        logger.warning("Database engine not initialized, skipping dispose")
     logger.info("Shutdown complete.")
 
 async def main():

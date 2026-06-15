@@ -1,18 +1,18 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 _cache: dict[str, tuple[Any, datetime]] = {}
 
 def set_cache(key: str, value: Any, ttl_seconds: int = 300):
     """Сохранить значение в кэш на указанное количество секунд."""
-    _cache[key] = (value, datetime.utcnow() + timedelta(seconds=ttl_seconds))
+    _cache[key] = (value, datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds))
 
 def get_cache(key: str) -> Optional[Any]:
     """Получить значение из кэша, если оно ещё не истекло."""
     entry = _cache.get(key)
     if entry:
         value, expires = entry
-        if datetime.utcnow() < expires:
+        if datetime.now(timezone.utc) < expires:
             return value
         # Удаляем просроченную запись
         del _cache[key]

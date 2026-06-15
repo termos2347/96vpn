@@ -1,6 +1,6 @@
-import os
 import asyncio
 import logging
+import os
 from alembic.config import Config
 from alembic import command
 from sqlalchemy import text
@@ -14,37 +14,46 @@ async def run_migrations():
     if settings.DEBUG:
         logger.info("DEBUG mode: skipping automatic migrations")
         return
-    
-    # Путь к alembic.ini относительно корня проекта
+
+    if not engine:
+        logger.warning("Database engine not initialized, skipping migrations")
+        return
+
     alembic_ini_path = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")
     alembic_cfg = Config(alembic_ini_path)
 
     logger.info("Running database migrations with advisory lock...")
-    alembic_cfg = Config("alembic.ini")
 
-    # Используем блокировку PostgreSQL (только для PostgreSQL, для SQLite пропускаем)
     if 'postgresql' in settings.DATABASE_URL:
         async with engine.begin() as conn:
+            lock_acquired = False
             try:
-                # Захватываем advisory lock (идентификатор 12345 – произвольный)
-                await conn.execute(text("SELECT pg_advisory_lock(12345)"))
-                logger.info("Advisory lock acquired")
-                
-                # Выполняем миграции
+                for attempt in range(60):
+                    lock_acquired = await conn.scalar(text("SELECT pg_try_advisory_lock(12345)"))
+                    if lock_acquired:
+                        break
+                    if attempt == 0:
+                        logger.warning("Another migration is running, waiting up to 60 seconds...")
+                    await asyncio.sleep(1)
+
+                if not lock_acquired:
+                    logger.error("Could not acquire advisory lock after 60 seconds, aborting migrations")
+                    return
+
+                logger.info("Advisory lock acquired, running migrations...")
                 command.upgrade(alembic_cfg, "head")
-                
-                # Освобождаем блокировку
-                await conn.execute(text("SELECT pg_advisory_unlock(12345)"))
-                logger.info("Advisory lock released, migrations applied")
+                logger.info("Migrations applied successfully")
+
             except Exception as e:
                 logger.error(f"Migration failed: {e}")
-                # Пытаемся освободить блокировку в случае ошибки
-                try:
-                    await conn.execute(text("SELECT pg_advisory_unlock(12345)"))
-                except Exception:
-                    pass
                 raise
+            finally:
+                if lock_acquired:
+                    try:
+                        await conn.execute(text("SELECT pg_advisory_unlock(12345)"))
+                        logger.debug("Advisory lock released")
+                    except Exception as unlock_err:
+                        logger.error(f"Failed to release advisory lock: {unlock_err}")
     else:
-        # Для SQLite или других БД – просто выполняем миграции без блокировки
         command.upgrade(alembic_cfg, "head")
         logger.info("Migrations applied (no advisory lock, non-PostgreSQL DB)")
