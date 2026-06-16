@@ -24,6 +24,7 @@ class ServerPool:
             wait_for_login: Если True, дожидается успешного логина всех провайдеров (с таймаутом).
             login_timeout: Максимальное время ожидания логина для одного провайдера.
         """
+        logger.info("🔄 Refreshing server pool...")
         async with self._lock:
             # Отменяем незавершённые задачи логина (если перезагружаем пул)
             for task in self._login_tasks.values():
@@ -33,6 +34,7 @@ class ServerPool:
 
             new_servers = await get_active_servers()
             self.servers = new_servers
+            logger.info(f"📦 Loaded {len(self.servers)} active servers from DB")
 
             # Удаляем провайдеров для серверов, которых больше нет
             old_ids = set(self.providers.keys())
@@ -41,6 +43,7 @@ class ServerPool:
                 provider = self.providers.pop(sid, None)
                 if provider:
                     await provider.close()
+                    logger.info(f"🧹 Removed provider for server {sid}")
 
             # Добавляем новых провайдеров
             for s in self.servers:
@@ -55,6 +58,7 @@ class ServerPool:
                         sub_port=s.sub_port
                     )
                     self.providers[s.id] = provider
+                    logger.info(f"➕ Created provider for server {s.id} ({s.name})")
                     
                     # Запускаем логин в фоне, но с возможностью дождаться
                     login_task = asyncio.create_task(self._login_provider_with_retry(s.id))
@@ -62,7 +66,7 @@ class ServerPool:
 
             # Если требуется дождаться логина – ждём завершения всех задач (с таймаутом)
             if wait_for_login and self._login_tasks:
-                logger.info(f"Waiting for {len(self._login_tasks)} providers to log in...")
+                logger.info(f"⏳ Waiting for {len(self._login_tasks)} providers to log in...")
                 done, pending = await asyncio.wait(
                     self._login_tasks.values(),
                     timeout=login_timeout,
@@ -70,35 +74,42 @@ class ServerPool:
                 )
                 for task in pending:
                     task.cancel()
-                    logger.warning(f"Login timeout for some provider, will retry on first use")
+                    logger.warning(f"⚠️ Login timeout for some provider, will retry on first use")
                 for task in done:
                     if task.exception():
-                        logger.error(f"Login failed: {task.exception()}")
-                logger.info(f"Login completed: {len(done)} succeeded, {len(pending)} pending")
+                        logger.error(f"❌ Login failed: {task.exception()}")
+                    else:
+                        logger.debug("✅ Provider login succeeded")
+                logger.info(f"✅ Login completed: {len(done)} succeeded, {len(pending)} pending")
+            else:
+                logger.info("⏭️ Skipping wait for login (wait_for_login=False or no tasks)")
 
     async def _login_provider_with_retry(self, server_id: int, max_retries: int = 3):
         """Пытается залогиниться с повторными попытками."""
         provider = self.providers.get(server_id)
         if not provider:
+            logger.error(f"❌ Provider for server {server_id} not found during login")
             return
         for attempt in range(max_retries):
             try:
                 if await provider.login():
-                    logger.info(f"Provider {server_id} authenticated (attempt {attempt+1})")
+                    logger.info(f"✅ Provider {server_id} authenticated (attempt {attempt+1})")
                     return
                 else:
-                    logger.warning(f"Provider {server_id} login failed (attempt {attempt+1})")
+                    logger.warning(f"⚠️ Provider {server_id} login failed (attempt {attempt+1})")
             except Exception as e:
-                logger.error(f"Provider {server_id} login error: {e}")
+                logger.error(f"❌ Provider {server_id} login error: {e}")
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
-        logger.error(f"Provider {server_id} could not authenticate after {max_retries} attempts")
+        logger.error(f"❌ Provider {server_id} could not authenticate after {max_retries} attempts")
 
     async def get_server(self) -> Optional[VPNServer]:
         """Выбрать сервер round‑robin с учётом веса."""
         if not self.servers:
+            logger.info("No servers in pool, refreshing...")
             await self.refresh_servers(wait_for_login=False)  # не блокируем при выборе
         if not self.servers:
+            logger.error("No active servers available")
             return None
         weighted = []
         for s in self.servers:
@@ -108,24 +119,28 @@ class ServerPool:
             return None
         idx = self.current_index % len(weighted)
         self.current_index += 1
-        return weighted[idx]
+        selected = weighted[idx]
+        logger.debug(f"🎯 Selected server {selected.id} ({selected.name})")
+        return selected
 
     async def get_provider(self, server_id: int) -> Optional[XUIVPNProvider]:
         """Возвращает провайдера, при необходимости дожидаясь его логина (но не блокируя надолго)."""
         provider = self.providers.get(server_id)
         if provider and not provider._is_authenticated:
             # Если провайдер ещё не залогинился, пытаемся залогиниться синхронно
-            logger.info(f"Provider {server_id} not authenticated yet, logging in now...")
+            logger.info(f"🔑 Provider {server_id} not authenticated yet, logging in now...")
             try:
                 await asyncio.wait_for(provider.login(), timeout=5.0)
+                logger.info(f"✅ Provider {server_id} logged in successfully")
             except asyncio.TimeoutError:
-                logger.error(f"Provider {server_id} login timeout")
+                logger.error(f"⏱️ Provider {server_id} login timeout")
             except Exception as e:
-                logger.error(f"Provider {server_id} login error: {e}")
+                logger.error(f"❌ Provider {server_id} login error: {e}")
         return provider
 
     async def close_all(self):
         """Закрыть всех провайдеров и отменить задачи логина."""
+        logger.info("Closing all providers...")
         for task in self._login_tasks.values():
             if not task.done():
                 task.cancel()
@@ -135,3 +150,4 @@ class ServerPool:
             await provider.close()
         self.providers.clear()
         self.servers.clear()
+        logger.info("All providers closed")

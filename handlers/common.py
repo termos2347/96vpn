@@ -32,7 +32,10 @@ async def cmd_start(message: types.Message):
         username = message.from_user.username
 
         validate_user_id(user_id)
-        await get_or_create_bot_user(user_id, username)
+        
+        # Создаём сессию и передаём её в функцию
+        async with AsyncSessionLocal() as session:
+            await get_or_create_bot_user(session, user_id, username)
 
         logger.info(f"User {user_id} (@{username}) started the bot")
 

@@ -4,8 +4,23 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from config import settings
 
+class ConsoleFilter(logging.Filter):
+    """Фильтр, пропускающий только логи от наших модулей."""
+    def filter(self, record):
+        # Список имён наших модулей (могут быть вложенные, поэтому проверяем начало)
+        allowed_prefixes = (
+            '__main__',
+            'handlers',
+            'services',
+            'db',
+            'admin',
+            'internal_api',
+            'utils',
+        )
+        return any(record.name.startswith(prefix) for prefix in allowed_prefixes)
+
 def setup_logger():
-    """Настраивает логирование с ротацией и параметрами из .env."""
+    """Настраивает логирование с ротацией и разделением на консоль и файл."""
     log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
     access_level = getattr(logging, settings.LOG_ACCESS_LEVEL.upper(), logging.WARNING)
 
@@ -14,12 +29,15 @@ def setup_logger():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-    # Консольный вывод
+    # --- Консольный обработчик ---
     console = logging.StreamHandler(sys.stdout)
-    console.setLevel(log_level)
+    # Уровень консоли: DEBUG если включён DEBUG, иначе INFO
+    console.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
     console.setFormatter(formatter)
+    # Добавляем фильтр, чтобы в консоль не попадали логи библиотек
+    console.addFilter(ConsoleFilter())
 
-    # Файловый вывод с ротацией
+    # --- Файловый обработчик с ротацией ---
     log_file = Path("logs/bot.log")
     log_file.parent.mkdir(exist_ok=True)
 
@@ -29,27 +47,17 @@ def setup_logger():
         backupCount=settings.LOG_BACKUP_COUNT,
         encoding='utf-8'
     )
-    file_handler.setLevel(log_level)
+    file_handler.setLevel(logging.INFO)  # всегда пишем INFO и выше
     file_handler.setFormatter(formatter)
 
-    # Корневой логгер
+    # --- Настройка корневого логгера ---
     root = logging.getLogger()
-    root.setLevel(log_level)
+    root.setLevel(logging.DEBUG)  # чтобы все логи (включая DEBUG) доходили до обработчиков
+    # Удаляем старые обработчики, если были
     for h in root.handlers[:]:
         root.removeHandler(h)
     root.addHandler(console)
     root.addHandler(file_handler)
 
-    # Логгеры Uvicorn и aiohttp
-    for name in ("uvicorn", "uvicorn.access", "uvicorn.error", "aiohttp.access", "aiohttp.server"):
-        logger = logging.getLogger(name)
-        logger.handlers = []
-        logger.addHandler(console)
-        logger.addHandler(file_handler)
-        logger.propagate = False
-        if "access" in name:
-            logger.setLevel(access_level)
-        else:
-            logger.setLevel(log_level)
-
-    return root
+    logging.info("Логирование настроено: консоль (%s), файл (%s)", 
+                 "DEBUG" if settings.DEBUG else "INFO", "INFO")

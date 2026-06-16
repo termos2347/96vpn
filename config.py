@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     )
     
     DEBUG: bool = False
+    RUN_MIGRATIONS: bool = False
 
     # ---------- Telegram Bot ----------
     BOT_TOKEN: str

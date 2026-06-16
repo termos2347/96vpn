@@ -2,11 +2,12 @@ import asyncio
 import logging
 import signal
 import sys
+import traceback
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 
-from config import TOKEN, PROXY_URL, ADMIN_BOT_TOKEN, settings
+from config import TOKEN, PROXY_URL, settings
 from handlers import router as main_router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
@@ -17,6 +18,13 @@ from db.base import engine
 from internal_api import create_internal_app, set_main_bot, set_main_dp, set_admin_bot, set_admin_dp
 import admin.bot
 from utils.logger import setup_logger
+
+# Попытка импорта pyfiglet для ASCII-арта
+try:
+    from pyfiglet import Figlet
+    HAS_PYFIGLET = True
+except ImportError:
+    HAS_PYFIGLET = False
 
 setup_logger()
 logger = logging.getLogger(__name__)
@@ -30,75 +38,121 @@ _background_tasks = []
 
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
-    logger.info("Starting VPN bot with webhooks...")
+    logger.info("=" * 50)
+    logger.info("🚀 Starting VPN bot with webhooks...")
+    logger.info("=" * 50)
 
-    # 1. Инициализация БД (в DEBUG режиме пропускается)
-    if not settings.DEBUG:
-        await run_migrations()
-    else:
-        logger.info("DEBUG mode: skipping automatic migrations")
-    logger.info("Database ready")
+    try:
+        # 1. Инициализация БД
+        if settings.RUN_MIGRATIONS:
+            logger.info("Step 1/7: Running database migrations...")
+            await run_migrations()
+        else:
+            logger.info("Step 1/7: Skipping migrations (RUN_MIGRATIONS=false)")
+        logger.info("✅ Database ready")
 
-    # 2. Пул серверов и VPN менеджер
-    server_pool = ServerPool()
-    await server_pool.refresh_servers()
-    from handlers import set_server_pool, set_vpn_manager
-    set_server_pool(server_pool)
-    set_vpn_manager(VPNManager(server_pool))
+        # 2. Пул серверов и VPN менеджер
+        logger.info("Step 2/7: Initializing ServerPool and VPNManager...")
+        server_pool = ServerPool()
+        logger.info("   Refreshing server list from DB...")
+        await server_pool.refresh_servers()
+        logger.info("   Servers loaded: %d active", len(server_pool.servers))
+        from handlers import set_server_pool, set_vpn_manager
+        set_server_pool(server_pool)
+        set_vpn_manager(VPNManager(server_pool))
+        logger.info("✅ ServerPool and VPNManager ready")
 
-    # 3. Запуск админ-бота
-    await admin.bot.startup()
+        # 3. Запуск админ-бота
+        logger.info("Step 3/7: Starting admin bot...")
+        await admin.bot.startup()
+        logger.info("✅ Admin bot started")
 
-    # 4. Основной бот (с поддержкой прокси)
-    if PROXY_URL:
-        main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
-        logger.info(f"Proxy configured: {PROXY_URL}")
-    else:
-        main_session = AiohttpSession(timeout=180)
+        # 4. Основной бот
+        logger.info("Step 4/7: Initializing main bot...")
+        if PROXY_URL:
+            main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
+            logger.info(f"   Proxy configured: {PROXY_URL}")
+        else:
+            main_session = AiohttpSession(timeout=180)
 
-    main_bot = Bot(token=TOKEN, session=main_session)
-    main_dp = Dispatcher()
-    main_dp.include_router(main_router)
-    await setup_bot_commands(main_bot)
+        main_bot = Bot(token=TOKEN, session=main_session)
+        main_dp = Dispatcher()
+        main_dp.include_router(main_router)
+        await setup_bot_commands(main_bot)
+        logger.info("✅ Main bot initialized")
 
-    # Передаём экземпляры во внутреннее API (для вебхуков)
-    set_main_bot(main_bot)
-    set_main_dp(main_dp)
-    set_admin_bot(admin.bot.admin_bot)
-    set_admin_dp(admin.bot.dp)
+        # Передаём экземпляры во внутреннее API
+        set_main_bot(main_bot)
+        set_main_dp(main_dp)
+        set_admin_bot(admin.bot.admin_bot)
+        set_admin_dp(admin.bot.dp)
+        logger.info("   Internal API hooks set")
 
-    # 5. Запуск внутреннего API с reuse_address
-    internal_app = create_internal_app()
-    internal_runner = web.AppRunner(internal_app)
-    await internal_runner.setup()
-    site = web.TCPSite(
-        internal_runner,
-        host=settings.INTERNAL_API_HOST,
-        port=settings.INTERNAL_API_PORT,
-        reuse_address=True   # позволяет переиспользовать порт после аварийного завершения
-    )
-    await site.start()
-    logger.info(f"Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
+        # 5. Запуск внутреннего API
+        logger.info("Step 5/7: Starting internal API server...")
+        internal_app = create_internal_app()
+        internal_runner = web.AppRunner(internal_app)
+        await internal_runner.setup()
+        site = web.TCPSite(
+            internal_runner,
+            host=settings.INTERNAL_API_HOST,
+            port=settings.INTERNAL_API_PORT,
+            reuse_address=True
+        )
+        await site.start()
+        logger.info(f"✅ Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
-    # 6. Установка вебхуков (только если заданы URL в .env)
-    webhook_url = getattr(settings, 'WEBHOOK_URL', None)
-    admin_webhook_url = getattr(settings, 'ADMIN_WEBHOOK_URL', None)
-    if webhook_url:
-        await main_bot.set_webhook(url=webhook_url, secret_token=settings.WEBHOOK_SECRET)
-        logger.info(f"Main bot webhook set to {webhook_url}")
-    else:
-        logger.warning("WEBHOOK_URL not set, main bot webhook not configured")
+        # 6. Установка вебхуков
+        logger.info("Step 6/7: Setting up webhooks...")
+        webhook_url = getattr(settings, 'WEBHOOK_URL', None)
+        admin_webhook_url = getattr(settings, 'ADMIN_WEBHOOK_URL', None)
+        if webhook_url:
+            await main_bot.set_webhook(url=webhook_url, secret_token=settings.WEBHOOK_SECRET)
+            logger.info(f"   Main bot webhook set to {webhook_url}")
+        else:
+            logger.warning("   WEBHOOK_URL not set, main bot webhook not configured")
 
-    if admin_webhook_url and admin.bot.admin_bot:
-        await admin.bot.admin_bot.set_webhook(url=admin_webhook_url, secret_token=settings.ADMIN_WEBHOOK_SECRET)
-        logger.info(f"Admin bot webhook set to {admin_webhook_url}")
-    else:
-        logger.warning("Admin bot webhook not configured")
+        if admin_webhook_url and admin.bot.admin_bot:
+            await admin.bot.admin_bot.set_webhook(url=admin_webhook_url, secret_token=settings.ADMIN_WEBHOOK_SECRET)
+            logger.info(f"   Admin bot webhook set to {admin_webhook_url}")
+        else:
+            logger.warning("   Admin bot webhook not configured")
+        logger.info("✅ Webhooks configured")
 
-    # 7. Запуск фоновых задач
-    _background_tasks = await start_scheduler(main_bot)
+        # 7. Запуск фоновых задач
+        logger.info("Step 7/7: Starting background tasks...")
+        _background_tasks = await start_scheduler(main_bot)
+        logger.info("✅ Background tasks started")
 
-    logger.info("All services started. Waiting for webhook requests...")
+        # --- Финиш: выводим ASCII-арт ---
+        logger.info("=" * 50)
+        logger.info("🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
+        logger.info("=" * 50)
+
+        if HAS_PYFIGLET:
+            try:
+                f = Figlet(font='slant')
+                ascii_art = f.renderText('96VPN BOT')
+                logger.info("\n" + ascii_art)
+            except Exception:
+                logger.info("(ASCII art not available)")
+        else:
+            logger.info("""
+             ██████╗ ██╗   ██╗██╗   ██╗██████╗ ███╗   ██╗
+            ██╔═══██╗██║   ██║╚██╗ ██╔╝██╔══██╗████╗  ██║
+            ██║   ██║██║   ██║ ╚████╔╝ ██████╔╝██╔██╗ ██║
+            ██║   ██║██║   ██║  ╚██╔╝  ██╔═══╝ ██║╚██╗██║
+            ╚██████╔╝╚██████╔╝   ██║   ██║     ██║ ╚████║
+             ╚═════╝  ╚═════╝    ╚═╝   ╚═╝     ╚═╝  ╚═══╝
+            """)
+
+        logger.info("✅ Bot is now running and waiting for updates...")
+        logger.info("Press Ctrl+C to stop.")
+
+    except Exception as e:
+        logger.error("🔥 FATAL ERROR during startup:")
+        logger.error(traceback.format_exc())
+        raise
 
 async def on_shutdown():
     global _shutting_down, _background_tasks
@@ -109,13 +163,12 @@ async def on_shutdown():
 
     logger.info("Shutting down...")
 
-    # --- Отменяем фоновые задачи ---
+    # Отменяем фоновые задачи
     if _background_tasks:
         logger.info(f"Cancelling {len(_background_tasks)} background tasks...")
         for task in _background_tasks:
             if not task.done():
                 task.cancel()
-        # Ждём завершения с таймаутом
         try:
             await asyncio.wait_for(asyncio.gather(*_background_tasks, return_exceptions=True), timeout=5.0)
         except asyncio.TimeoutError:
@@ -145,7 +198,6 @@ async def on_shutdown():
     
     await admin.bot.shutdown()
     
-    # Закрываем внутреннее API
     if internal_runner:
         try:
             await internal_runner.cleanup()
@@ -153,20 +205,16 @@ async def on_shutdown():
         except Exception as e:
             logger.error(f"Error cleaning internal API: {e}")
     
-    # Закрываем соединения с БД
     if engine:
         try:
             await engine.dispose()
             logger.info("Database engine disposed")
         except Exception as e:
             logger.error(f"Error disposing engine: {e}")
-    else:
-        logger.warning("Database engine not initialized, skipping dispose")
     
     logger.info("Shutdown complete.")
 
 async def shutdown_with_timeout():
-    """Завершает работу с таймаутом, чтобы не зависнуть."""
     try:
         await asyncio.wait_for(on_shutdown(), timeout=10.0)
     except asyncio.TimeoutError:
@@ -175,30 +223,28 @@ async def shutdown_with_timeout():
         logger.exception(f"Unexpected error during shutdown: {e}")
 
 async def main():
-    # Запускаем стартовую инициализацию
-    await on_startup()
-    
-    # Создаём событие для ожидания сигнала остановки
+    try:
+        await on_startup()
+    except Exception:
+        logger.error("Startup failed, exiting.")
+        sys.exit(1)
+
     stop_event = asyncio.Event()
     
     def signal_handler():
         logger.info("Received stop signal, initiating graceful shutdown...")
         stop_event.set()
     
-    # Получаем цикл событий и устанавливаем обработчики сигналов
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
     
     try:
-        # Ждём сигнал остановки
         await stop_event.wait()
     except asyncio.CancelledError:
         logger.info("Main task cancelled")
     finally:
-        # Выполняем завершение с таймаутом
         await shutdown_with_timeout()
-        # Даём время на освобождение порта (для сокетов в TIME_WAIT)
         await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
