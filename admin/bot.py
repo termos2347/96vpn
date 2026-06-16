@@ -392,7 +392,6 @@ async def cmd_grant(message: types.Message):
         await set_vpn_subscription(tid, days)
         manager = get_vpn_manager()
         link = await manager.create_key(tid, days)
-        await manager.close()
 
         async with AsyncSessionLocal() as session:
             user = await get_or_create_bot_user(tid, session=session)
@@ -428,7 +427,6 @@ async def cmd_revoke(message: types.Message):
     try:
         manager = get_vpn_manager()
         success = await manager.revoke_key(tid)
-        await manager.close()
 
         if success:
             async with AsyncSessionLocal() as session:

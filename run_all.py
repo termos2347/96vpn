@@ -25,14 +25,18 @@ logger = logging.getLogger(__name__)
 main_bot = None
 main_dp = None
 internal_runner = None
+_shutting_down = False  # флаг для предотвращения повторного вызова shutdown
 
 async def on_startup():
     global main_bot, main_dp, internal_runner
     logger.info("Starting VPN bot with webhooks...")
 
-    # 1. Инициализация БД
-    await run_migrations()
-    logger.info("Database migrations applied")
+    # 1. Инициализация БД (в DEBUG режиме пропускается)
+    if not settings.DEBUG:
+        await run_migrations()
+    else:
+        logger.info("DEBUG mode: skipping automatic migrations")
+    logger.info("Database ready")
 
     # 2. Пул серверов и VPN менеджер
     server_pool = ServerPool()
@@ -41,7 +45,7 @@ async def on_startup():
     set_server_pool(server_pool)
     set_vpn_manager(VPNManager(server_pool))
 
-    # 3. Запуск админ-бота (инициализирует admin.bot.admin_bot и admin.bot.dp)
+    # 3. Запуск админ-бота
     await admin.bot.startup()
 
     # 4. Основной бот (с поддержкой прокси)
@@ -56,21 +60,26 @@ async def on_startup():
     main_dp.include_router(main_router)
     await setup_bot_commands(main_bot)
 
-    # 5. Передаём экземпляры во внутреннее API (для вебхуков)
+    # Передаём экземпляры во внутреннее API (для вебхуков)
     set_main_bot(main_bot)
     set_main_dp(main_dp)
     set_admin_bot(admin.bot.admin_bot)
     set_admin_dp(admin.bot.dp)
 
-    # 6. Запуск внутреннего API (aiohttp) – будет слушать вебхуки
+    # 5. Запуск внутреннего API с reuse_address
     internal_app = create_internal_app()
     internal_runner = web.AppRunner(internal_app)
     await internal_runner.setup()
-    site = web.TCPSite(internal_runner, settings.INTERNAL_API_HOST, settings.INTERNAL_API_PORT)
+    site = web.TCPSite(
+        internal_runner,
+        host=settings.INTERNAL_API_HOST,
+        port=settings.INTERNAL_API_PORT,
+        reuse_address=True   # позволяет переиспользовать порт после аварийного завершения
+    )
     await site.start()
     logger.info(f"Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
-    # 7. Установка вебхуков (только если заданы URL в .env)
+    # 6. Установка вебхуков (только если заданы URL в .env)
     webhook_url = getattr(settings, 'WEBHOOK_URL', None)
     admin_webhook_url = getattr(settings, 'ADMIN_WEBHOOK_URL', None)
     if webhook_url:
@@ -85,51 +94,104 @@ async def on_startup():
     else:
         logger.warning("Admin bot webhook not configured")
 
-    # 8. Запуск фоновых задач
+    # 7. Запуск фоновых задач
     await start_scheduler(main_bot)
 
     logger.info("All services started. Waiting for webhook requests...")
 
 async def on_shutdown():
+    global _shutting_down
+    if _shutting_down:
+        logger.info("Shutdown already in progress, skipping")
+        return
+    _shutting_down = True
+
     logger.info("Shutting down...")
+    
+    # Закрываем вебхуки и сессии ботов
     if main_bot:
         try:
             await main_bot.delete_webhook()
-        except Exception:
-            pass
-        await main_bot.session.close()
+        except Exception as e:
+            logger.debug(f"Error deleting main webhook: {e}")
+        try:
+            await main_bot.session.close()
+        except Exception as e:
+            logger.debug(f"Error closing main bot session: {e}")
+    
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
-        except Exception:
-            pass
-        await admin.bot.admin_bot.session.close()
+        except Exception as e:
+            logger.debug(f"Error deleting admin webhook: {e}")
+        try:
+            await admin.bot.admin_bot.session.close()
+        except Exception as e:
+            logger.debug(f"Error closing admin bot session: {e}")
+    
     await admin.bot.shutdown()
+    
+    # Закрываем внутреннее API
     if internal_runner:
-        await internal_runner.cleanup()
+        try:
+            await internal_runner.cleanup()
+            logger.info("Internal API cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning internal API: {e}")
+    
+    # Закрываем соединения с БД
     if engine:
-        await engine.dispose()
+        try:
+            await engine.dispose()
+            logger.info("Database engine disposed")
+        except Exception as e:
+            logger.error(f"Error disposing engine: {e}")
     else:
         logger.warning("Database engine not initialized, skipping dispose")
+    
     logger.info("Shutdown complete.")
 
+async def shutdown_with_timeout():
+    """Завершает работу с таймаутом, чтобы не зависнуть."""
+    try:
+        await asyncio.wait_for(on_shutdown(), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.error("Shutdown timed out after 10 seconds, forcing exit")
+    except Exception as e:
+        logger.exception(f"Unexpected error during shutdown: {e}")
+
 async def main():
+    # Запускаем стартовую инициализацию
     await on_startup()
+    
+    # Создаём событие для ожидания сигнала остановки
     stop_event = asyncio.Event()
+    
     def signal_handler():
+        logger.info("Received stop signal, initiating graceful shutdown...")
         stop_event.set()
-    # Регистрируем обработчики сигналов (только для Unix)
+    
+    # Получаем цикл событий и устанавливаем обработчики сигналов
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-    await stop_event.wait()
-    await on_shutdown()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
+    
+    try:
+        # Ждём сигнал остановки
+        await stop_event.wait()
+    except asyncio.CancelledError:
+        logger.info("Main task cancelled")
+    finally:
+        # Выполняем завершение с таймаутом
+        await shutdown_with_timeout()
+        # Даём время на освобождение порта (для сокетов в TIME_WAIT)
+        await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Shutdown by user")
+        logger.info("Shutdown by user (KeyboardInterrupt)")
     except Exception as e:
         logger.exception("Fatal error")
         sys.exit(1)
