@@ -1,23 +1,21 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
 from db.base import AsyncSessionLocal
 from db.models import BotUser, BotPayment
 
 logger = logging.getLogger(__name__)
 
 # ---------- BotUser ----------
-async def _get_or_create_bot_user(
+async def get_or_create_bot_user(
     session: AsyncSession,
     telegram_id: int,
-    username: Optional[str],
-    email: Optional[str]
+    username: Optional[str] = None,
+    email: Optional[str] = None
 ) -> BotUser:
-    """Внутренняя функция: получить или создать пользователя в рамках переданной сессии.
-    Предполагается, что транзакция уже начата (session.begin() или autocommit=False)."""
+    """Получить или создать пользователя. Вызывается только внутри переданной сессии."""
     result = await session.execute(
         select(BotUser).where(BotUser.telegram_id == telegram_id)
     )
@@ -31,111 +29,119 @@ async def _get_or_create_bot_user(
             updated_at=datetime.now(timezone.utc)
         )
         session.add(user)
-        # Не делаем commit здесь, чтобы управление транзакцией было внешним
-        await session.flush()  # чтобы получить id, если нужно
+        # flush не обязателен, но можно для получения id
+        await session.flush()
     return user
 
-async def get_or_create_bot_user(
+async def update_vpn_subscription(
+    session: AsyncSession,
     telegram_id: int,
-    username: Optional[str] = None,
-    email: Optional[str] = None,
-    session: Optional[AsyncSession] = None
-) -> Optional[BotUser]:
-    """Получить или создать пользователя. 
-    Если передан session, то НЕ закрывает его и НЕ управляет транзакцией.
-    Если session=None, создаёт собственную сессию с автоматическим commit/rollback."""
-    if session is None:
-        async with AsyncSessionLocal() as new_session:
-            async with new_session.begin():  # автоматический коммит при успехе, откат при ошибке
-                return await _get_or_create_bot_user(new_session, telegram_id, username, email)
+    days: int
+) -> BotUser:
+    """Обновляет VPN-подписку (продлевает или устанавливает) и возвращает пользователя."""
+    user = await get_or_create_bot_user(session, telegram_id)
+    now = datetime.now(timezone.utc)
+    if user.vpn_subscription_end and user.vpn_subscription_end > now:
+        user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
     else:
-        # Если сессия передана извне, предполагаем, что транзакция уже открыта
-        # или будет открыта вызывающим кодом.
-        return await _get_or_create_bot_user(session, telegram_id, username, email)
+        user.vpn_subscription_end = now + timedelta(days=days)
+    user.updated_at = now
+    return user
 
-async def set_vpn_subscription(telegram_id: int, days: int) -> None:
-    """Установить или продлить VPN-подписку."""
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            user = await get_or_create_bot_user(telegram_id, session=session)
-            now = datetime.now(timezone.utc)
-            if user.vpn_subscription_end and user.vpn_subscription_end > now:
-                user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
-            else:
-                user.vpn_subscription_end = now + timedelta(days=days)
-            user.updated_at = now
-            # session.begin() автоматически закоммитит при выходе
-            logger.info(f"VPN subscription set for user {telegram_id} until {user.vpn_subscription_end}")
+async def update_bypass_subscription(
+    session: AsyncSession,
+    telegram_id: int,
+    days: int
+) -> BotUser:
+    user = await get_or_create_bot_user(session, telegram_id)
+    now = datetime.now(timezone.utc)
+    if user.bypass_subscription_end and user.bypass_subscription_end > now:
+        user.bypass_subscription_end = user.bypass_subscription_end + timedelta(days=days)
+    else:
+        user.bypass_subscription_end = now + timedelta(days=days)
+    user.updated_at = now
+    return user
 
-async def set_bypass_subscription(telegram_id: int, days: int) -> None:
-    """Установить или продлить обход DPI."""
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            user = await get_or_create_bot_user(telegram_id, session=session)
-            now = datetime.now(timezone.utc)
-            if user.bypass_subscription_end and user.bypass_subscription_end > now:
-                user.bypass_subscription_end = user.bypass_subscription_end + timedelta(days=days)
-            else:
-                user.bypass_subscription_end = now + timedelta(days=days)
-            user.updated_at = now
-            logger.info(f"Bypass subscription set for user {telegram_id} until {user.bypass_subscription_end}")
+async def set_vpn_client_id(
+    session: AsyncSession,
+    telegram_id: int,
+    client_uuid: Optional[str]
+) -> None:
+    user = await get_or_create_bot_user(session, telegram_id)
+    user.vpn_client_id = client_uuid
+    user.updated_at = datetime.now(timezone.utc)
 
-async def set_vpn_client_id(telegram_id: int, client_uuid: Optional[str]) -> None:
-    """Установить или очистить VPN client ID."""
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            user = await get_or_create_bot_user(telegram_id, session=session)
-            user.vpn_client_id = client_uuid
-            user.updated_at = datetime.now(timezone.utc)
-            # коммит автоматический
+async def set_vpn_server_id(
+    session: AsyncSession,
+    telegram_id: int,
+    server_id: Optional[int]
+) -> None:
+    user = await get_or_create_bot_user(session, telegram_id)
+    user.server_id = server_id
+    user.updated_at = datetime.now(timezone.utc)
 
-async def get_vpn_end(telegram_id: int) -> Optional[datetime]:
-    """Возвращает дату окончания VPN-подписки."""
+async def get_user_vpn_data(
+    telegram_id: int
+) -> Optional[dict]:
+    """Возвращает словарь с данными пользователя (без объекта)."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == telegram_id))
-        return result.scalar()
+        result = await session.execute(
+            select(
+                BotUser.vpn_subscription_end,
+                BotUser.bypass_subscription_end,
+                BotUser.vpn_client_id,
+                BotUser.server_id
+            ).where(BotUser.telegram_id == telegram_id)
+        )
+        row = result.first()
+        if row:
+            return {
+                "vpn_subscription_end": row[0],
+                "bypass_subscription_end": row[1],
+                "vpn_client_id": row[2],
+                "server_id": row[3]
+            }
+        return None
 
-async def get_bypass_end(telegram_id: int) -> Optional[datetime]:
-    """Возвращает дату окончания обхода DPI."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(BotUser.bypass_subscription_end).where(BotUser.telegram_id == telegram_id))
-        return result.scalar()
+# ---------- BotPayment ----------
+async def log_bot_payment(
+    session: AsyncSession,
+    payment_id: str,
+    telegram_id: int
+) -> bool:
+    """Записывает платёж, возвращает False, если уже существует."""
+    existing = await session.execute(
+        select(BotPayment).where(BotPayment.payment_id == payment_id)
+    )
+    if existing.scalars().first():
+        return False
+    session.add(BotPayment(payment_id=payment_id, telegram_id=telegram_id))
+    return True
+
+async def is_bot_payment_processed(
+    session: AsyncSession,
+    payment_id: str
+) -> bool:
+    result = await session.execute(
+        select(BotPayment).where(BotPayment.payment_id == payment_id)
+    )
+    return result.scalars().first() is not None
 
 async def is_vpn_active(telegram_id: int) -> bool:
-    """Активна ли VPN-подписка."""
-    end = await get_vpn_end(telegram_id)
-    return end is not None and end > datetime.now(timezone.utc)
-
-async def is_bypass_active(telegram_id: int) -> bool:
-    """Активен ли обход DPI."""
-    end = await get_bypass_end(telegram_id)
-    return end is not None and end > datetime.now(timezone.utc)
+    """Проверяет, активна ли VPN-подписка у пользователя."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == telegram_id)
+        )
+        end_date = result.scalar()
+        if end_date is None:
+            return False
+        return end_date > datetime.now(timezone.utc)
 
 async def get_vpn_client_id(telegram_id: int) -> Optional[str]:
-    """Получить VPN client ID."""
+    """Возвращает vpn_client_id пользователя или None."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(BotUser.vpn_client_id).where(BotUser.telegram_id == telegram_id))
+        result = await session.execute(
+            select(BotUser.vpn_client_id).where(BotUser.telegram_id == telegram_id)
+        )
         return result.scalar()
-
-# ---------- Bot Payments ----------
-async def log_bot_payment(payment_id: str, telegram_id: int) -> bool:
-    """Записывает платёж бота. Возвращает False, если payment_id уже существует."""
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            existing = await session.execute(select(BotPayment).where(BotPayment.payment_id == payment_id))
-            if existing.scalars().first():
-                return False
-            session.add(BotPayment(payment_id=payment_id, telegram_id=telegram_id))
-            return True
-
-async def is_bot_payment_processed(payment_id: str) -> bool:
-    """Проверяет, был ли уже обработан платёж."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(BotPayment).where(BotPayment.payment_id == payment_id))
-        return result.scalars().first() is not None
-
-async def set_vpn_server_id(telegram_id: int, server_id: Optional[int]) -> None:
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            user = await get_or_create_bot_user(telegram_id, session=session)
-            user.server_id = server_id

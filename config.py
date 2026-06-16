@@ -26,16 +26,6 @@ class Settings(BaseSettings):
     # ---------- Proxy (опционально) ----------
     PROXY_URL: Optional[str] = None
 
-    # ---------- SENTRY ----------
-    SENTRY_DSN: Optional[str] = None
-
-    # ---------- XUI панель (3x-ui) ----------
-    XUI_BASE_URL: Optional[str] = None
-    XUI_USERNAME: Optional[str] = None
-    XUI_PASSWORD: Optional[str] = None
-    XUI_INBOUND_ID: Optional[int] = None
-    XUI_SUB_PORT: Optional[int] = None
-
     # ---------- Database ----------
     DATABASE_URL: str
 
@@ -91,10 +81,6 @@ class Settings(BaseSettings):
     INTERNAL_API_PORT: int = 5001
     INTERNAL_API_URL: str = "http://localhost:5001"
 
-    # ---------- Subscription ----------
-    SUBSCRIPTION_DAYS: int = 30
-    PAYMENT_LINK_TTL_MINUTES: int = 120
-
     @property
     def VPN_PRICES(self) -> dict:
         return {
@@ -142,17 +128,6 @@ except Exception as e:
         "Use valid IANA timezone name (e.g., Europe/Moscow, UTC, America/New_York)."
     )
 
-# ==================== ВАЛИДАЦИЯ XUI ====================
-xui_vars = [
-    settings.XUI_BASE_URL,
-    settings.XUI_USERNAME,
-    settings.XUI_PASSWORD,
-    settings.XUI_INBOUND_ID,
-    settings.XUI_SUB_PORT,
-]
-xui_filled = sum(1 for v in xui_vars if v is not None and str(v).strip())
-if 0 < xui_filled < len(xui_vars):
-    raise ValueError("Все переменные XUI должны быть заполнены вместе или оставлены пустыми")
 
 # ==================== ВАЛИДАЦИЯ Yookassa ====================
 if settings.YOOKASSA_SHOP_ID or settings.YOOKASSA_API_KEY:
@@ -174,12 +149,6 @@ PROXY_URL = settings.PROXY_URL
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
 ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID
 
-XUI_BASE_URL = settings.XUI_BASE_URL
-XUI_USERNAME = settings.XUI_USERNAME
-XUI_PASSWORD = settings.XUI_PASSWORD
-XUI_INBOUND_ID = settings.XUI_INBOUND_ID
-XUI_SUB_PORT = settings.XUI_SUB_PORT
-
 VPN_PRICES = settings.VPN_PRICES
 BYPASS_PRICES = settings.BYPASS_PRICES
 
@@ -187,5 +156,3 @@ INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 INTERNAL_API_URL = settings.INTERNAL_API_URL
-
-PAYMENT_LINK_TTL_MINUTES = settings.PAYMENT_LINK_TTL_MINUTES

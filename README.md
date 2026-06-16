@@ -21,7 +21,23 @@ Telegram-бот для продажи VPN-подписок с интеграци
 3. Скопируйте `.env.example` в `.env` и заполните обязательные переменные.
 4. Примените миграции: `alembic upgrade head`.
 5. Запустите: `python run_all.py`.
+```
+git clone https://github.com/your-repo/96vpn-bot.git
+cd 96vpn-bot
+python3 -m venv .venv
+source .venv/bin/activate          # для Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
+## Запуск
+```
+npx localtunnel --port 5001 --subdomain my-vpn-bot
+```
+
+```
+chmod +x run.sh
+./run.sh
+```
 ## Переменные окружения
 (перечислите только необходимые – см. выше)
 

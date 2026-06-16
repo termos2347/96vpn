@@ -5,7 +5,6 @@ import asyncio
 import aiohttp
 from typing import Optional, Dict, Any, Set
 from dotenv import load_dotenv
-from config import XUI_BASE_URL, XUI_USERNAME, XUI_PASSWORD, XUI_INBOUND_ID, XUI_SUB_PORT
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -17,12 +16,13 @@ class XUIVPNProvider:
     REQUEST_TIMEOUT = 30
     HEARTBEAT_INTERVAL = 300  # 5 минут
 
-    def __init__(self, base_url=None, username=None, password=None, inbound_id=None, sub_port=None):
-        self.base_url = (base_url or XUI_BASE_URL).rstrip('/') if (base_url or XUI_BASE_URL) else ""
-        self.username = username or XUI_USERNAME
-        self.password = password or XUI_PASSWORD
-        self.inbound_id = inbound_id or XUI_INBOUND_ID
-        self.sub_port = sub_port or XUI_SUB_PORT
+    def __init__(self, base_url, username, password, inbound_id, sub_port):
+        self.base_url = base_url.rstrip('/') if base_url else ""
+        self.username = username
+        self.password = password
+        self.inbound_id = inbound_id
+        self.sub_port = sub_port
+        
         self.headers = {"Referer": f"{self.base_url}/panel/inbounds"} if self.base_url else {}
         
         # Управление сессией
@@ -197,8 +197,6 @@ class XUIVPNProvider:
             logger.exception(f"Login exception for {self.base_url}")
             return False
 
-    # Остальные методы (create_client, get_client_by_email, revoke_client) остаются без изменений,
-    # но используют _retry_request, который теперь управляет сессией корректно.
     async def create_client(self, email: str) -> Optional[Dict[str, str]]:
         if not await self.login():
             logger.error("Cannot create client: not authenticated")
@@ -296,6 +294,3 @@ class XUIVPNProvider:
                 continue
         logger.error(f"Failed to revoke client {client_uuid}")
         return False
-
-# Глобальный экземпляр провайдера (для обратной совместимости)
-vpn_provider = XUIVPNProvider()

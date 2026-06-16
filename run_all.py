@@ -25,10 +25,11 @@ logger = logging.getLogger(__name__)
 main_bot = None
 main_dp = None
 internal_runner = None
-_shutting_down = False  # флаг для предотвращения повторного вызова shutdown
+_shutting_down = False
+_background_tasks = []
 
 async def on_startup():
-    global main_bot, main_dp, internal_runner
+    global main_bot, main_dp, internal_runner, _background_tasks
     logger.info("Starting VPN bot with webhooks...")
 
     # 1. Инициализация БД (в DEBUG режиме пропускается)
@@ -95,19 +96,32 @@ async def on_startup():
         logger.warning("Admin bot webhook not configured")
 
     # 7. Запуск фоновых задач
-    await start_scheduler(main_bot)
+    _background_tasks = await start_scheduler(main_bot)
 
     logger.info("All services started. Waiting for webhook requests...")
 
 async def on_shutdown():
-    global _shutting_down
+    global _shutting_down, _background_tasks
     if _shutting_down:
         logger.info("Shutdown already in progress, skipping")
         return
     _shutting_down = True
 
     logger.info("Shutting down...")
-    
+
+    # --- Отменяем фоновые задачи ---
+    if _background_tasks:
+        logger.info(f"Cancelling {len(_background_tasks)} background tasks...")
+        for task in _background_tasks:
+            if not task.done():
+                task.cancel()
+        # Ждём завершения с таймаутом
+        try:
+            await asyncio.wait_for(asyncio.gather(*_background_tasks, return_exceptions=True), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Background tasks did not finish within timeout")
+        _background_tasks.clear()
+
     # Закрываем вебхуки и сессии ботов
     if main_bot:
         try:

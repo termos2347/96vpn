@@ -6,8 +6,8 @@ from sqlalchemy.dialects.postgresql import insert
 
 from config import INTERNAL_API_SECRET, settings
 from db.crud import (
-    set_vpn_subscription,
-    set_bypass_subscription,
+    update_vpn_subscription,
+    update_bypass_subscription,
     log_bot_payment,
     is_bot_payment_processed,
 )
@@ -70,47 +70,42 @@ async def handle_activation(request):
         return web.json_response({"error": "invalid period"}, status=400)
     days = PERIOD_DAYS[period]
 
-    # Идемпотентность по payment_id
-    if payment_id:
-        async with AsyncSessionLocal() as session:
-            existing = await session.execute(
-                select(BotPayment).where(BotPayment.payment_id == payment_id)
-            )
-            if existing.scalars().first():
-                logger.info(f"Payment {payment_id} already activated")
-                return web.json_response({"status": "already_activated"})
+    # Вся работа с БД в одной сессии и транзакции
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Проверка идемпотентности по payment_id
+            if payment_id:
+                if await is_bot_payment_processed(session, payment_id):
+                    logger.info(f"Payment {payment_id} already activated")
+                    return web.json_response({"status": "already_activated"})
 
-    # Активация подписки
+            # Обновление подписки
+            if product_type == "vpn":
+                user = await update_vpn_subscription(session, telegram_id, days)
+            elif product_type == "bypass":
+                user = await update_bypass_subscription(session, telegram_id, days)
+            else:
+                return web.json_response({"error": "unknown product"}, status=400)
+
+            if payment_id:
+                await log_bot_payment(session, payment_id, telegram_id)
+
+    # Создание VPN-ключа (если нужно) – делаем после коммита, т.к. create_key сам создаёт сессию
     if product_type == "vpn":
-        await set_vpn_subscription(telegram_id, days)
         vpn_manager = get_vpn_manager()
         if vpn_manager:
             link = await vpn_manager.create_key(telegram_id, days)
             if not link:
-                logger.error(f"Failed to create VPN key for {telegram_id}")
-                await send_admin_alert(f"Не создался VPN-ключ для {telegram_id}, payment {payment_id}")
+                logger.error(f"Failed to create VPN key for {telegram_id}, payment {payment_id}")
             else:
                 if _main_bot:
-                    await _main_bot.send_message(
-                        telegram_id,
-                        f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
-                    )
-    elif product_type == "bypass":
-        await set_bypass_subscription(telegram_id, days)
-    else:
-        return web.json_response({"error": "unknown product"}, status=400)
-
-    # Запись платежа (если есть payment_id)
-    if payment_id:
-        async with AsyncSessionLocal() as session:
-            stmt = insert(BotPayment).values(
-                payment_id=payment_id,
-                telegram_id=telegram_id,
-                created_at=datetime.now(timezone.utc)
-            )
-            stmt = stmt.on_conflict_do_nothing(index_elements=['payment_id'])
-            await session.execute(stmt)
-            await session.commit()
+                    try:
+                        await _main_bot.send_message(
+                            telegram_id,
+                            f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send link to user {telegram_id}: {e}")
 
     logger.info(f"Activated {product_type} for {telegram_id}, days={days}")
     return web.json_response({"status": "ok"})

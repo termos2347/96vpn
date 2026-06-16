@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from aiogram import Router, F, types
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from db.crud import set_vpn_subscription, log_bot_payment, is_bot_payment_processed
+from db.base import AsyncSessionLocal
+from db.crud import log_bot_payment, is_bot_payment_processed, update_bypass_subscription, update_vpn_subscription 
 from config import settings
 from services.payment_yookassa import yookassa_service
 from handlers.keyboards import vpn_currency_keyboard, vpn_period_keyboard
@@ -89,77 +90,56 @@ async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def successful_payment(message: types.Message):
     payment = message.successful_payment
-    payload = payment.invoice_payload          # "vpn_1m_123456"
+    payload = payment.invoice_payload
     telegram_payment_id = payment.telegram_payment_charge_id
-    logger.info(f"⭐ Successful Stars payment: payload={payload}, payment_id={telegram_payment_id}")
 
-    # 1. Проверка на дубликат
-    if await is_bot_payment_processed(telegram_payment_id):
-        logger.info(f"Duplicate Stars payment {telegram_payment_id} ignored")
-        await message.answer("✅ Этот платёж уже был обработан.")
-        return
-
-    # 2. Разбор payload
     parts = payload.split("_")
     if len(parts) < 3:
-        logger.error(f"Invalid invoice payload: {payload}")
-        await message.answer("❌ Ошибка: некорректный формат платежа. Обратитесь в поддержку.")
+        await message.answer("❌ Ошибка формата платежа.")
         return
-
     product_type, period, user_id_str = parts[0], parts[1], parts[2]
-    try:
-        target_user_id = int(user_id_str)
-    except ValueError:
-        logger.error(f"Invalid user_id in payload: {user_id_str}")
-        await message.answer("❌ Ошибка: неверный идентификатор пользователя. Обратитесь в поддержку.")
-        return
-
-    # 3. КРИТИЧЕСКАЯ ПРОВЕРКА: плательщик должен совпадать с получателем
+    target_user_id = int(user_id_str)
     if message.from_user.id != target_user_id:
-        logger.error(
-            f"Stars payment user mismatch: payer={message.from_user.id}, "
-            f"target={target_user_id}, payment_id={telegram_payment_id}"
-        )
-        await message.answer(
-            "⚠️ Вы попытались оплатить подписку для другого пользователя.\n"
-            "Это запрещено из соображений безопасности.\n\n"
-            "Платёж не был активирован. Пожалуйста, обратитесь в поддержку "
-            f"@{settings.SUPPORT_USERNAME} для возврата средств."
-        )
-        # Дополнительно можно уведомить администратора
-        from admin.bot import send_admin_alert
-        await send_admin_alert(
-            f"Stars payment rejected: payer {message.from_user.id} tried to "
-            f"activate for user {target_user_id}, payment_id={telegram_payment_id}"
-        )
+        await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
     days = PERIOD_DAYS.get(period, 0)
     if days == 0:
-        logger.error(f"Unknown period in payload: {period}")
-        await message.answer("❌ Неизвестный период подписки. Обратитесь в поддержку.")
+        await message.answer("❌ Неизвестный период.")
         return
 
-    # 4. Активация подписки (только для VPN, так как bypass временно отключён)
-    if product_type == "vpn":
-        await set_vpn_subscription(target_user_id, days)
-        await log_bot_payment(telegram_payment_id, target_user_id)
+    # Одна сессия для проверки дубликата, обновления подписки и логирования платежа
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            # Проверяем дубликат
+            if await is_bot_payment_processed(session, telegram_payment_id):
+                await message.answer("✅ Платёж уже обработан.")
+                return
 
+            # Обновляем подписку
+            if product_type == "vpn":
+                user = await update_vpn_subscription(session, target_user_id, days)
+            elif product_type == "bypass":
+                user = await update_bypass_subscription(session, target_user_id, days)
+            else:
+                await message.answer("❌ Неизвестный продукт.")
+                return
+
+            # Логируем платёж
+            await log_bot_payment(session, telegram_payment_id, target_user_id)
+
+            # session.begin() закоммитит всё
+
+    # После успешного обновления БД создаём ключ (если VPN)
+    if product_type == "vpn":
         vpn_manager = get_vpn_manager()
         if vpn_manager:
             link = await vpn_manager.create_key(target_user_id, days)
             if link:
-                await message.answer(
-                    f"✅ VPN подписка на {days} дней активирована!\n"
-                    f"🔗 Ваша ссылка: {link}"
-                )
+                await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
             else:
-                await message.answer(
-                    f"✅ VPN подписка на {days} дней активирована, "
-                    f"но ключ не создан. Обратитесь в поддержку."
-                )
+                await message.answer(f"✅ Подписка активирована, но ключ не создан.")
         else:
             await message.answer(f"✅ VPN подписка на {days} дней активирована!")
     else:
-        logger.warning(f"Unknown product type: {product_type}")
-        await message.answer("❌ Неизвестный тип подписки. Обратитесь в поддержку.")
+        await message.answer(f"✅ Обход DPI на {days} дней активирован!")

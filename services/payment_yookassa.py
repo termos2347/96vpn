@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 class YookassaService:
     def __init__(self):
         Configuration.account_id = settings.YOOKASSA_SHOP_ID
-        Configuration.secret_key = settings.YOOKASSA_API_KEY
 
     @retry(
         stop=stop_after_attempt(3),

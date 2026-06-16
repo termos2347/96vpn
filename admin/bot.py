@@ -16,12 +16,12 @@ from handlers import get_vpn_manager
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
 from db.crud import (
-    get_or_create_bot_user, set_vpn_subscription, set_vpn_client_id,
-    get_vpn_end, is_vpn_active, get_vpn_client_id
+    get_or_create_bot_user, get_user_vpn_data, set_vpn_client_id,
+    is_vpn_active, get_vpn_client_id, update_vpn_subscription
 )
-from services.vpn_provider import vpn_provider
 from services.vpn_manager import VPNManager
 from .servers import router as servers_router
+from handlers import get_server_pool
 
 logger = logging.getLogger(__name__)
 
@@ -105,19 +105,33 @@ async def cmd_menu(message: types.Message):
 @dp.message(Command("health"))
 async def cmd_health(message: types.Message):
     status = "✅ Статус:\n"
+    # Проверка базы данных
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         status += "• БД: подключена\n"
     except Exception as e:
         status += f"• БД: ошибка ({e})\n"
-    try:
-        if await vpn_provider.login():
-            status += "• VPN-панель: авторизована\n"
+    
+    # Проверка VPN-панели через пул серверов (без глобального провайдера)
+    pool = get_server_pool()
+    if pool.servers:
+        # Берём первый активный сервер для проверки
+        first_server = pool.servers[0]
+        provider = await pool.get_provider(first_server.id)
+        if provider:
+            try:
+                if await provider.login():
+                    status += "• VPN-панель: авторизована (на одном из серверов)\n"
+                else:
+                    status += "• VPN-панель: не удалось авторизоваться\n"
+            except Exception as e:
+                status += f"• VPN-панель: ошибка при авторизации ({e})\n"
         else:
-            status += "• VPN-панель: не авторизована\n"
-    except Exception:
-        status += "• VPN-панель: ошибка\n"
+            status += "• VPN-панель: провайдер не найден\n"
+    else:
+        status += "• VPN-панель: нет активных серверов в пуле\n"
+    
     await message.answer(status)
 
 @dp.message(Command("errors"))
@@ -331,34 +345,33 @@ async def cmd_userinfo(message: types.Message):
         await message.answer("❌ Неверный формат telegram_id.")
         return
 
-    async with AsyncSessionLocal() as session:
-        user = await get_or_create_bot_user(tid, session=session)
-        if not user:
-            await message.answer("❌ Пользователь не найден.")
-            return
+    data = await get_user_vpn_data(tid)
+    if not data:
+        await message.answer("❌ Пользователь не найден.")
+        return
 
-        vpn_end = user.vpn_subscription_end
-        bypass_end = user.bypass_subscription_end
-        now = datetime.now(timezone.utc)
-        vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
-        bypass_left = (bypass_end - now).days if bypass_end and bypass_end > now else 0
-        vpn_active = vpn_left > 0
-        bypass_active = bypass_left > 0
-        vpn_key = user.vpn_client_id or "не создан"
+    now = datetime.now(timezone.utc)
+    vpn_end = data["vpn_subscription_end"]
+    bypass_end = data["bypass_subscription_end"]
+    vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
+    bypass_left = (bypass_end - now).days if bypass_end and bypass_end > now else 0
+    vpn_active = vpn_left > 0
+    bypass_active = bypass_left > 0
+    vpn_key = data["vpn_client_id"] or "не создан"
 
-        text = (
-            f"👤 Пользователь: {user.telegram_id}\n"
-            f"🔹 Username: @{user.username or '—'}\n"
-            f"📧 Email: {user.email or '—'}\n\n"
-            f"🚀 VPN-подписка: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
-            f"   Окончание: {vpn_end.strftime('%d.%m.%Y') if vpn_end else '—'}\n"
-            f"   Осталось: {vpn_left} дн.\n"
-            f"   Ключ: {vpn_key}\n\n"
-            f"🛡️ Обход DPI: {'✅ активен' if bypass_active else '❌ не активен'}\n"
-            f"   Окончание: {bypass_end.strftime('%d.%m.%Y') if bypass_end else '—'}\n"
-            f"   Осталось: {bypass_left} дн."
-        )
-        await message.answer(text)
+    text = (
+        f"👤 Пользователь: {tid}\n"
+        f"🔹 Username: ... (можно получить отдельно, если нужно)\n"
+        f"📧 Email: ...\n\n"
+        f"🚀 VPN-подписка: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
+        f"   Окончание: {vpn_end.strftime('%d.%m.%Y') if vpn_end else '—'}\n"
+        f"   Осталось: {vpn_left} дн.\n"
+        f"   Ключ: {vpn_key}\n\n"
+        f"🛡️ Обход DPI: {'✅ активен' if bypass_active else '❌ не активен'}\n"
+        f"   Окончание: {bypass_end.strftime('%d.%m.%Y') if bypass_end else '—'}\n"
+        f"   Осталось: {bypass_left} дн."
+    )
+    await message.answer(text)
 
 @dp.message(Command("grant"))
 async def cmd_grant(message: types.Message):
@@ -373,42 +386,34 @@ async def cmd_grant(message: types.Message):
         tid = int(args[1])
         days = int(args[2])
     except ValueError:
-        await message.answer("❌ Неверный формат аргументов.")
+        await message.answer("❌ Неверный формат.")
         return
     if days <= 0:
         await message.answer("❌ Дни должны быть положительным числом.")
         return
 
-    try:
-        async with AsyncSessionLocal() as session:
-            user = await get_or_create_bot_user(tid, session=session)
-            has_active_key = user.vpn_client_id and user.vpn_subscription_end and user.vpn_subscription_end > datetime.now(timezone.utc)
-            if has_active_key:
-                await set_vpn_subscription(tid, days)
-                end_date = user.vpn_subscription_end.strftime('%d.%m.%Y') if user.vpn_subscription_end else "неизвестно"
+    # Вся операция в одной сессии
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            user = await update_vpn_subscription(session, tid, days)
+            # Проверяем, есть ли активный ключ
+            if user.vpn_client_id and user.vpn_subscription_end > datetime.now(timezone.utc):
+                # ключ уже есть – просто продлили
+                end_date = user.vpn_subscription_end.strftime('%d.%m.%Y')
                 await message.answer(f"✅ VPN-подписка для {tid} продлена на {days} дн. до {end_date}. Ключ не изменялся.")
-                return
+            else:
+                pass
 
-        await set_vpn_subscription(tid, days)
+    # После выхода из сессии создаём ключ (если нужно)
+    if not (user.vpn_client_id and user.vpn_subscription_end > datetime.now(timezone.utc)):
         manager = get_vpn_manager()
         link = await manager.create_key(tid, days)
-
-        async with AsyncSessionLocal() as session:
-            user = await get_or_create_bot_user(tid, session=session)
-            end_date = user.vpn_subscription_end.strftime('%d.%m.%Y') if user.vpn_subscription_end else "неизвестно"
-
-        msg = f"✅ VPN-подписка для {tid} активирована на {days} дн. до {end_date}."
         if link:
-            msg += f"\n🔗 Новый ключ: {link}"
+            await message.answer(f"✅ VPN-подписка для {tid} активирована на {days} дн., ключ: {link}")
         else:
-            msg += "\n⚠️ Ключ не был создан (ошибка)."
-        await message.answer(msg)
+            await message.answer(f"✅ VPN-подписка для {tid} активирована, но ключ не создан.")
 
-    except Exception as e:
-        logger.error(f"Grant failed for {tid}: {e}")
-        await send_admin_alert(f"Ошибка при /grant для {tid}: {e}")
-        await message.answer(f"❌ Ошибка: {e}")
-
+# Аналогично revoke – открываем сессию, обновляем поля, затем коммитим.
 @dp.message(Command("revoke"))
 async def cmd_revoke(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -421,26 +426,19 @@ async def cmd_revoke(message: types.Message):
     try:
         tid = int(args[1])
     except ValueError:
-        await message.answer("❌ Неверный формат telegram_id.")
+        await message.answer("❌ Неверный формат.")
         return
 
-    try:
-        manager = get_vpn_manager()
-        success = await manager.revoke_key(tid)
-
-        if success:
-            async with AsyncSessionLocal() as session:
-                user = await get_or_create_bot_user(tid, session=session)
-                if user:
-                    user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
-                    await session.commit()
-            await message.answer(f"✅ VPN-подписка для {tid} полностью отозвана (ключ удалён, подписка деактивирована).")
-        else:
-            await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}. Возможно, ключа не было.")
-    except Exception as e:
-        logger.error(f"Revoke failed for {tid}: {e}")
-        await send_admin_alert(f"Ошибка при /revoke для {tid}: {e}")
-        await message.answer(f"❌ Ошибка: {e}")
+    manager = get_vpn_manager()
+    success = await manager.revoke_key(tid)  # внутри сам создаст сессию
+    if success:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                user = await get_or_create_bot_user(session, tid)
+                user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
+        await message.answer(f"✅ VPN-подписка для {tid} отозвана.")
+    else:
+        await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}.")
 
 # ---------- Статистика ----------
 @dp.message(Command("stats"))
@@ -456,62 +454,86 @@ async def cmd_stats(message: types.Message):
     week_later = now + timedelta(days=7)
     month_later = now + timedelta(days=30)
 
+    # Все запросы выполняем в одной сессии
     async with AsyncSessionLocal() as session:
+        # Общее количество пользователей
         total_res = await session.execute(select(func.count(BotUser.id)))
         total = total_res.scalar() or 0
 
+        # Новые сегодня
         new_today_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= today_start))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= today_start)
+        )
         new_today = new_today_res.scalar() or 0
 
+        # Новые за неделю
         new_week_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago)
+        )
         new_week = new_week_res.scalar() or 0
 
+        # Новые за месяц
         new_month_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago))
+            select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago)
+        )
         new_month = new_month_res.scalar() or 0
 
+        # Активные подписки (vpn_subscription_end > now)
         active_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now))
+            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now)
+        )
         active = active_res.scalar() or 0
 
+        # Истекают сегодня (до конца дня)
         expire_today_res = await session.execute(
             select(func.count(BotUser.id)).where(
                 BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= today_start + timedelta(days=1)))
+                BotUser.vpn_subscription_end <= today_start + timedelta(days=1)
+            )
+        )
         expire_today = expire_today_res.scalar() or 0
 
+        # Истекают в течение 7 дней
         expire_7d_res = await session.execute(
             select(func.count(BotUser.id)).where(
                 BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= week_later))
+                BotUser.vpn_subscription_end <= week_later
+            )
+        )
         expire_7d = expire_7d_res.scalar() or 0
 
+        # Истекают в течение 30 дней
         expire_30d_res = await session.execute(
             select(func.count(BotUser.id)).where(
                 BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= month_later))
+                BotUser.vpn_subscription_end <= month_later
+            )
+        )
         expire_30d = expire_30d_res.scalar() or 0
 
+        # Истекшие (vpn_subscription_end <= now и не NULL)
         expired_res = await session.execute(
             select(func.count(BotUser.id)).where(
                 BotUser.vpn_subscription_end <= now,
-                BotUser.vpn_subscription_end.isnot(None)))
+                BotUser.vpn_subscription_end.isnot(None)
+            )
+        )
         expired = expired_res.scalar() or 0
 
+        # Без подписки (vpn_subscription_end IS NULL)
         no_sub_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None)))
+            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None))
+        )
         no_sub = no_sub_res.scalar() or 0
 
+        # Средний остаток дней у активных (используем функцию avg)
         avg_days_res = await session.execute(
             select(func.avg(BotUser.vpn_subscription_end - now)).where(
-                BotUser.vpn_subscription_end > now))
-        avg_days = avg_days_res.scalar()
-        try:
-            avg_days = int(avg_days) if avg_days is not None else 0
-        except (TypeError, ValueError):
-            avg_days = 0
+                BotUser.vpn_subscription_end > now
+            )
+        )
+        avg_days_val = avg_days_res.scalar()
+        avg_days = int(avg_days_val) if avg_days_val is not None else 0
 
     text = (
         "📊 Статистика VPN-клиентов:\n"

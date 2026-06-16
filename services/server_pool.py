@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from typing import Optional, List, Dict
-from urllib.parse import urlparse
 
 from db.models import VPNServer
 from db.crud_servers import get_active_servers
@@ -47,9 +46,9 @@ class ServerPool:
             for s in self.servers:
                 if s.id not in self.providers:
                     real_password = decrypt_password(s.password)
-                    base_url = f"https://{s.host}:{s.port}{s.api_path or ''}"
+                    # Все параметры берутся из БД
                     provider = XUIVPNProvider(
-                        base_url=base_url,
+                        base_url=f"https://{s.host}:{s.port}{s.api_path or ''}",
                         username=s.username,
                         password=real_password,
                         inbound_id=s.inbound_id,
