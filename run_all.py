@@ -5,9 +5,8 @@ import sys
 import traceback
 from aiohttp import web
 from aiogram import Bot, Dispatcher
-from aiogram.client.session.aiohttp import AiohttpSession
 
-from config import TOKEN, PROXY_URL, settings
+from config import TOKEN, settings
 from handlers import router as main_router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
@@ -68,13 +67,7 @@ async def on_startup():
 
         # 4. Основной бот
         logger.info("Step 4/7: Initializing main bot...")
-        if PROXY_URL:
-            main_session = AiohttpSession(proxy=PROXY_URL, timeout=180)
-            logger.info(f"   Proxy configured: {PROXY_URL}")
-        else:
-            main_session = AiohttpSession(timeout=180)
-
-        main_bot = Bot(token=TOKEN, session=main_session)
+        main_bot = Bot(token=TOKEN)
         main_dp = Dispatcher()
         main_dp.include_router(main_router)
         await setup_bot_commands(main_bot)

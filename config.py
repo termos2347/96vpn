@@ -24,9 +24,6 @@ class Settings(BaseSettings):
     ADMIN_BOT_TOKEN: str
     ADMIN_CHAT_ID: str
 
-    # ---------- Proxy (опционально) ----------
-    PROXY_URL: Optional[str] = None
-
     # ---------- Database ----------
     DATABASE_URL: str
 
@@ -148,7 +145,6 @@ else:
 # ==================== ЭКСПОРТ ПЕРЕМЕННЫХ ДЛЯ БОТА ====================
 TOKEN = settings.BOT_TOKEN
 DATABASE_URL = settings.DATABASE_URL
-PROXY_URL = settings.PROXY_URL
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
 ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID
 
