@@ -125,19 +125,19 @@ async def on_startup():
         logger.info("✅ Background tasks started")
 
         # --- Финиш: выводим ASCII-арт ---
-        logger.info("=" * 50)
-        logger.info("🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
-        logger.info("=" * 50)
+        print("\n" + "=" * 50)
+        print("🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
+        print("=" * 50)
 
         if HAS_PYFIGLET:
             try:
                 f = Figlet(font='slant')
                 ascii_art = f.renderText('96VPN BOT')
-                logger.info("\n" + ascii_art)
+                print("\n" + ascii_art)
             except Exception:
-                logger.info("(ASCII art not available)")
+                print("(ASCII art not available)")
         else:
-            logger.info("""
+            print("""
              ██████╗ ██╗   ██╗██╗   ██╗██████╗ ███╗   ██╗
             ██╔═══██╗██║   ██║╚██╗ ██╔╝██╔══██╗████╗  ██║
             ██║   ██║██║   ██║ ╚████╔╝ ██████╔╝██╔██╗ ██║
@@ -146,8 +146,8 @@ async def on_startup():
              ╚═════╝  ╚═════╝    ╚═╝   ╚═╝     ╚═╝  ╚═══╝
             """)
 
-        logger.info("✅ Bot is now running and waiting for updates...")
-        logger.info("Press Ctrl+C to stop.")
+        print("✅ Bot is now running and waiting for updates...")
+        print("Press Ctrl+C to stop.\n")
 
     except Exception as e:
         logger.error("🔥 FATAL ERROR during startup:")

@@ -5,10 +5,11 @@ from logging.handlers import RotatingFileHandler
 from config import settings
 
 class ConsoleFilter(logging.Filter):
-    """Фильтр, пропускающий только логи от наших модулей."""
-    def filter(self, record):
-        # Список имён наших модулей (могут быть вложенные, поэтому проверяем начало)
-        allowed_prefixes = (
+    """Фильтр, пропускающий только логи от наших модулей, если DEBUG=True."""
+    def __init__(self, debug: bool):
+        self.debug = debug
+        # Список имён наших модулей
+        self.allowed_prefixes = (
             '__main__',
             'handlers',
             'services',
@@ -17,7 +18,17 @@ class ConsoleFilter(logging.Filter):
             'internal_api',
             'utils',
         )
-        return any(record.name.startswith(prefix) for prefix in allowed_prefixes)
+
+    def filter(self, record):
+        # Если DEBUG включён, пропускаем всё (уровень уже проверен обработчиком)
+        if self.debug:
+            return True
+        # Если DEBUG выключен, пропускаем только WARNING и выше от наших модулей
+        # Это даст ошибки и предупреждения в консоль
+        if record.levelno >= logging.WARNING:
+            # Проверяем, принадлежит ли логгер нашим модулям
+            return any(record.name.startswith(prefix) for prefix in self.allowed_prefixes)
+        return False
 
 def setup_logger():
     """Настраивает логирование с ротацией и разделением на консоль и файл."""
@@ -31,11 +42,11 @@ def setup_logger():
 
     # --- Консольный обработчик ---
     console = logging.StreamHandler(sys.stdout)
-    # Уровень консоли: DEBUG если включён DEBUG, иначе INFO
-    console.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
+    # Если DEBUG=True, уровень DEBUG, иначе WARNING (чтобы видеть только ошибки и предупреждения)
+    console.setLevel(logging.DEBUG if settings.DEBUG else logging.WARNING)
     console.setFormatter(formatter)
-    # Добавляем фильтр, чтобы в консоль не попадали логи библиотек
-    console.addFilter(ConsoleFilter())
+    # Добавляем фильтр, который учитывает DEBUG
+    console.addFilter(ConsoleFilter(settings.DEBUG))
 
     # --- Файловый обработчик с ротацией ---
     log_file = Path("logs/bot.log")
@@ -52,12 +63,11 @@ def setup_logger():
 
     # --- Настройка корневого логгера ---
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)  # чтобы все логи (включая DEBUG) доходили до обработчиков
-    # Удаляем старые обработчики, если были
+    root.setLevel(logging.DEBUG)  # чтобы все логи доходили до обработчиков
     for h in root.handlers[:]:
         root.removeHandler(h)
     root.addHandler(console)
     root.addHandler(file_handler)
 
     logging.info("Логирование настроено: консоль (%s), файл (%s)", 
-                 "DEBUG" if settings.DEBUG else "INFO", "INFO")
+                 "DEBUG" if settings.DEBUG else "WARNING+", "INFO")
