@@ -11,7 +11,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import BotCommand, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, text, func
 
-from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN
+from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN, settings
 from handlers import get_vpn_manager
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
@@ -145,6 +145,7 @@ async def cmd_errors(message: types.Message):
     await message.answer(text_lines)
 
 # ---------- Рассылка с подтверждением и ограничениями ----------
+# ---------- Рассылка с подтверждением и ограничениями ----------
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -196,7 +197,6 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
 
     # Получаем содержимое сообщения
     try:
-        # Копируем сообщение в текущий чат, чтобы извлечь медиа
         original_msg = await callback.bot.forward_message(
             chat_id=callback.message.chat.id,
             from_chat_id=reply_chat_id,
@@ -206,23 +206,57 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         media_type = None
         file_id = None
         filename = "file"
+
+        # ---- НАЧАЛО: проверка размера файла ----
+        MAX_SIZE = settings.MAX_BROADCAST_FILE_SIZE_MB * 1024 * 1024
+
         if original_msg.photo:
             media_type = "photo"
             file_id = original_msg.photo[-1].file_id
             filename = "image.jpg"
+            # Проверяем размер фото, если он известен
+            if original_msg.photo[-1].file_size and original_msg.photo[-1].file_size > MAX_SIZE:
+                await callback.message.answer(
+                    f"❌ Файл слишком большой ({original_msg.photo[-1].file_size // (1024*1024)} МБ). "
+                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                )
+                await original_msg.delete()
+                return
         elif original_msg.video:
             media_type = "video"
             file_id = original_msg.video.file_id
             filename = "video.mp4"
+            if original_msg.video.file_size and original_msg.video.file_size > MAX_SIZE:
+                await callback.message.answer(
+                    f"❌ Файл слишком большой ({original_msg.video.file_size // (1024*1024)} МБ). "
+                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                )
+                await original_msg.delete()
+                return
         elif original_msg.animation:
             media_type = "animation"
             file_id = original_msg.animation.file_id
             filename = "animation.gif"
+            if original_msg.animation.file_size and original_msg.animation.file_size > MAX_SIZE:
+                await callback.message.answer(
+                    f"❌ Файл слишком большой ({original_msg.animation.file_size // (1024*1024)} МБ). "
+                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                )
+                await original_msg.delete()
+                return
         elif original_msg.document:
             media_type = "document"
             file_id = original_msg.document.file_id
-            if original_msg.document.file_name:
-                filename = original_msg.document.file_name
+            filename = original_msg.document.file_name or "file"
+            if original_msg.document.file_size and original_msg.document.file_size > MAX_SIZE:
+                await callback.message.answer(
+                    f"❌ Файл слишком большой ({original_msg.document.file_size // (1024*1024)} МБ). "
+                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                )
+                await original_msg.delete()
+                return
+        # ---- КОНЕЦ: проверка размера файла ----
+
         await original_msg.delete()
     except Exception as e:
         logger.error("Failed to fetch original message for broadcast", exc_info=True)

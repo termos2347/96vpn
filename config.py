@@ -56,6 +56,8 @@ class Settings(BaseSettings):
 
     # ---------- Часовой пояс ----------
     TIMEZONE: str = "UTC"
+    
+    MAX_BROADCAST_FILE_SIZE_MB: int = 20  #МБ
 
     # ---------- Цены ----------
     VPN_PRICE_RUB_1M: float = 199.0
