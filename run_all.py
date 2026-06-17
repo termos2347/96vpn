@@ -34,7 +34,7 @@ main_bot = None
 main_dp = None
 internal_runner = None
 _shutting_down = False
-_background_tasks = []
+_background_tasks = []   # здесь будут только фоновые задачи (scheduler)
 
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
@@ -51,10 +51,9 @@ async def on_startup():
             logger.info("Step 1/7: Skipping migrations (RUN_MIGRATIONS=false)")
         logger.info("✅ Database ready")
 
-        # 2. Пул серверов и VPN менеджер
+        # 2. Пул серверов и VPN-менеджер
         logger.info("Step 2/7: Initializing ServerPool and VPNManager...")
         server_pool = ServerPool()
-        logger.info("   Refreshing server list from DB...")
         await server_pool.refresh_servers()
         logger.info("   Servers loaded: %d active", len(server_pool.servers))
         from handlers import set_server_pool, set_vpn_manager
@@ -88,7 +87,7 @@ async def on_startup():
         set_admin_dp(admin.bot.dp)
         logger.info("   Internal API hooks set")
 
-        # 5. Запуск внутреннего API
+        # 5. Внутренний API сервер
         logger.info("Step 5/7: Starting internal API server...")
         internal_app = create_internal_app()
         internal_runner = web.AppRunner(internal_app)
@@ -102,29 +101,46 @@ async def on_startup():
         await site.start()
         logger.info(f"✅ Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
-        # 6. Установка вебхуков
+        # 6. Установка вебхуков (строго обязательны)
         logger.info("Step 6/7: Setting up webhooks...")
-        webhook_url = getattr(settings, 'WEBHOOK_URL', None)
-        admin_webhook_url = getattr(settings, 'ADMIN_WEBHOOK_URL', None)
-        if webhook_url:
-            await main_bot.set_webhook(url=webhook_url, secret_token=settings.WEBHOOK_SECRET)
-            logger.info(f"   Main bot webhook set to {webhook_url}")
-        else:
-            logger.warning("   WEBHOOK_URL not set, main bot webhook not configured")
 
-        if admin_webhook_url and admin.bot.admin_bot:
-            await admin.bot.admin_bot.set_webhook(url=admin_webhook_url, secret_token=settings.ADMIN_WEBHOOK_SECRET)
-            logger.info(f"   Admin bot webhook set to {admin_webhook_url}")
-        else:
-            logger.warning("   Admin bot webhook not configured")
+        # Проверка, что URL заданы
+        if not settings.WEBHOOK_URL:
+            raise ValueError("WEBHOOK_URL is required for webhook mode")
+        if not settings.ADMIN_WEBHOOK_URL:
+            raise ValueError("ADMIN_WEBHOOK_URL is required for webhook mode")
+
+        # Удаляем старые вебхуки (на случай, если бот перезапущен)
+        try:
+            await main_bot.delete_webhook()
+        except Exception as e:
+            logger.debug(f"Could not delete main webhook: {e}")
+        try:
+            await admin.bot.admin_bot.delete_webhook()
+        except Exception as e:
+            logger.debug(f"Could not delete admin webhook: {e}")
+
+        # Устанавливаем новые
+        await main_bot.set_webhook(
+            url=settings.WEBHOOK_URL,
+            secret_token=settings.WEBHOOK_SECRET
+        )
+        logger.info(f"✅ Main bot webhook set to {settings.WEBHOOK_URL}")
+
+        await admin.bot.admin_bot.set_webhook(
+            url=settings.ADMIN_WEBHOOK_URL,
+            secret_token=settings.ADMIN_WEBHOOK_SECRET
+        )
+        logger.info(f"✅ Admin bot webhook set to {settings.ADMIN_WEBHOOK_URL}")
+
         logger.info("✅ Webhooks configured")
 
-        # 7. Запуск фоновых задач
+        # 7. Запуск фоновых задач (scheduler)
         logger.info("Step 7/7: Starting background tasks...")
         _background_tasks = await start_scheduler(main_bot)
         logger.info("✅ Background tasks started")
 
-        # --- Финиш: выводим ASCII-арт ---
+        # --- Финиш: вывод ASCII-арта ---
         print("\n" + "=" * 50)
         print("🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
         print("=" * 50)
@@ -138,15 +154,15 @@ async def on_startup():
                 print("(ASCII art not available)")
         else:
             print("""
-             ██████╗ ██╗   ██╗██╗   ██╗██████╗ ███╗   ██╗
-            ██╔═══██╗██║   ██║╚██╗ ██╔╝██╔══██╗████╗  ██║
-            ██║   ██║██║   ██║ ╚████╔╝ ██████╔╝██╔██╗ ██║
-            ██║   ██║██║   ██║  ╚██╔╝  ██╔═══╝ ██║╚██╗██║
-            ╚██████╔╝╚██████╔╝   ██║   ██║     ██║ ╚████║
-             ╚═════╝  ╚═════╝    ╚═╝   ╚═╝     ╚═╝  ╚═══╝
+             ╔══╗ ╔╗   ╔╗╔╗   ╔╗╔══╗   ╔╗╔╗
+            ╚╗╔╝ ╚╝   ╚╝╚╝   ╚╝╚╗╔╝   ╚╝╚╝
+             ║║    ╔╗ ╔╗ ╔╗   ╔╗ ║║     ╔╗
+             ║║    ╚╝ ╚╝ ╚╝   ╚╝ ║║     ╚╝
+             ╚╝         ╔╗    ╔╗  ║║      ╔╗
+                          ╚╝    ╚╝  ╚╝      ╚╝
             """)
 
-        print("✅ Bot is now running and waiting for updates...")
+        print("✅ Bot is now running and waiting for updates via webhooks...")
         print("Press Ctrl+C to stop.\n")
 
     except Exception as e:
@@ -175,7 +191,7 @@ async def on_shutdown():
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
-    # Закрываем вебхуки и сессии ботов
+    # Удаляем вебхуки и закрываем сессии ботов
     if main_bot:
         try:
             await main_bot.delete_webhook()
@@ -185,7 +201,7 @@ async def on_shutdown():
             await main_bot.session.close()
         except Exception as e:
             logger.debug(f"Error closing main bot session: {e}")
-    
+
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
@@ -195,23 +211,23 @@ async def on_shutdown():
             await admin.bot.admin_bot.session.close()
         except Exception as e:
             logger.debug(f"Error closing admin bot session: {e}")
-    
+
     await admin.bot.shutdown()
-    
+
     if internal_runner:
         try:
             await internal_runner.cleanup()
             logger.info("Internal API cleaned up")
         except Exception as e:
             logger.error(f"Error cleaning internal API: {e}")
-    
+
     if engine:
         try:
             await engine.dispose()
             logger.info("Database engine disposed")
         except Exception as e:
             logger.error(f"Error disposing engine: {e}")
-    
+
     logger.info("Shutdown complete.")
 
 async def shutdown_with_timeout():
@@ -230,15 +246,15 @@ async def main():
         sys.exit(1)
 
     stop_event = asyncio.Event()
-    
+
     def signal_handler():
         logger.info("Received stop signal, initiating graceful shutdown...")
         stop_event.set()
-    
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
-    
+
     try:
         await stop_event.wait()
     except asyncio.CancelledError:
