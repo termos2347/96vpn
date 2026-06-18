@@ -1,12 +1,15 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import select, update
+from sqlalchemy import select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import AsyncSessionLocal
 from db.models import BotUser, BotPayment
 
 logger = logging.getLogger(__name__)
+
+# Константа для преобразования периода в дни
+PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 # ---------- BotUser ----------
 async def get_or_create_bot_user(
@@ -29,7 +32,6 @@ async def get_or_create_bot_user(
             updated_at=datetime.now(timezone.utc)
         )
         session.add(user)
-        # flush не обязателен, но можно для получения id
         await session.flush()
     return user
 
@@ -103,30 +105,65 @@ async def get_user_vpn_data(
             }
         return None
 
-# ---------- BotPayment ----------
-async def log_bot_payment(
+# ---------- Новая атомарная активация ----------
+async def activate_subscription(
     session: AsyncSession,
-    payment_id: str,
-    telegram_id: int
+    telegram_id: int,
+    product_type: str,
+    period: str,
+    payment_id: Optional[str] = None
 ) -> bool:
-    """Записывает платёж, возвращает False, если уже существует."""
-    existing = await session.execute(
-        select(BotPayment).where(BotPayment.payment_id == payment_id)
-    )
-    if existing.scalars().first():
-        return False
-    session.add(BotPayment(payment_id=payment_id, telegram_id=telegram_id))
+    """
+    Атомарно активирует подписку (vpn/bypass) и записывает платёж.
+    Возвращает True, если активация произведена или уже была.
+    При наличии payment_id обеспечивает идемпотентность через уникальное ограничение.
+    """
+    days = PERIOD_DAYS.get(period)
+    if not days:
+        raise ValueError(f"Unknown period: {period}")
+
+    # Если передан payment_id, пытаемся вставить запись о платеже
+    if payment_id:
+        stmt = insert(BotPayment).values(
+            payment_id=payment_id,
+            telegram_id=telegram_id,
+            created_at=datetime.now(timezone.utc)
+        ).on_conflict_do_nothing()  # для PostgreSQL
+        result = await session.execute(stmt)
+        # Если affected_rows == 0, значит запись уже существует
+        if result.rowcount == 0:
+            # Проверяем, что платёж действительно существует и принадлежит этому пользователю
+            existing = await session.execute(
+                select(BotPayment).where(BotPayment.payment_id == payment_id)
+            )
+            if existing.scalar():
+                # Уже обработано – считаем успехом
+                return True
+            else:
+                # Странный случай, но лучше считать успехом, чтобы избежать ошибок
+                return True
+
+    # Обновляем подписку
+    user = await get_or_create_bot_user(session, telegram_id)
+    now = datetime.now(timezone.utc)
+    if product_type == "vpn":
+        if user.vpn_subscription_end and user.vpn_subscription_end > now:
+            user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
+        else:
+            user.vpn_subscription_end = now + timedelta(days=days)
+    elif product_type == "bypass":
+        if user.bypass_subscription_end and user.bypass_subscription_end > now:
+            user.bypass_subscription_end = user.bypass_subscription_end + timedelta(days=days)
+        else:
+            user.bypass_subscription_end = now + timedelta(days=days)
+    else:
+        raise ValueError(f"Unknown product: {product_type}")
+
+    user.updated_at = now
+    await session.flush()
     return True
 
-async def is_bot_payment_processed(
-    session: AsyncSession,
-    payment_id: str
-) -> bool:
-    result = await session.execute(
-        select(BotPayment).where(BotPayment.payment_id == payment_id)
-    )
-    return result.scalars().first() is not None
-
+# ---------- Вспомогательные функции для проверки ----------
 async def is_vpn_active(telegram_id: int) -> bool:
     """Проверяет, активна ли VPN-подписка у пользователя."""
     async with AsyncSessionLocal() as session:

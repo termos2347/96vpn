@@ -6,10 +6,9 @@ from sqlalchemy.dialects.postgresql import insert
 
 from config import INTERNAL_API_SECRET, settings
 from db.crud import (
+    activate_subscription,
     update_vpn_subscription,
     update_bypass_subscription,
-    log_bot_payment,
-    is_bot_payment_processed,
 )
 from db.models import BotPayment
 from db.base import AsyncSessionLocal
@@ -66,49 +65,33 @@ async def handle_activation(request):
     period = data["period"]
     payment_id = data.get("payment_id")
 
-    if period not in PERIOD_DAYS:
-        return web.json_response({"error": "invalid period"}, status=400)
-    days = PERIOD_DAYS[period]
-
-    # Вся работа с БД в одной сессии и транзакции
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            # Проверка идемпотентности по payment_id
-            if payment_id:
-                if await is_bot_payment_processed(session, payment_id):
-                    logger.info(f"Payment {payment_id} already activated")
-                    return web.json_response({"status": "already_activated"})
-
-            # Обновление подписки
+    try:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                success = await activate_subscription(
+                    session, telegram_id, product_type, period, payment_id
+                )
+        if success:
+            # После коммита создаём VPN-ключ (если нужно)
             if product_type == "vpn":
-                user = await update_vpn_subscription(session, telegram_id, days)
-            elif product_type == "bypass":
-                user = await update_bypass_subscription(session, telegram_id, days)
-            else:
-                return web.json_response({"error": "unknown product"}, status=400)
-
-            if payment_id:
-                await log_bot_payment(session, payment_id, telegram_id)
-
-    # Создание VPN-ключа (если нужно) – делаем после коммита, т.к. create_key сам создаёт сессию
-    if product_type == "vpn":
-        vpn_manager = get_vpn_manager()
-        if vpn_manager:
-            link = await vpn_manager.create_key(telegram_id, days)
-            if not link:
-                logger.error(f"Failed to create VPN key for {telegram_id}, payment {payment_id}")
-            else:
-                if _main_bot:
-                    try:
-                        await _main_bot.send_message(
-                            telegram_id,
-                            f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to send link to user {telegram_id}: {e}")
-
-    logger.info(f"Activated {product_type} for {telegram_id}, days={days}")
-    return web.json_response({"status": "ok"})
+                vpn_manager = get_vpn_manager()
+                if vpn_manager:
+                    days = PERIOD_DAYS[period]
+                    link = await vpn_manager.create_key(telegram_id, days)
+                    if link and _main_bot:
+                        try:
+                            await _main_bot.send_message(
+                                telegram_id,
+                                f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to send link to user {telegram_id}: {e}")
+            return web.json_response({"status": "ok"})
+        else:
+            return web.json_response({"status": "already_activated"}, status=200)
+    except Exception as e:
+        logger.error(f"Activation error: {e}", exc_info=True)
+        return web.json_response({"status": "error"}, status=500)
 
 # ------------------------------------------------------------------
 # Вебхук ЮKassa
@@ -116,7 +99,8 @@ async def handle_activation(request):
 async def yookassa_webhook(request):
     try:
         data = await request.json()
-        success = await yookassa_service.process_webhook(data, _main_bot)
+        async with AsyncSessionLocal() as session:
+            success = await yookassa_service.process_webhook(data, session, _main_bot)
         if success:
             return web.json_response({"status": "ok"})
         else:

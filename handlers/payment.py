@@ -4,7 +4,7 @@ from aiogram import Router, F, types
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db.base import AsyncSessionLocal
-from db.crud import log_bot_payment, is_bot_payment_processed, update_bypass_subscription, update_vpn_subscription 
+from db.crud import activate_subscription, update_bypass_subscription, update_vpn_subscription 
 from config import settings
 from services.payment_yookassa import yookassa_service
 from handlers.keyboards import vpn_currency_keyboard, vpn_period_keyboard
@@ -103,34 +103,38 @@ async def successful_payment(message: types.Message):
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
-    days = PERIOD_DAYS.get(period, 0)
-    if days == 0:
-        await message.answer("❌ Неизвестный период.")
+    # Атомарно активируем подписку
+    async with AsyncSessionLocal() as session:
+        try:
+            success = await activate_subscription(
+                session,
+                target_user_id,
+                product_type,
+                period,
+                telegram_payment_id
+            )
+            # activate_subscription сама коммитит, если вызвана внутри session.begin()
+            # но она не начинает транзакцию, поэтому обернём в begin
+            async with session.begin():
+                success = await activate_subscription(
+                    session,
+                    target_user_id,
+                    product_type,
+                    period,
+                    telegram_payment_id
+                )
+        except Exception as e:
+            logger.error(f"Activation error for payment {telegram_payment_id}: {e}", exc_info=True)
+            await message.answer("❌ Ошибка при активации подписки. Обратитесь в поддержку.")
+            return
+
+    if not success:
+        # Может быть, уже обработано
+        await message.answer("✅ Платёж уже обработан.")
         return
 
-    # Одна сессия для проверки дубликата, обновления подписки и логирования платежа
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            # Проверяем дубликат
-            if await is_bot_payment_processed(session, telegram_payment_id):
-                await message.answer("✅ Платёж уже обработан.")
-                return
-
-            # Обновляем подписку
-            if product_type == "vpn":
-                user = await update_vpn_subscription(session, target_user_id, days)
-            elif product_type == "bypass":
-                user = await update_bypass_subscription(session, target_user_id, days)
-            else:
-                await message.answer("❌ Неизвестный продукт.")
-                return
-
-            # Логируем платёж
-            await log_bot_payment(session, telegram_payment_id, target_user_id)
-
-            # session.begin() закоммитит всё
-
-    # После успешного обновления БД создаём ключ (если VPN)
+    # После успешной активации создаём VPN-ключ (если нужно)
+    days = PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
         vpn_manager = get_vpn_manager()
         if vpn_manager:

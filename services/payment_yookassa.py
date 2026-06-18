@@ -9,7 +9,9 @@ from yookassa import Configuration, Payment
 from yookassa.domain.exceptions import ApiError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config import settings
-from db.crud import is_bot_payment_processed, log_bot_payment
+from db.crud import activate_subscription
+from db.base import AsyncSessionLocal
+from sqlalchemy.ext.asyncio import AsyncSession   # <-- добавлен импорт
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +24,13 @@ class YookassaService:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((ApiError, aiohttp.ClientError, asyncio.TimeoutError))
     )
-
     async def create_payment(
         self,
         amount: float,
         description: str,
         metadata: dict
     ) -> Optional[Dict[str, Any]]:
+        # ... (оставляем без изменений) ...
         try:
             return_url = settings.YOOKASSA_RETURN_URL
             if not return_url:
@@ -43,16 +45,13 @@ class YookassaService:
                 "metadata": metadata
             }
 
-            # Уникальный idempotence_key для каждого запроса
             unique_suffix = f"{uuid.uuid4().hex}_{int(time.time() * 1000)}"
             idempotence_key = hashlib.sha256(unique_suffix.encode()).hexdigest()[:50]
 
             payment = await asyncio.to_thread(Payment.create, payment_data, idempotence_key)
 
-            # Если платёж уже успешен (маловероятно из-за уникального ключа), но на всякий случай
             if payment.status == "succeeded":
                 logger.info(f"Payment {payment.id} already succeeded (should not happen with new key)")
-                # Всё равно возвращаем ссылку? Нет, ссылки уже нет. Лучше сообщить об ошибке.
                 return None
 
             if payment.confirmation is None:
@@ -73,7 +72,11 @@ class YookassaService:
             logger.error(f"Error creating payment: {e}", exc_info=True)
             return None
 
-    async def process_webhook(self, webhook_data: Dict[str, Any], bot) -> bool:
+    async def process_webhook(self, webhook_data: Dict[str, Any], session: AsyncSession, bot) -> bool:
+        """
+        Обрабатывает вебхук от ЮKassa.
+        Использует атомарную функцию activate_subscription для гарантии идемпотентности.
+        """
         event = webhook_data.get("event")
         if event != "payment.succeeded":
             logger.info(f"Ignored event: {event}")
@@ -85,9 +88,8 @@ class YookassaService:
             logger.warning("Webhook without payment_id")
             return False
 
-        if await is_bot_payment_processed(payment_id):
-            logger.info(f"Payment {payment_id} already processed")
-            return True
+        # Рекомендуется добавить проверку подписи вебхука (см. документацию ЮKassa)
+        # Здесь можно реализовать проверку заголовка X-Yookassa-Signature
 
         metadata = payment_obj.get("metadata", {})
         source = metadata.get("source")
@@ -102,36 +104,32 @@ class YookassaService:
             logger.error(f"Incomplete metadata: {metadata}")
             return False
 
-        # Вызываем внутреннее API для активации
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(
-                    f"http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}/activate",
-                    json={
-                        "telegram_id": int(telegram_id),
-                        "product_type": product_type,
-                        "period": period,
-                        "payment_id": payment_id
-                    },
-                    headers={"Authorization": f"Bearer {settings.INTERNAL_API_SECRET}"},
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("status") in ("ok", "already_activated"):
-                            await log_bot_payment(payment_id, int(telegram_id))
-                            if bot:
-                                await bot.send_message(
-                                    int(telegram_id),
-                                    "✅ Оплата прошла успешно! Ваша подписка активирована."
-                                )
-                            logger.info(f"Activated for user {telegram_id}, payment {payment_id}")
-                            return True
-                    logger.error(f"Activation failed: HTTP {resp.status}")
-                    return False
-            except Exception as e:
-                logger.error(f"Error calling internal API: {e}")
-                return False
-
+        # Атомарно активируем подписку в переданной сессии
+        try:
+            async with session.begin():
+                success = await activate_subscription(
+                    session,
+                    int(telegram_id),
+                    product_type,
+                    period,
+                    payment_id
+                )
+            if success:
+                logger.info(f"Activated for user {telegram_id}, payment {payment_id}")
+                if bot:
+                    try:
+                        await bot.send_message(
+                            int(telegram_id),
+                            "✅ Оплата прошла успешно! Ваша подписка активирована."
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send notification to {telegram_id}: {e}")
+                return True
+            else:
+                logger.warning(f"Payment {payment_id} already processed, skipping")
+                return True
+        except Exception as e:
+            logger.error(f"Error activating subscription: {e}", exc_info=True)
+            return False
 
 yookassa_service = YookassaService()
