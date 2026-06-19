@@ -412,40 +412,53 @@ async def cmd_grant(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
+
     args = message.text.split()
     if len(args) < 3:
         await message.answer("❗ Используйте: /grant <telegram_id> <days>")
         return
+
     try:
         tid = int(args[1])
         days = int(args[2])
     except ValueError:
         await message.answer("❌ Неверный формат.")
         return
+
     if days <= 0:
         await message.answer("❌ Дни должны быть положительным числом.")
         return
 
-    # Вся операция в одной сессии
+    # Шаг 1: обновляем подписку в БД
     async with AsyncSessionLocal() as session:
         async with session.begin():
             user = await update_vpn_subscription(session, tid, days)
-            # Проверяем, есть ли активный ключ
-            if user.vpn_client_id and user.vpn_subscription_end > datetime.now(timezone.utc):
-                # ключ уже есть – просто продлили
-                end_date = user.vpn_subscription_end.strftime('%d.%m.%Y')
-                await message.answer(f"✅ VPN-подписка для {tid} продлена на {days} дн. до {end_date}. Ключ не изменялся.")
-            else:
-                pass
+            # Сохраняем нужные данные до закрытия сессии
+            has_key = user.vpn_client_id is not None
+            end_date = user.vpn_subscription_end
+            now = datetime.now(timezone.utc)
 
-    # После выхода из сессии создаём ключ (если нужно)
-    if not (user.vpn_client_id and user.vpn_subscription_end > datetime.now(timezone.utc)):
-        manager = get_vpn_manager()
-        link = await manager.create_key(tid, days)
-        if link:
-            await message.answer(f"✅ VPN-подписка для {tid} активирована на {days} дн., ключ: {link}")
-        else:
-            await message.answer(f"✅ VPN-подписка для {tid} активирована, но ключ не создан.")
+            # Если ключ уже существует и подписка активна – просто продлеваем
+            if has_key and end_date > now:
+                end_date_str = end_date.strftime('%d.%m.%Y')
+                await message.answer(
+                    f"✅ VPN-подписка для {tid} продлена на {days} дн. до {end_date_str}. "
+                    "Ключ не изменялся."
+                )
+                return
+
+    # Шаг 2: если ключа не было или он истёк – создаём новый
+    manager = get_vpn_manager()
+    link = await manager.create_key(tid, days)
+    if link:
+        await message.answer(
+            f"✅ VPN-подписка для {tid} активирована на {days} дн., ключ: {link}"
+        )
+    else:
+        await message.answer(
+            f"✅ VPN-подписка для {tid} активирована, но ключ не создан. "
+            "Проверьте доступность серверов."
+        )
 
 # Аналогично revoke – открываем сессию, обновляем поля, затем коммитим.
 @dp.message(Command("revoke"))
