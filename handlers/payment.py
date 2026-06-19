@@ -85,8 +85,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
 async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
-# handlers/payment.py (фрагмент с исправлением)
-
 @router.message(F.successful_payment)
 async def successful_payment(message: types.Message):
     payment = message.successful_payment
@@ -103,18 +101,10 @@ async def successful_payment(message: types.Message):
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
-    # Атомарно активируем подписку
-    async with AsyncSessionLocal() as session:
-        try:
-            success = await activate_subscription(
-                session,
-                target_user_id,
-                product_type,
-                period,
-                telegram_payment_id
-            )
-            # activate_subscription сама коммитит, если вызвана внутри session.begin()
-            # но она не начинает транзакцию, поэтому обернём в begin
+    # Атомарно активируем подписку — только один раз
+    success = False
+    try:
+        async with AsyncSessionLocal() as session:
             async with session.begin():
                 success = await activate_subscription(
                     session,
@@ -123,27 +113,30 @@ async def successful_payment(message: types.Message):
                     period,
                     telegram_payment_id
                 )
-        except Exception as e:
-            logger.error(f"Activation error for payment {telegram_payment_id}: {e}", exc_info=True)
-            await message.answer("❌ Ошибка при активации подписки. Обратитесь в поддержку.")
-            return
+    except Exception as e:
+        logger.exception(f"Activation error for payment {telegram_payment_id}")
+        await message.answer("❌ Ошибка при активации подписки. Обратитесь в поддержку.")
+        return
 
     if not success:
-        # Может быть, уже обработано
         await message.answer("✅ Платёж уже обработан.")
         return
 
-    # После успешной активации создаём VPN-ключ (если нужно)
+    # После активации создаём VPN-ключ (если нужно)
     days = PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
-        vpn_manager = get_vpn_manager()
-        if vpn_manager:
-            link = await vpn_manager.create_key(target_user_id, days)
-            if link:
-                await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
+        try:
+            vpn_manager = get_vpn_manager()
+            if vpn_manager:
+                link = await vpn_manager.create_key(target_user_id, days)
+                if link:
+                    await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
+                else:
+                    await message.answer(f"✅ Подписка активирована, но ключ не создан. Обратитесь в поддержку.")
             else:
-                await message.answer(f"✅ Подписка активирована, но ключ не создан.")
-        else:
-            await message.answer(f"✅ VPN подписка на {days} дней активирована!")
+                await message.answer(f"✅ VPN подписка на {days} дней активирована! (сервис ключей временно недоступен)")
+        except Exception as e:
+            logger.exception(f"Key creation failed for user {target_user_id}")
+            await message.answer(f"✅ Подписка активирована, но произошла ошибка при создании ключа. Мы исправим в ближайшее время.")
     else:
         await message.answer(f"✅ Обход DPI на {days} дней активирован!")

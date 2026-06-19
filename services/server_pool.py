@@ -135,7 +135,7 @@ class ServerPool:
             except asyncio.TimeoutError:
                 logger.error(f"⏱️ Provider {server_id} login timeout")
             except Exception as e:
-                logger.error(f"❌ Provider {server_id} login error: {e}")
+                logger.exception(f"❌ Provider {server_id} login error")
         return provider
 
     async def close_all(self):

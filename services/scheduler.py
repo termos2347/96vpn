@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func
+from aiogram.exceptions import TelegramForbiddenError
 
 from db.base import AsyncSessionLocal
 from db.models import BotUser
@@ -14,14 +15,13 @@ logger = logging.getLogger(__name__)
 
 async def check_expired_subscriptions(bot):
     """Проверяет истёкшие VPN-подписки и отзывает ключи с retry."""
-    retry_count = 3  # количество попыток отзыва ключа при ошибках сети
+    retry_count = 3
 
-    while True:  # бесконечный цикл – задача не должна останавливаться
+    while True:
         try:
             async with AsyncSessionLocal() as session:
                 now = datetime.now(timezone.utc)
 
-                # Находим всех пользователей, у которых подписка истекла, но ключ ещё есть
                 result = await session.execute(
                     select(BotUser).where(
                         BotUser.vpn_subscription_end < now,
@@ -40,40 +40,32 @@ async def check_expired_subscriptions(bot):
                         client_uuid = user.vpn_client_id
                         success = False
 
-                        # Пытаемся отозвать ключ с повторными попытками
                         for attempt in range(retry_count):
                             try:
                                 success = await vpn_manager.revoke_key(user.telegram_id)
                                 if success:
                                     break
                             except Exception as e:
-                                # Сетевые ошибки или ошибки соединения с панелью
                                 logger.warning(
                                     f"Ошибка при отзыве ключа {client_uuid} для user_id={user.telegram_id}, "
                                     f"попытка {attempt+1}/{retry_count}: {e}"
                                 )
                                 if attempt < retry_count - 1:
-                                    await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
-                            # Другие ошибки (не связанные с сетью) – прерываем попытки
-                            except Exception as e:
-                                logger.error(
-                                    f"Неожиданная ошибка при отзыве ключа {client_uuid}, попытка {attempt+1}: {e}"
-                                )
-                                break
-
+                                    await asyncio.sleep(2 ** attempt)
+                                # Если не сетевые ошибки, можно выйти из цикла, но мы просто продолжаем
                         if success:
-                            # revoke_key уже обнулил client_id и server_id внутри, но для надёжности делаем это явно
                             user.vpn_client_id = None
                             user.server_id = None
                             await session.commit()
                             logger.info(f"Ключ {client_uuid} отозван для user_id={user.telegram_id}")
 
-                            # Уведомляем пользователя в Telegram
                             try:
                                 await bot.send_message(
                                     user.telegram_id,
                                     "❌ Ваша VPN-подписка истекла. Для продления перейдите в раздел оплаты."
                                 )
+                            except TelegramForbiddenError:
+                                logger.info(f"User {user.telegram_id} blocked the bot, skipping notification")
                             except Exception as e:
                                 logger.error(f"Не удалось отправить уведомление пользователю {user.telegram_id}: {e}")
                         else:
@@ -85,20 +77,14 @@ async def check_expired_subscriptions(bot):
                                 f"Не удалось отозвать ключ {client_uuid} для user_id={user.telegram_id}"
                             )
 
-            # Пауза до следующей проверки (1 час)
             await asyncio.sleep(3600)
 
         except asyncio.CancelledError:
-            # Задача отменяется – корректно завершаем работу
             logger.info("Task check_expired_subscriptions cancelled")
-            raise  # пробрасываем, чтобы задача завершилась
-
+            raise
         except Exception as e:
-            # Любая другая критическая ошибка (например, потеря соединения с БД)
             logger.error(f"Критическая ошибка в задаче проверки подписок: {e}", exc_info=True)
             await send_admin_alert(f"Критическая ошибка в задаче проверки подписок: {e}")
-
-            # Ждём минуту перед повторной попыткой, чтобы не зациклиться на временной проблеме
             await asyncio.sleep(60)
 
 async def send_expiry_reminders(bot):
@@ -136,6 +122,9 @@ async def send_expiry_reminders(bot):
                                 )
                                 message_sent = True
                                 break
+                            except TelegramForbiddenError:
+                                logger.info(f"User {user.telegram_id} blocked the bot, skipping reminders")
+                                break  # не пытаемся больше отправлять этому пользователю
                             except Exception as e:
                                 logger.warning(f"Не удалось отправить напоминание пользователю {user.telegram_id}, attempt {attempt+1}: {e}")
                                 if attempt < 2:
@@ -153,7 +142,7 @@ async def send_expiry_reminders(bot):
             except Exception as e:
                 logger.error(f"Ошибка в задаче напоминаний: {e}", exc_info=True)
 
-            await asyncio.sleep(3600)  # раз в час
+            await asyncio.sleep(3600)
     except asyncio.CancelledError:
         logger.info("Task send_expiry_reminders cancelled")
         raise

@@ -1,8 +1,9 @@
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-from db.base import AsyncSessionLocal
+from unittest.mock import AsyncMock
+from aiogram import Bot
 
-@pytest.fixture(scope="session")
-async def async_session() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        yield session
+@pytest.fixture
+def bot():
+    bot = AsyncMock(spec=Bot)
+    bot.send_message = AsyncMock()
+    return bot

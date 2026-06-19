@@ -99,6 +99,10 @@ async def handle_activation(request):
 async def yookassa_webhook(request):
     try:
         data = await request.json()
+        # Проверяем, что _main_bot инициализирован
+        if _main_bot is None:
+            logger.error("Main bot not set, cannot process yookassa webhook")
+            return web.json_response({"error": "main bot not ready"}, status=503)
         async with AsyncSessionLocal() as session:
             success = await yookassa_service.process_webhook(data, session, _main_bot)
         if success:

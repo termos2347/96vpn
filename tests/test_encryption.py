@@ -16,5 +16,4 @@ def test_empty():
 
 def test_plain_text_auto_decrypt():
     plain = "not_encrypted"
-    # При вызове decrypt_password с незашифрованной строкой вернёт её как есть
     assert decrypt_password(plain) == plain

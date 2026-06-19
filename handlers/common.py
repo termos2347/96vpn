@@ -33,7 +33,6 @@ async def cmd_start(message: types.Message):
 
         validate_user_id(user_id)
         
-        # Создаём сессию и передаём её в функцию
         async with AsyncSessionLocal() as session:
             await get_or_create_bot_user(session, user_id, username)
 
@@ -89,15 +88,21 @@ async def info(message: types.Message):
             set_cache(cache_key_vpn, vpn_active, 300)
             set_cache(cache_key_bypass, bypass_active, 300)
 
+        # Получаем количество дней (отдельно, с обработкой ошибок)
+        vpn_status = ""
         if vpn_active:
-            async with AsyncSessionLocal() as session:
-                stmt = select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == user_id)
-                end = (await session.execute(stmt)).scalar()
-                if end and end > datetime.now(timezone.utc):
-                    days_left = (end - datetime.now(timezone.utc)).days
-                    vpn_status = f"✅ активна, осталось {days_left} дн."
-                else:
-                    vpn_status = "✅ активна"
+            try:
+                async with AsyncSessionLocal() as session:
+                    stmt = select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == user_id)
+                    end = (await session.execute(stmt)).scalar()
+                    if end and end > datetime.now(timezone.utc):
+                        days_left = (end - datetime.now(timezone.utc)).days
+                        vpn_status = f"✅ активна, осталось {days_left} дн."
+                    else:
+                        vpn_status = "✅ активна"
+            except Exception as e:
+                logger.exception(f"DB error in info for user {user_id}")
+                vpn_status = "✅ активна (ошибка получения срока)"
         else:
             vpn_status = "❌ не активна"
 
@@ -120,5 +125,5 @@ async def info(message: types.Message):
         logger.warning(f"Validation error in info: {e}")
         await message.answer("❌ Ошибка при получении информации.")
     except Exception as e:
-        logger.error(f"Exception in info: {e}", exc_info=True)
+        logger.exception(f"Exception in info: {e}")
         await message.answer("❌ Произошла ошибка при получении информации.")

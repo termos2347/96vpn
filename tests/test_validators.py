@@ -1,5 +1,11 @@
 import pytest
-from utils.validators import validate_user_id, validate_email, validate_days, validate_currency, ValidationError
+from utils.validators import (
+    validate_user_id,
+    validate_days,
+    validate_currency,
+    validate_uuid,
+    ValidationError
+)
 
 def test_validate_user_id():
     assert validate_user_id(123)
@@ -15,3 +21,8 @@ def test_validate_currency():
     assert validate_currency("rub")
     with pytest.raises(ValidationError):
         validate_currency("eur")
+
+def test_validate_uuid():
+    assert validate_uuid("123e4567-e89b-12d3-a456-426614174000")
+    with pytest.raises(ValidationError):
+        validate_uuid("invalid-uuid")

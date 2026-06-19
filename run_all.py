@@ -25,6 +25,15 @@ try:
 except ImportError:
     HAS_PYFIGLET = False
 
+# Глобальный обработчик для необработанных исключений в asyncio
+def handle_asyncio_exception(loop, context):
+    logger = logging.getLogger(__name__)
+    logger.error(f"Asyncio exception: {context.get('message')}")
+    exception = context.get('exception')
+    if exception:
+        logger.exception("Exception details", exc_info=exception)
+    # Можно отправить в Sentry, если настроен
+
 setup_logger()
 logger = logging.getLogger(__name__)
 
@@ -245,6 +254,9 @@ async def main():
         stop_event.set()
 
     loop = asyncio.get_running_loop()
+    # Устанавливаем глобальный обработчик для необработанных исключений в asyncio
+    loop.set_exception_handler(handle_asyncio_exception)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
 
