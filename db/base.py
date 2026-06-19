@@ -4,60 +4,57 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from config import DATABASE_URL
 from .models import Base
 
-is_sqlite = 'sqlite' in DATABASE_URL
-
-def _split_db_url(url: str):
-    parsed = urlparse(url)
-    return parsed, dict(parse_qs(parsed.query))
-
-# --- Асинхронный движок (бот и веб) ---
+# --- Асинхронный движок для PostgreSQL ---
 if DATABASE_URL:
-    if is_sqlite:
-        # для SQLite настройки проще
-        async_db_url = DATABASE_URL.replace('sqlite:///', 'sqlite+aiosqlite:///')
-        engine = create_async_engine(
-            async_db_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_recycle=600,
-            pool_size=10,
-            max_overflow=20,
-        )
-    else:
-        parsed, qs = _split_db_url(DATABASE_URL)
-        qs.pop('channel_binding', None)
-        new_query = urlencode(qs, doseq=True)
-        async_db_url = urlunparse(parsed._replace(
-            scheme='postgresql+asyncpg',
-            query=new_query
-        ))
-        engine = create_async_engine(
-            async_db_url,
-            echo=False,
-            pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=10,
-            pool_timeout=30,
-            pool_recycle=300,
-            pool_use_lifo=True,
-            connect_args={
-                "timeout": 10,
-                "command_timeout": 60,
-                "server_settings": {"application_name": "96vpn_bot"}
-            }
-        )
+    parsed = urlparse(DATABASE_URL)
+    query_params = parse_qs(parsed.query)
+
+    # Удаляем несовместимые с asyncpg параметры (если они есть)
+    query_params.pop('channel_binding', None)
+    # Если параметр sslmode указан, asyncpg его поддерживает, оставляем.
+    # Но для чистоты можно оставить как есть.
+
+    new_query = urlencode(query_params, doseq=True)
+    async_db_url = urlunparse(parsed._replace(
+        scheme='postgresql+asyncpg',
+        query=new_query
+    ))
+
+    engine = create_async_engine(
+        async_db_url,
+        echo=False,                     # В продакшне отключаем логи SQL
+        pool_pre_ping=True,             # Проверка соединения перед использованием
+        pool_size=5,                    # Размер пула соединений
+        max_overflow=10,                # Дополнительные соединения при пиковой нагрузке
+        pool_timeout=30,                # Таймаут ожидания соединения из пула
+        pool_recycle=300,               # Пересоздавать соединения через 5 минут
+        pool_use_lifo=True,             # Использовать LIFO для лучшей производительности
+        connect_args={
+            "timeout": 10,              # Таймаут подключения
+            "command_timeout": 60,      # Таймаут выполнения запроса
+            "server_settings": {"application_name": "96vpn_bot"}
+        }
+    )
 else:
     engine = None
+    raise RuntimeError("DATABASE_URL must be set in environment")
 
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession) if engine else None
+# Фабрика сессий
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+    class_=AsyncSession
+)
 
 async def init_db():
-    if not engine:
+    """Создаёт таблицы (если их нет) – используется только при разработке."""
+    if engine is None:
         return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 async def get_async_db():
+    """Генератор сессии для внедрения зависимостей (если нужно)."""
     async with AsyncSessionLocal() as session:
         try:
             yield session
