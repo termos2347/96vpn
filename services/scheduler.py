@@ -52,11 +52,10 @@ async def check_expired_subscriptions(bot):
                                 )
                                 if attempt < retry_count - 1:
                                     await asyncio.sleep(2 ** attempt)
-                                # Если не сетевые ошибки, можно выйти из цикла, но мы просто продолжаем
+
                         if success:
-                            user.vpn_client_id = None
-                            user.server_id = None
-                            await session.commit()
+                            # ✅ Поля vpn_client_id и server_id уже обнулены внутри revoke_key,
+                            # дополнительных операций с БД не требуется.
                             logger.info(f"Ключ {client_uuid} отозван для user_id={user.telegram_id}")
 
                             try:

@@ -5,6 +5,7 @@ import asyncio
 import aiohttp
 from typing import Optional, Dict, Any, Set
 from dotenv import load_dotenv
+from config import settings
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class XUIVPNProvider:
                     await self._session.close()
                 
                 connector = aiohttp.TCPConnector(
-                    ssl=False,
+                    ssl=settings.VERIFY_SSL, 
                     limit=100,
                     force_close=True  # Закрывать соединения после каждого запроса
                 )

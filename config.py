@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # ---------- Database ----------
     DATABASE_URL: str
+    
+    # ---------- 3X-UI ----------
+    VERIFY_SSL: bool = True
 
     # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str
