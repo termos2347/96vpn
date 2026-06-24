@@ -2,50 +2,51 @@ import logging
 from datetime import datetime, timezone
 from aiohttp import web
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 
 from config import INTERNAL_API_SECRET, settings
-from db.crud import (
-    activate_subscription,
-    update_vpn_subscription,
-    update_bypass_subscription,
-)
-from db.models import BotPayment
+from db.crud import activate_subscription
 from db.base import AsyncSessionLocal
 from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
-from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
-# ------------------------------------------------------------------
-# Глобальные переменные для вебхуков (устанавливаются из run_all.py)
-# ------------------------------------------------------------------
+# Официальные IP-адреса ЮKassa для проверки вебхуков
+YOOKASSA_IPS = {
+    "185.71.76.0/24",
+    "185.71.77.0/24",
+    "77.75.153.0/25",
+    "77.75.156.11",
+    "77.75.156.35",
+    "77.75.154.128/25",
+    "2a02:5180::/32"
+}
+
 _main_bot = None
 _main_dp = None
 _admin_bot = None
 _admin_dp = None
 
-def set_main_bot(bot):
-    global _main_bot
-    _main_bot = bot
+def set_main_bot(bot): global _main_bot; _main_bot = bot
+def set_main_dp(dp): global _main_dp; _main_dp = dp
+def set_admin_bot(bot): global _admin_bot; _admin_bot = bot
+def set_admin_dp(dp): global _admin_dp; _admin_dp = dp
 
-def set_main_dp(dp):
-    global _main_dp
-    _main_dp = dp
+def ip_in_network(ip: str, networks: set) -> bool:
+    """Простая утилита для проверки вхождения IP в подсети ЮKassa"""
+    import ipaddress
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+        for net in networks:
+            if "/" in net:
+                if ip_obj in ipaddress.ip_network(net): return True
+            else:
+                if ip_obj == ipaddress.ip_address(net): return True
+    except Exception as e:
+        logger.error(f"IP validation error: {e}")
+    return False
 
-def set_admin_bot(bot):
-    global _admin_bot
-    _admin_bot = bot
-
-def set_admin_dp(dp):
-    global _admin_dp
-    _admin_dp = dp
-
-# ------------------------------------------------------------------
-# Внутренний эндпоинт для активации подписки (бот -> сайт)
-# ------------------------------------------------------------------
 async def handle_activation(request):
     auth = request.headers.get("Authorization")
     if not auth or auth != f"Bearer {INTERNAL_API_SECRET}":
@@ -72,7 +73,6 @@ async def handle_activation(request):
                     session, telegram_id, product_type, period, payment_id
                 )
         if success:
-            # После коммита создаём VPN-ключ (если нужно)
             if product_type == "vpn":
                 vpn_manager = get_vpn_manager()
                 if vpn_manager:
@@ -87,40 +87,41 @@ async def handle_activation(request):
                         except Exception as e:
                             logger.error(f"Failed to send link to user {telegram_id}: {e}")
             return web.json_response({"status": "ok"})
-        else:
-            return web.json_response({"status": "already_activated"}, status=200)
+        return web.json_response({"status": "already_activated"}, status=200)
     except Exception as e:
         logger.error(f"Activation error: {e}", exc_info=True)
         return web.json_response({"status": "error"}, status=500)
 
-# ------------------------------------------------------------------
-# Вебхук ЮKassa
-# ------------------------------------------------------------------
 async def yookassa_webhook(request):
+    # 1. Проверяем IP источника (учитываем Nginx прокси через X-Forwarded-For)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.remote
+
+    if not client_ip or not ip_in_network(client_ip, YOOKASSA_IPS):
+        logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
+        return web.json_response({"error": "forbidden"}, status=403)
+
     try:
         data = await request.json()
-        # Проверяем, что _main_bot инициализирован
         if _main_bot is None:
             logger.error("Main bot not set, cannot process yookassa webhook")
             return web.json_response({"error": "main bot not ready"}, status=503)
+        
+        # Передаем обработку сервису (внутри будет Double-Check запрос к API ЮKassa)
         async with AsyncSessionLocal() as session:
             success = await yookassa_service.process_webhook(data, session, _main_bot)
+            
         if success:
             return web.json_response({"status": "ok"})
-        else:
-            return web.json_response({"status": "error"}, status=500)
+        return web.json_response({"status": "error"}, status=400)
     except Exception as e:
         logger.error(f"Yookassa webhook error: {e}", exc_info=True)
         return web.json_response({"status": "error"}, status=500)
 
-# ------------------------------------------------------------------
-# Вебхук основного Telegram бота
-# ------------------------------------------------------------------
 async def telegram_webhook(request):
     if _main_bot is None or _main_dp is None:
         return web.json_response({"error": "main bot not ready"}, status=503)
 
-    # Проверка секретного токена
     if settings.WEBHOOK_SECRET:
         secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
         if secret != settings.WEBHOOK_SECRET:
@@ -136,9 +137,6 @@ async def telegram_webhook(request):
         logger.error(f"Main bot webhook error: {e}", exc_info=True)
         return web.json_response({"status": "error"}, status=500)
 
-# ------------------------------------------------------------------
-# Вебхук административного Telegram бота
-# ------------------------------------------------------------------
 async def admin_telegram_webhook(request):
     if _admin_bot is None or _admin_dp is None:
         return web.json_response({"error": "admin bot not ready"}, status=503)
@@ -158,9 +156,6 @@ async def admin_telegram_webhook(request):
         logger.error(f"Admin bot webhook error: {e}", exc_info=True)
         return web.json_response({"status": "error"}, status=500)
 
-# ------------------------------------------------------------------
-# Создание aiohttp приложения
-# ------------------------------------------------------------------
 def create_internal_app():
     app = web.Application()
     app.router.add_post('/activate', handle_activation)

@@ -111,41 +111,19 @@ async def activate_subscription(
     telegram_id: int,
     product_type: str,
     period: str,
-    payment_id: Optional[str] = None
+    payment_id: Optional[str] = None   # оставляем для совместимости, но не используем
 ) -> bool:
     """
-    Атомарно активирует подписку (vpn/bypass) и записывает платёж.
-    Возвращает True, если активация произведена или уже была.
-    При наличии payment_id обеспечивает идемпотентность через уникальное ограничение.
+    Атомарно активирует подписку (vpn/bypass) для пользователя.
+    Не занимается платежами – только обновляет дату окончания.
     """
     days = PERIOD_DAYS.get(period)
     if not days:
         raise ValueError(f"Unknown period: {period}")
 
-    # Если передан payment_id, пытаемся вставить запись о платеже
-    if payment_id:
-        stmt = insert(BotPayment).values(
-            payment_id=payment_id,
-            telegram_id=telegram_id,
-            created_at=datetime.now(timezone.utc)
-        ).on_conflict_do_nothing()  # для PostgreSQL
-        result = await session.execute(stmt)
-        # Если affected_rows == 0, значит запись уже существует
-        if result.rowcount == 0:
-            # Проверяем, что платёж действительно существует и принадлежит этому пользователю
-            existing = await session.execute(
-                select(BotPayment).where(BotPayment.payment_id == payment_id)
-            )
-            if existing.scalar():
-                # Уже обработано – считаем успехом
-                return True
-            else:
-                # Странный случай, но лучше считать успехом, чтобы избежать ошибок
-                return True
-
-    # Обновляем подписку
     user = await get_or_create_bot_user(session, telegram_id)
     now = datetime.now(timezone.utc)
+
     if product_type == "vpn":
         if user.vpn_subscription_end and user.vpn_subscription_end > now:
             user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
@@ -160,7 +138,7 @@ async def activate_subscription(
         raise ValueError(f"Unknown product: {product_type}")
 
     user.updated_at = now
-    await session.flush()
+    # Изменения закоммитятся вызывающим кодом (process_webhook)
     return True
 
 # ---------- Вспомогательные функции для проверки ----------

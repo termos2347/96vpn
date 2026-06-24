@@ -1,9 +1,13 @@
 import logging
+import uuid
 from datetime import datetime, timezone
 from aiogram import Router, F, types
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from sqlalchemy import select
+
 from db.base import AsyncSessionLocal
+from db.models import BotPayment  # Импортируем обновленную модель
 from db.crud import activate_subscription, update_bypass_subscription, update_vpn_subscription 
 from config import settings
 from services.payment_yookassa import yookassa_service
@@ -51,34 +55,77 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
     price = settings.VPN_PRICES[currency][period]
     description = f"VPN подписка {period} ({currency})"
 
-    metadata = {
-        "source": "bot",
-        "telegram_id": user_id,
-        "product_type": "vpn",
-        "period": period,
-        "currency": currency
-    }
-    payment = await yookassa_service.create_payment(price, description, metadata)
-    if not payment:
-        await callback.answer("❌ Ошибка создания платежа", show_alert=True)
-        return
+    # ЮKassa работает только с RUB официально. 
+    # Если валюта не RUB, обработка должна идти через другие шлюзы, но для ЮKassa жестко пишем RUB/валюту сверки
+    db_currency = currency.upper()
 
-    url = payment.get("confirmation_url")
-    if not url:
-        await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
-        return
+    # 1. Защита: Генерируем временный ID для предварительной записи в БД
+    local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", url=url)]
-    ])
-    await callback.message.delete()
-    await callback.message.answer(
-        f"💳 Ссылка для оплаты VPN ({period}, {price} {currency}):\n\n"
-        f"После оплаты подписка активируется автоматически.\n"
-        f"Если вы уже оплачивали ранее, новая подписка добавится к текущей.",
-        reply_markup=kb
-    )
-    await callback.answer()
+    try:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                new_payment = BotPayment(
+                    payment_id=local_tx_id,
+                    telegram_id=user_id,
+                    amount=price,
+                    currency=db_currency,
+                    status="pending",
+                    is_paid=False
+                )
+                session.add(new_payment)
+        
+        # 2. Формируем метаданные для ЮKassa
+        metadata = {
+            "source": "bot",
+            "telegram_id": user_id,
+            "product_type": "vpn",
+            "period": period,
+            "currency": db_currency
+        }
+
+        # 3. Запрашиваем платежную ссылку у ЮKassa
+        payment = await yookassa_service.create_payment(price, description, metadata)
+        if not payment:
+            await callback.answer("❌ Ошибка создания платежа в платежной системе", show_alert=True)
+            return
+
+        yookassa_id = payment.get("payment_id")
+        url = payment.get("confirmation_url")
+
+        if not url or not yookassa_id:
+            await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
+            return
+
+        # 4. Защита: Обновляем временный ID на реальный payment_id от ЮKassa
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                stmt = select(BotPayment).where(BotPayment.payment_id == local_tx_id)
+                res = await session.execute(stmt)
+                db_payment = res.scalar_one_or_none()
+                if db_payment:
+                    db_payment.payment_id = yookassa_id
+                else:
+                    logger.error(f"Critical: Local payment log {local_tx_id} vanished during API request!")
+                    await callback.answer("❌ Системная ошибка. Попробуйте заново.", show_alert=True)
+                    return
+
+        # 5. Выдаем ссылку пользователю
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", url=url)]
+        ])
+        await callback.message.delete()
+        await callback.message.answer(
+            f"💳 Ссылка для оплаты VPN ({period}, {price} {currency.upper()}):\n\n"
+            f"После оплаты подписка активируется автоматически.\n"
+            f"Если вы уже оплачивали ранее, новая подписка добавится к текущей.",
+            reply_markup=kb
+        )
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Error in vpn_payment_rub_usdt chain: {e}", exc_info=True)
+        await callback.answer("❌ Произошла внутренняя ошибка сервера", show_alert=True)
 
 # ---------- Оплата через Telegram Stars ----------
 @router.pre_checkout_query()
@@ -101,7 +148,6 @@ async def successful_payment(message: types.Message):
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
-    # Атомарно активируем подписку — только один раз
     success = False
     try:
         async with AsyncSessionLocal() as session:
@@ -122,7 +168,6 @@ async def successful_payment(message: types.Message):
         await message.answer("✅ Платёж уже обработан.")
         return
 
-    # После активации создаём VPN-ключ (если нужно)
     days = PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
         try:
