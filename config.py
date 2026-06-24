@@ -54,7 +54,12 @@ class Settings(BaseSettings):
     # ---------- Часовой пояс ----------
     TIMEZONE: str = "UTC"
     
-    MAX_BROADCAST_FILE_SIZE_MB: int = 20  #МБ
+    MAX_BROADCAST_FILE_SIZE_MB: int = 20
+
+    # ---------- Периоды подписок (дни) ----------
+    PERIOD_DAYS_1M: int = 30
+    PERIOD_DAYS_3M: int = 90
+    PERIOD_DAYS_6M: int = 180
 
     # ---------- Цены ----------
     VPN_PRICE_RUB_1M: float = 199.0
@@ -75,7 +80,7 @@ class Settings(BaseSettings):
     BYPASS_PRICE_USDT_1M: float = 2.0
     BYPASS_PRICE_USDT_3M: float = 4.5
 
-    # ---------- Внутренний API (бот ↔ сайт) ----------
+    # ---------- Внутренний API ----------
     INTERNAL_API_SECRET: str
     INTERNAL_API_HOST: str = "0.0.0.0"
     INTERNAL_API_PORT: int = 5001
@@ -95,6 +100,14 @@ class Settings(BaseSettings):
             "rub": {"1m": self.BYPASS_PRICE_RUB_1M, "3m": self.BYPASS_PRICE_RUB_3M},
             "stars": {"1m": self.BYPASS_PRICE_STARS_1M, "3m": self.BYPASS_PRICE_STARS_3M},
             "usdt": {"1m": self.BYPASS_PRICE_USDT_1M, "3m": self.BYPASS_PRICE_USDT_3M},
+        }
+
+    @property
+    def PERIOD_DAYS(self) -> dict:
+        return {
+            "1m": self.PERIOD_DAYS_1M,
+            "3m": self.PERIOD_DAYS_3M,
+            "6m": self.PERIOD_DAYS_6M,
         }
 
 settings = Settings()

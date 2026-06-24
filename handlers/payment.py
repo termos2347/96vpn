@@ -15,10 +15,10 @@ from handlers.keyboards import vpn_currency_keyboard, vpn_period_keyboard
 from utils.decorators import rate_limit
 from utils.validators import validate_user_id, validate_currency, ValidationError
 from handlers import get_vpn_manager
+from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 router = Router()
-PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 # ---------- Оплата через ЮKassa (RUB, USDT) ----------
 @router.message(F.text == "💳 Оплатить VPN")
@@ -168,7 +168,7 @@ async def successful_payment(message: types.Message):
         await message.answer("✅ Платёж уже обработан.")
         return
 
-    days = PERIOD_DAYS.get(period, 0)
+    days = settings.PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
         try:
             vpn_manager = get_vpn_manager()
@@ -177,11 +177,25 @@ async def successful_payment(message: types.Message):
                 if link:
                     await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
                 else:
-                    await message.answer(f"✅ Подписка активирована, но ключ не создан. Обратитесь в поддержку.")
+                    # Ключ не создан – уведомляем пользователя и админа
+                    await message.answer(
+                        "✅ Ваша VPN-подписка активирована, но не удалось создать ключ автоматически.\n"
+                        "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту – ключ будет создан.\n"
+                        "Если проблема сохраняется, обратитесь в поддержку."
+                    )
+                    await send_admin_alert(
+                        f"⚠️ Не удалось создать VPN-ключ для пользователя {target_user_id} после оплаты Stars (payment {telegram_payment_id})"
+                    )
             else:
                 await message.answer(f"✅ VPN подписка на {days} дней активирована! (сервис ключей временно недоступен)")
         except Exception as e:
             logger.exception(f"Key creation failed for user {target_user_id}")
-            await message.answer(f"✅ Подписка активирована, но произошла ошибка при создании ключа. Мы исправим в ближайшее время.")
+            await message.answer(
+                "✅ Подписка активирована, но произошла ошибка при создании ключа.\n"
+                "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту."
+            )
+            await send_admin_alert(
+                f"❌ Критическая ошибка при создании ключа для {target_user_id} после оплаты Stars: {e}"
+            )
     else:
         await message.answer(f"✅ Обход DPI на {days} дней активирован!")

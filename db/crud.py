@@ -1,15 +1,13 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from sqlalchemy import select, insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import AsyncSessionLocal
 from db.models import BotUser, BotPayment
+from config import settings
 
 logger = logging.getLogger(__name__)
-
-# Константа для преобразования периода в дни
-PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 # ---------- BotUser ----------
 async def get_or_create_bot_user(
@@ -117,7 +115,7 @@ async def activate_subscription(
     Атомарно активирует подписку (vpn/bypass) для пользователя.
     Не занимается платежами – только обновляет дату окончания.
     """
-    days = PERIOD_DAYS.get(period)
+    days = settings.PERIOD_DAYS.get(period)
     if not days:
         raise ValueError(f"Unknown period: {period}")
 

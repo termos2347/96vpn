@@ -14,6 +14,9 @@ from db.models import BotPayment  # Импортируем модель плат
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from handlers import get_vpn_manager
+from admin import send_admin_alert
+
 logger = logging.getLogger(__name__)
 
 class YookassaService:
@@ -82,7 +85,7 @@ class YookassaService:
             try:
                 verified_payment = await loop.run_in_executor(
                     None,
-                    lambda: Payment.find_one(payment_id)   # <--- ИСПРАВЛЕНО find → find_one
+                    lambda: Payment.find_one(payment_id)
                 )
             except Exception as api_err:
                 logger.error(f"Double-Check failed. Can't find payment {payment_id} via API: {api_err}")
@@ -130,36 +133,61 @@ class YookassaService:
                     await session.commit()
                     logger.info(f"Successfully activated subscription for user {telegram_id} via secure webhook.")
 
-                    # ----- СОЗДАНИЕ КЛЮЧА И ОТПРАВКА ССЫЛКИ -----
+                    # ----- СОЗДАНИЕ КЛЮЧА И ОТПРАВКА ССЫЛКИ (с обработкой ошибок) -----
                     if product_type == "vpn":
-                        from handlers import get_vpn_manager
-                        from config import VPN_PRICES  # или свои PERIOD_DAYS
-                        # Определяем дни из периода
-                        period_days = {"1m": 30, "3m": 90, "6m": 180}
-                        days = period_days.get(period, 30)
-                        vpn_manager = get_vpn_manager()
-                        if vpn_manager:
-                            try:
-                                link = await vpn_manager.create_key(int(telegram_id), days)
-                                if link and bot:
+                        try:
+                            # Получаем пользователя из БД (сессия уже открыта)
+                            from db.models import BotUser
+                            stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id)
+                            user = (await session.execute(stmt_user)).scalar_one_or_none()
+                            if not user:
+                                logger.error(f"User {telegram_id} not found after activation")
+                                return False
+
+                            days = settings.PERIOD_DAYS.get(period, 30)
+                            vpn_manager = get_vpn_manager()
+                            link = await vpn_manager.create_key(int(telegram_id), days)
+
+                            if link and bot:
+                                await bot.send_message(
+                                    telegram_id,
+                                    f"✅ VPN подписка активирована на {days} дней!\n\n"
+                                    f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
+                                    f"Скопируйте ссылку и вставьте в VPN-приложение.",
+                                    parse_mode="Markdown"
+                                )
+                                logger.info(f"VPN link sent to user {telegram_id}")
+                            else:
+                                # Ключ не создан – уведомляем пользователя и админа
+                                error_msg = (
+                                    "✅ Ваша VPN-подписка активирована, но не удалось создать ключ автоматически.\n"
+                                    "Пожалуйста, через пару минут нажмите кнопку «🚀 Подключить VPN» — "
+                                    "ключ будет создан повторно.\n"
+                                    "Если проблема сохраняется, обратитесь в поддержку."
+                                )
+                                if bot:
+                                    await bot.send_message(telegram_id, error_msg)
+                                else:
+                                    logger.error("Bot instance is None, cannot send error message to user")
+
+                                alert_msg = f"⚠️ Не удалось создать VPN-ключ для пользователя {telegram_id} после успешной оплаты (payment {payment_id}). Пользователь уведомлён, требуется контроль."
+                                await send_admin_alert(alert_msg)
+                                logger.error(f"Failed to create VPN key for user {telegram_id} after payment {payment_id}")
+                        except Exception as e:
+                            logger.exception(f"Error creating VPN key for user {telegram_id}: {e}")
+                            await send_admin_alert(f"❌ Критическая ошибка при создании ключа для {telegram_id} после оплаты: {e}")
+                            # Пользователю можно отправить общее сообщение, чтобы он не ждал
+                            if bot:
+                                try:
                                     await bot.send_message(
                                         telegram_id,
-                                        f"✅ VPN подписка активирована на {days} дней!\n\n"
-                                        f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
-                                        f"Скопируйте ссылку и вставьте в VPN-приложение.",
-                                        parse_mode="Markdown"
+                                        "✅ Ваша VPN-подписка активирована, но произошла техническая ошибка.\n"
+                                        "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту – ключ будет создан.\n"
+                                        "Приносим извинения за неудобства."
                                     )
-                                    logger.info(f"VPN link sent to user {telegram_id}")
-                                elif link:
-                                    logger.warning(f"Bot instance is None, cannot send link to user {telegram_id}")
-                                else:
-                                    logger.error(f"Failed to create VPN key for user {telegram_id} after payment {payment_id}")
-                                    # Можно отправить администратору уведомление
-                            except Exception as e:
-                                logger.exception(f"Error creating VPN key for user {telegram_id}: {e}")
-                        else:
-                            logger.error("VPNManager not available, cannot create key")
-                    # Если bypass – аналогичная логика
+                                except Exception:
+                                    pass
+                    # Если bypass – аналогичная логика может быть добавлена позже
                     return True
                 else:
                     logger.warning(f"activate_subscription returned False for user {telegram_id}, payment {payment_id}")

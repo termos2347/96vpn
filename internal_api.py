@@ -10,7 +10,6 @@ from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
 
 logger = logging.getLogger(__name__)
-PERIOD_DAYS = {"1m": 30, "3m": 90, "6m": 180}
 
 # Официальные IP-адреса ЮKassa для проверки вебхуков
 YOOKASSA_IPS = {
@@ -76,7 +75,7 @@ async def handle_activation(request):
             if product_type == "vpn":
                 vpn_manager = get_vpn_manager()
                 if vpn_manager:
-                    days = PERIOD_DAYS[period]
+                    days = settings.PERIOD_DAYS[period]
                     link = await vpn_manager.create_key(telegram_id, days)
                     if link and _main_bot:
                         try:
