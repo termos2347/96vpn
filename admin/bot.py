@@ -16,8 +16,8 @@ from handlers import get_vpn_manager
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
 from db.crud import (
-    get_or_create_bot_user, get_user_vpn_data, set_vpn_client_id,
-    is_vpn_active, get_vpn_client_id, update_vpn_subscription
+    get_or_create_bot_user, get_user_by_telegram_id, set_vpn_client_id,
+    is_vpn_active, get_vpn_client_id, update_vpn_subscription, get_user_full_data
 )
 from services.vpn_manager import VPNManager
 from .servers import router as servers_router
@@ -366,9 +366,12 @@ async def stop_broadcast(callback: types.CallbackQuery):
 # ---------- Управление пользователями ----------
 @dp.message(Command("userinfo"))
 async def cmd_userinfo(message: types.Message):
+    # Проверка прав администратора
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
+
+    # Разбор аргументов
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❗ Используйте: /userinfo <telegram_id>")
@@ -379,88 +382,93 @@ async def cmd_userinfo(message: types.Message):
         await message.answer("❌ Неверный формат telegram_id.")
         return
 
-    data = await get_user_vpn_data(tid)
+    # Получение данных пользователя
+    data = await get_user_full_data(tid)
     if not data:
-        await message.answer("❌ Пользователь не найден.")
+        await message.answer(f"❌ Пользователь с ID {tid} не найден.")
         return
 
+    # Расчёт оставшихся дней
     now = datetime.now(timezone.utc)
     vpn_end = data["vpn_subscription_end"]
     bypass_end = data["bypass_subscription_end"]
+
     vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
     bypass_left = (bypass_end - now).days if bypass_end and bypass_end > now else 0
     vpn_active = vpn_left > 0
     bypass_active = bypass_left > 0
-    vpn_key = data["vpn_client_id"] or "не создан"
 
+    # Форматирование дат
+    vpn_end_str = vpn_end.strftime('%d.%m.%Y %H:%M') if vpn_end else "—"
+    bypass_end_str = bypass_end.strftime('%d.%m.%Y %H:%M') if bypass_end else "—"
+    created_str = data["created_at"].strftime('%d.%m.%Y %H:%M') if data["created_at"] else "—"
+
+    vpn_key = data["vpn_client_id"] or "не создан"
+    server_id = data["server_id"] or "—"
+
+    # Формирование ответа
     text = (
-        f"👤 Пользователь: {tid}\n"
-        f"🔹 Username: ... (можно получить отдельно, если нужно)\n"
-        f"📧 Email: ...\n\n"
-        f"🚀 VPN-подписка: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
-        f"   Окончание: {vpn_end.strftime('%d.%m.%Y') if vpn_end else '—'}\n"
+        f"👤 **Пользователь**: {tid}\n"
+        f"🔹 **Username**: @{data['username'] or '—'}\n"
+        f"📧 **Email**: {data['email'] or '—'}\n"
+        f"📅 **Зарегистрирован**: {created_str}\n\n"
+        f"🚀 **VPN-подписка**: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
+        f"   Окончание: {vpn_end_str}\n"
         f"   Осталось: {vpn_left} дн.\n"
-        f"   Ключ: {vpn_key}\n\n"
-        f"🛡️ Обход DPI: {'✅ активен' if bypass_active else '❌ не активен'}\n"
-        f"   Окончание: {bypass_end.strftime('%d.%m.%Y') if bypass_end else '—'}\n"
+        f"   Ключ: `{vpn_key}`\n"
+        f"   Сервер ID: {server_id}\n\n"
+        f"🛡️ **Обход DPI**: {'✅ активен' if bypass_active else '❌ не активен'}\n"
+        f"   Окончание: {bypass_end_str}\n"
         f"   Осталось: {bypass_left} дн."
     )
-    await message.answer(text)
+
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("grant"))
 async def cmd_grant(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
-
     args = message.text.split()
     if len(args) < 3:
         await message.answer("❗ Используйте: /grant <telegram_id> <days>")
         return
-
     try:
         tid = int(args[1])
         days = int(args[2])
     except ValueError:
         await message.answer("❌ Неверный формат.")
         return
-
     if days <= 0:
         await message.answer("❌ Дни должны быть положительным числом.")
         return
 
-    # Шаг 1: обновляем подписку в БД
+    # Проверяем существование пользователя
     async with AsyncSessionLocal() as session:
-        async with session.begin():
-            user = await update_vpn_subscription(session, tid, days)
-            # Сохраняем нужные данные до закрытия сессии
-            has_key = user.vpn_client_id is not None
-            end_date = user.vpn_subscription_end
-            now = datetime.now(timezone.utc)
+        user = await get_user_by_telegram_id(session, tid)
+        if not user:
+            await message.answer(f"❌ Пользователь с ID {tid} не найден в базе.")
+            return
 
-            # Если ключ уже существует и подписка активна – просто продлеваем
-            if has_key and end_date > now:
-                end_date_str = end_date.strftime('%d.%m.%Y')
-                await message.answer(
-                    f"✅ VPN-подписка для {tid} продлена на {days} дн. до {end_date_str}. "
-                    "Ключ не изменялся."
-                )
-                return
+        # Обновляем подписку
+        user = await update_vpn_subscription(session, tid, days)
+        # (update_vpn_subscription теперь не создаёт нового пользователя,
+        #  но на всякий случай оставим проверку выше)
 
-    # Шаг 2: если ключа не было или он истёк – создаём новый
+    # Создаём/обновляем ключ
     manager = get_vpn_manager()
     link = await manager.create_key(tid, days)
     if link:
         await message.answer(
-            f"✅ VPN-подписка для {tid} активирована на {days} дн., ключ: {link}"
+            f"✅ VPN-подписка для {tid} активирована на {days} дн.\n"
+            f"🔗 Ключ: {link}"
         )
     else:
         await message.answer(
-            f"✅ VPN-подписка для {tid} активирована, но ключ не создан. "
-            "Проверьте доступность серверов."
+            f"⚠️ Подписка для {tid} обновлена, но не удалось получить/создать ключ.\n"
+            "Пользователь может нажать «🚀 Подключить VPN» для повторной попытки."
         )
 
-# Аналогично revoke – открываем сессию, обновляем поля, затем коммитим.
 @dp.message(Command("revoke"))
 async def cmd_revoke(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -476,16 +484,18 @@ async def cmd_revoke(message: types.Message):
         await message.answer("❌ Неверный формат.")
         return
 
+    async with AsyncSessionLocal() as session:
+        user = await get_user_by_telegram_id(session, tid)
+        if not user:
+            await message.answer(f"❌ Пользователь с ID {tid} не найден.")
+            return
+
     manager = get_vpn_manager()
-    success = await manager.revoke_key(tid)  # внутри сам создаст сессию
+    success = await manager.revoke_key(tid)
     if success:
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                user = await get_or_create_bot_user(session, tid)
-                user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
-        await message.answer(f"✅ VPN-подписка для {tid} отозвана.")
+        await message.answer(f"✅ VPN-подписка для {tid} отозвана, ключ удалён.")
     else:
-        await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}.")
+        await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}. Проверьте логи.")
 
 # ---------- Статистика ----------
 @dp.message(Command("stats"))

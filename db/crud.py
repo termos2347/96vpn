@@ -36,10 +36,16 @@ async def get_or_create_bot_user(
 async def update_vpn_subscription(
     session: AsyncSession,
     telegram_id: int,
-    days: int
-) -> BotUser:
-    """Обновляет VPN-подписку (продлевает или устанавливает) и возвращает пользователя."""
-    user = await get_or_create_bot_user(session, telegram_id)
+    days: int,
+    create_if_missing: bool = True
+) -> Optional[BotUser]:
+    """Обновляет VPN-подписку. Если пользователь не найден и create_if_missing=False – возвращает None."""
+    if create_if_missing:
+        user = await get_or_create_bot_user(session, telegram_id)
+    else:
+        user = await get_user_by_telegram_id(session, telegram_id)
+        if not user:
+            return None
     now = datetime.now(timezone.utc)
     if user.vpn_subscription_end and user.vpn_subscription_end > now:
         user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
@@ -80,29 +86,49 @@ async def set_vpn_server_id(
     user.server_id = server_id
     user.updated_at = datetime.now(timezone.utc)
 
-async def get_user_vpn_data(
+async def get_user_by_telegram_id(
+    session: AsyncSession,
     telegram_id: int
-) -> Optional[dict]:
-    """Возвращает словарь с данными пользователя (без объекта)."""
+) -> Optional[BotUser]:
+    """Возвращает пользователя или None, если не найден."""
+    result = await session.execute(
+        select(BotUser).where(BotUser.telegram_id == telegram_id)
+    )
+    return result.scalars().first()
+
+async def get_user_full_data(telegram_id: int) -> Optional[dict]:
+    """
+    Возвращает полную информацию о пользователе.
+    Если пользователь не найден – возвращает None.
+    """
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(
+                BotUser.telegram_id,
+                BotUser.username,
+                BotUser.email,
                 BotUser.vpn_subscription_end,
                 BotUser.bypass_subscription_end,
                 BotUser.vpn_client_id,
-                BotUser.server_id
+                BotUser.server_id,
+                BotUser.created_at,
+                BotUser.updated_at
             ).where(BotUser.telegram_id == telegram_id)
         )
         row = result.first()
         if row:
             return {
-                "vpn_subscription_end": row[0],
-                "bypass_subscription_end": row[1],
-                "vpn_client_id": row[2],
-                "server_id": row[3]
+                "telegram_id": row[0],
+                "username": row[1],
+                "email": row[2],
+                "vpn_subscription_end": row[3],
+                "bypass_subscription_end": row[4],
+                "vpn_client_id": row[5],
+                "server_id": row[6],
+                "created_at": row[7],
+                "updated_at": row[8]
             }
         return None
-
 # ---------- Новая атомарная активация ----------
 async def activate_subscription(
     session: AsyncSession,

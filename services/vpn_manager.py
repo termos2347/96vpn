@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +105,7 @@ class VPNManager:
                     return await self._revoke_key_unsafe(user_id, session)
 
     async def _revoke_key_unsafe(self, user_id: int, session: AsyncSession) -> bool:
+        """Удаляет ключ на панели, обнуляет поля в БД и делает подписку истекшей."""
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -124,13 +126,17 @@ class VPNManager:
 
                 success = await provider.revoke_client(user.vpn_client_id)
                 if success:
+                    # Обнуляем поля
                     user.vpn_client_id = None
                     user.server_id = None
+                    # Устанавливаем дату окончания в прошлое, чтобы подписка считалась истекшей
+                    user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
                     logger.info(f"Key revoked for user {user_id} on server {server_id}")
                     return True
                 else:
                     logger.error(f"Failed to revoke key for user {user_id} on server {server_id}")
                     return False
+
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.warning(f"Network error on attempt {attempt+1}/{max_retries} revoking key for user {user_id}: {e}")
                 if attempt == max_retries - 1:
