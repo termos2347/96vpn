@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramForbiddenError
 from db.base import AsyncSessionLocal
 from db.models import BotUser
 from db.crud import set_vpn_client_id, set_vpn_server_id, get_or_create_bot_user
-from handlers import get_vpn_manager
+from handlers import get_server_pool, get_vpn_manager
 from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
@@ -146,9 +146,31 @@ async def send_expiry_reminders(bot):
         logger.info("Task send_expiry_reminders cancelled")
         raise
 
+async def refresh_server_pool_periodically(interval_seconds: int = 3600):
+    """
+    Фоновая задача: периодически обновляет пул серверов из БД,
+    пересоздаёт провайдеров и выполняет повторный логин.
+    """
+    while True:
+        try:
+            logger.info("🔄 Scheduled server pool refresh started")
+            pool = get_server_pool()
+            # wait_for_login=True, чтобы дождаться логина (с таймаутом 10 сек)
+            await pool.refresh_servers(wait_for_login=True, login_timeout=10.0)
+            logger.info("✅ Server pool refreshed successfully")
+        except asyncio.CancelledError:
+            logger.info("Task refresh_server_pool_periodically cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error refreshing server pool: {e}", exc_info=True)
+            await send_admin_alert(f"Ошибка при обновлении пула серверов: {e}")
+
+        await asyncio.sleep(interval_seconds)
+        
 async def start_scheduler(bot):
-    """Запускает обе фоновые задачи и возвращает их для управления."""
+    """Запускает все фоновые задачи и возвращает их для управления."""
     task1 = asyncio.create_task(check_expired_subscriptions(bot))
     task2 = asyncio.create_task(send_expiry_reminders(bot))
-    logger.info("Фоновые задачи проверки подписок и напоминаний запущены")
-    return [task1, task2]
+    task3 = asyncio.create_task(refresh_server_pool_periodically(interval_seconds=1800))  # каждые 30 минут
+    logger.info("Фоновые задачи запущены: проверка подписок, напоминания, обновление пула серверов")
+    return [task1, task2, task3]

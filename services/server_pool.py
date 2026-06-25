@@ -104,15 +104,32 @@ class ServerPool:
         logger.error(f"❌ Provider {server_id} could not authenticate after {max_retries} attempts")
 
     async def get_server(self) -> Optional[VPNServer]:
-        """Выбрать сервер round‑robin с учётом веса."""
+        """Выбрать сервер round‑robin с учётом веса, пропуская недоступные."""
         if not self.servers:
-            logger.info("No servers in pool, refreshing...")
-            await self.refresh_servers(wait_for_login=False)  # не блокируем при выборе
+            await self.refresh_servers(wait_for_login=False)
         if not self.servers:
-            logger.error("No active servers available")
             return None
-        weighted = []
+
+        # Собираем список доступных (провайдер авторизован)
+        available = []
         for s in self.servers:
+            provider = self.providers.get(s.id)
+            if provider and provider._is_authenticated:
+                available.append(s)
+            else:
+                logger.debug(f"Server {s.id} skipped – provider not authenticated")
+
+        if not available:
+            logger.warning("No authenticated providers available, attempting refresh...")
+            await self.refresh_servers(wait_for_login=True, login_timeout=5.0)
+            # повторно собираем
+            available = [s for s in self.servers if self.providers.get(s.id) and self.providers[s.id]._is_authenticated]
+            if not available:
+                logger.error("Still no authenticated providers after refresh")
+                return None
+
+        weighted = []
+        for s in available:
             weight = s.weight if s.weight is not None else 1
             weighted.extend([s] * weight)
         if not weighted:

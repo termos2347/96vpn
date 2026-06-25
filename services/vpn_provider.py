@@ -58,10 +58,21 @@ class XUIVPNProvider:
                 if self._session and not self._session.closed:
                     await self._session.close()
                 
+                # --- FIX: отменяем старый heartbeat, если он запущен ---
+                if self._heartbeat_task and not self._heartbeat_task.done():
+                    self._heartbeat_task.cancel()
+                    try:
+                        await self._heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.debug(f"Heartbeat task cancellation error: {e}")
+                    self._heartbeat_task = None
+                
                 connector = aiohttp.TCPConnector(
                     ssl=settings.VERIFY_SSL, 
                     limit=100,
-                    force_close=True  # Закрывать соединения после каждого запроса
+                    force_close=True
                 )
                 timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
                 self._session = aiohttp.ClientSession(
@@ -72,25 +83,28 @@ class XUIVPNProvider:
                 self._session_invalid = False
                 logger.debug(f"Created new session for {self.base_url}")
                 
-                # Запускаем heartbeat, если ещё не запущен
-                if self._heartbeat_task is None or self._heartbeat_task.done():
-                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                # Запускаем новый heartbeat
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             
             return self._session
 
     async def _heartbeat_loop(self):
         """Периодически проверяет доступность панели и поддерживает сессию живой."""
+        # Сохраняем ссылку на текущую сессию при старте задачи
+        current_session = self._session
         while not self._closed:
             try:
                 await asyncio.sleep(self.HEARTBEAT_INTERVAL)
                 if self._closed:
                     break
-                # Простой запрос к API, чтобы поддержать сессию и проверить авторизацию
+                # --- FIX: проверяем, что сессия не изменилась и не закрыта ---
+                if self._session is None or self._session.closed or self._session is not current_session:
+                    logger.debug(f"Heartbeat: session changed or closed, stopping for {self.base_url}")
+                    break
                 if self._is_authenticated:
                     url = f"{self.base_url}/panel/api/inbounds"
                     try:
-                        session = await self._get_session()
-                        async with session.get(url, headers=self.headers) as resp:
+                        async with self._session.get(url, headers=self.headers) as resp:
                             if resp.status == 401:
                                 logger.warning(f"Heartbeat: got 401 for {self.base_url}, re-authenticating")
                                 self._is_authenticated = False
@@ -99,7 +113,6 @@ class XUIVPNProvider:
                                 logger.debug(f"Heartbeat: unexpected status {resp.status}")
                     except Exception as e:
                         logger.warning(f"Heartbeat failed for {self.base_url}: {e}")
-                        # Пометим сессию как недействительную, при следующем запросе пересоздадим
                         async with self._session_lock:
                             self._session_invalid = True
             except asyncio.CancelledError:
@@ -110,12 +123,17 @@ class XUIVPNProvider:
     async def close(self):
         """Закрывает сессию и останавливает heartbeat."""
         self._closed = True
+        # --- FIX: отменяем задачу heartbeat, если она запущена ---
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
             try:
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.debug(f"Error cancelling heartbeat: {e}")
+            self._heartbeat_task = None
+        
         async with self._session_lock:
             if self._session and not self._session.closed:
                 await self._session.close()
@@ -149,13 +167,11 @@ class XUIVPNProvider:
                     else:
                         logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}/{self.MAX_RETRIES}")
             except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
-                # Ошибка сети — помечаем сессию как недействительную, чтобы пересоздать
                 logger.warning(f"Network error on {url} (attempt {attempt+1}): {type(net_err).__name__}")
                 async with self._session_lock:
                     self._session_invalid = True
                 last_error = net_err
             except Exception as e:
-                # Другие ошибки не должны приводить к пересозданию сессии автоматически
                 logger.exception(f"Unexpected error on {url}, attempt {attempt+1}")
                 last_error = e
 
@@ -179,7 +195,6 @@ class XUIVPNProvider:
         payload = {"username": self.username, "password": self.password}
         
         try:
-            # Прямой запрос без retry, чтобы не зациклиться
             session = await self._get_session()
             async with session.post(url, data=payload) as resp:
                 if resp.status == 200:
@@ -269,10 +284,6 @@ class XUIVPNProvider:
             return None
         
     async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
-        """
-        Ищет клиента по UUID в текущем inbound'е.
-        Возвращает словарь с полями 'uuid', 'subId', 'email' или None, если не найден.
-        """
         if not await self.login():
             logger.error("Cannot search client: not authenticated")
             return None
@@ -303,8 +314,6 @@ class XUIVPNProvider:
         if not self._server_address or not sub_id:
             logger.error("Invalid server address or sub_id")
             return ""
-        # ВАЖНО: используйте https, если сервер поддерживает SSL
-        # Для самоподписного сертификата можно оставить http, но лучше настроить https
         return f"https://{self._server_address}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
