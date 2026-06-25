@@ -105,45 +105,55 @@ class VPNManager:
                     return await self._revoke_key_unsafe(user_id, session)
 
     async def _revoke_key_unsafe(self, user_id: int, session: AsyncSession) -> bool:
-        """Удаляет ключ на панели, обнуляет поля в БД и делает подписку истекшей."""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                user = await get_or_create_bot_user(session, user_id)
-                if not user.vpn_client_id:
-                    logger.info(f"User {user_id} has no active key to revoke")
-                    return True
+        """Возвращает True, если ключ успешно отозван (или уже отсутствует)."""
+        try:
+            user = await get_or_create_bot_user(session, user_id)
+            if not user.vpn_client_id:
+                logger.info(f"User {user_id} has no active key to revoke")
+                return True
 
-                server_id = user.server_id
-                if not server_id:
-                    logger.error(f"No server_id for user {user_id}, cannot revoke")
-                    return False
+            server_id = user.server_id
+            client_id = user.vpn_client_id
 
-                provider = await self.pool.get_provider(server_id)
-                if not provider:
-                    logger.error(f"Provider for server {server_id} not found")
-                    return False
-
-                success = await provider.revoke_client(user.vpn_client_id)
-                if success:
-                    # Обнуляем поля
-                    user.vpn_client_id = None
-                    user.server_id = None
-                    # Устанавливаем дату окончания в прошлое, чтобы подписка считалась истекшей
-                    user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
-                    logger.info(f"Key revoked for user {user_id} on server {server_id}")
-                    return True
-                else:
-                    logger.error(f"Failed to revoke key for user {user_id} on server {server_id}")
-                    return False
-
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-                logger.warning(f"Network error on attempt {attempt+1}/{max_retries} revoking key for user {user_id}: {e}")
-                if attempt == max_retries - 1:
-                    logger.error(f"All retries failed to revoke key for user {user_id}")
-                    return False
-                await asyncio.sleep(2 ** attempt)
-            except Exception as e:
-                logger.exception(f"Unexpected error revoking key for user {user_id}")
+            if not server_id:
+                logger.error(f"No server_id for user {user_id}, cannot revoke on panel. Client {client_id} remains on panel.")
                 return False
-        return False
+
+            provider = await self.pool.get_provider(server_id)
+            if not provider:
+                logger.error(f"Provider for server {server_id} not found. Client {client_id} remains on panel.")
+                return False
+
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    success = await provider.revoke_client(client_id)
+                    if success:
+                        logger.info(f"Key revoked on panel for user {user_id} on server {server_id} (attempt {attempt+1})")
+                        user.vpn_client_id = None
+                        user.server_id = None
+                        user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
+                        return True
+                    else:
+                        # revoke_client вернул False – возможно клиент уже удалён
+                        client_info = await provider.get_client_by_uuid(client_id)
+                        if client_info is None:
+                            logger.info(f"Client {client_id} not found on panel, assuming already revoked. Updating DB.")
+                            user.vpn_client_id = None
+                            user.server_id = None
+                            user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
+                            return True
+                        else:
+                            logger.warning(f"revoke_client returned False but client exists, attempt {attempt+1}")
+                except Exception as e:
+                    logger.exception(f"Error revoking client on panel for user {user_id}, attempt {attempt+1}: {e}")
+                    if attempt == max_retries - 1:
+                        return False
+                    await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
+
+            logger.error(f"All retries failed to revoke client {client_id} for user {user_id}")
+            return False
+
+        except Exception as e:
+            logger.exception(f"Unexpected error in _revoke_key_unsafe for user {user_id}")
+            return False

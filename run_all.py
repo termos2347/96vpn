@@ -44,6 +44,37 @@ internal_runner = None
 _shutting_down = False
 _background_tasks = []   # здесь будут только фоновые задачи (scheduler)
 
+# ------------------------------------------------------------
+# НОВАЯ ФУНКЦИЯ: установка вебхука с повторными попытками
+# ------------------------------------------------------------
+async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
+                                 max_retries: int = 5, base_delay: float = 1.0) -> bool:
+    """Устанавливает вебхук с повторными попытками и проверкой через get_webhook_info."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Setting webhook to {url} (attempt {attempt}/{max_retries})...")
+            await bot.set_webhook(url=url, secret_token=secret_token)
+            # Проверяем, что вебхук действительно установлен
+            info = await bot.get_webhook_info()
+            if info.url == url:
+                logger.info(f"✅ Webhook successfully set to {url}")
+                return True
+            else:
+                logger.warning(f"Webhook URL mismatch: expected {url}, got {info.url}")
+        except Exception as e:
+            logger.error(f"Attempt {attempt} failed: {e}")
+
+        if attempt < max_retries:
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.info(f"Retrying in {delay} seconds...")
+            await asyncio.sleep(delay)
+
+    logger.error(f"❌ Failed to set webhook after {max_retries} attempts")
+    return False
+
+# ------------------------------------------------------------
+# Основные функции запуска и остановки
+# ------------------------------------------------------------
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
     logger.info("=" * 50)
@@ -103,16 +134,15 @@ async def on_startup():
         await site.start()
         logger.info(f"✅ Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
-        # 6. Установка вебхуков (строго обязательны)
-        logger.info("Step 6/7: Setting up webhooks...")
+        # 6. Установка вебхуков с повторными попытками
+        logger.info("Step 6/7: Setting up webhooks with retry...")
 
-        # Проверка, что URL заданы
         if not settings.WEBHOOK_URL:
             raise ValueError("WEBHOOK_URL is required for webhook mode")
         if not settings.ADMIN_WEBHOOK_URL:
             raise ValueError("ADMIN_WEBHOOK_URL is required for webhook mode")
 
-        # Удаляем старые вебхуки (на случай, если бот перезапущен)
+        # Удаляем старые вебхуки (без повторных попыток, просто логируем ошибки)
         try:
             await main_bot.delete_webhook()
         except Exception as e:
@@ -122,18 +152,11 @@ async def on_startup():
         except Exception as e:
             logger.debug(f"Could not delete admin webhook: {e}")
 
-        # Устанавливаем новые
-        await main_bot.set_webhook(
-            url=settings.WEBHOOK_URL,
-            secret_token=settings.WEBHOOK_SECRET
-        )
-        logger.info(f"✅ Main bot webhook set to {settings.WEBHOOK_URL}")
-
-        await admin.bot.admin_bot.set_webhook(
-            url=settings.ADMIN_WEBHOOK_URL,
-            secret_token=settings.ADMIN_WEBHOOK_SECRET
-        )
-        logger.info(f"✅ Admin bot webhook set to {settings.ADMIN_WEBHOOK_URL}")
+        # Устанавливаем новые с retry
+        if not await set_webhook_with_retry(main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET):
+            raise RuntimeError("Failed to set main bot webhook after retries")
+        if not await set_webhook_with_retry(admin.bot.admin_bot, settings.ADMIN_WEBHOOK_URL, settings.ADMIN_WEBHOOK_SECRET):
+            raise RuntimeError("Failed to set admin bot webhook after retries")
 
         logger.info("✅ Webhooks configured")
 
@@ -156,12 +179,11 @@ async def on_startup():
                 print("(ASCII art not available)")
         else:
             print("""
-             ╔══╗ ╔╗   ╔╗╔╗   ╔╗╔══╗   ╔╗╔╗
-            ╚╗╔╝ ╚╝   ╚╝╚╝   ╚╝╚╗╔╝   ╚╝╚╝
-             ║║    ╔╗ ╔╗ ╔╗   ╔╗ ║║     ╔╗
-             ║║    ╚╝ ╚╝ ╚╝   ╚╝ ║║     ╚╝
-             ╚╝         ╔╗    ╔╗  ║║      ╔╗
-                          ╚╝    ╚╝  ╚╝      ╚╝
+             ╔═══╗ ╔╗   ╔╗╔══╗   ╔╗╔══╗
+            ╚╗╔╗║ ║║   ║║╚╣╠╝   ║║╚╣╠╝
+             ║║║║ ║║ ╔╗║║ ║║    ║║ ║║
+             ║║║║ ║╚═╝║║ ║║    ║║ ║║
+             ╚╝╚╝ ╚═══╝╚╝ ╚╝    ╚╝ ╚╝
             """)
 
         print("✅ Bot is now running and waiting for updates via webhooks...")

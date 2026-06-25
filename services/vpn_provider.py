@@ -267,6 +267,37 @@ class XUIVPNProvider:
         except Exception:
             logger.exception("Exception searching client")
             return None
+        
+    async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
+        """
+        Ищет клиента по UUID в текущем inbound'е.
+        Возвращает словарь с полями 'uuid', 'subId', 'email' или None, если не найден.
+        """
+        if not await self.login():
+            logger.error("Cannot search client: not authenticated")
+            return None
+        url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
+        try:
+            result = await self._retry_request("GET", url, headers=self.headers)
+            if not result:
+                return None
+            inbound = result.get("obj")
+            if not inbound:
+                logger.error("Inbound not found in API response")
+                return None
+            settings_data = json.loads(inbound.get("settings", "{}"))
+            for client in settings_data.get("clients", []):
+                if client.get("id") == client_uuid:
+                    return {
+                        "uuid": client.get("id"),
+                        "subId": client.get("subId", client.get("id")[:16]),
+                        "email": client.get("email")
+                    }
+            logger.debug(f"Client with uuid {client_uuid} not found")
+            return None
+        except Exception:
+            logger.exception("Exception searching client by uuid")
+            return None
 
     def get_subscription_link(self, sub_id: str) -> str:
         if not self._server_address or not sub_id:
