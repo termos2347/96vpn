@@ -2,10 +2,12 @@ import os
 import sys
 import logging
 import zoneinfo
-from typing import Optional
+from typing import Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
+import json
 
 load_dotenv()
 
@@ -36,6 +38,12 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     
+    # Доверенные IP-адреса ЮKassa (ОБЯЗАТЕЛЬНОЕ поле)
+    YOOKASSA_TRUSTED_IPS: List[str] = Field(
+        ...,
+        description="JSON array of trusted IP/CIDR for Yookassa webhooks"
+    )
+
     # Webhook (Telegram)
     WEBHOOK_URL: str = ""
     WEBHOOK_SECRET: str = ""
@@ -113,6 +121,30 @@ class Settings(BaseSettings):
             "6m": self.PERIOD_DAYS_6M,
         }
 
+    @field_validator('YOOKASSA_TRUSTED_IPS', mode='before')
+    @classmethod
+    def parse_trusted_ips(cls, v):
+        # Если уже список – проверяем, что не пустой
+        if isinstance(v, list):
+            if v and all(isinstance(item, str) for item in v):
+                return v
+            else:
+                raise ValueError("YOOKASSA_TRUSTED_IPS must be a non-empty list of strings (IP/CIDR).")
+        # Если строка – пытаемся распарсить JSON
+        elif isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list) and parsed and all(isinstance(item, str) for item in parsed):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        # Если ничего не подошло – бросаем ошибку
+        raise ValueError(
+            "YOOKASSA_TRUSTED_IPS must be a non-empty JSON array of IP/CIDR strings.\n"
+            "Example: YOOKASSA_TRUSTED_IPS='[\"185.71.76.0/24\", \"185.71.77.0/24\"]'\n"
+            "Make sure the variable is set in .env file."
+        )
+
 settings = Settings()
 
 # ==================== ВАЛИДАЦИЯ ENCRYPTION_KEY ====================
@@ -143,7 +175,6 @@ except Exception as e:
         f"❌ Invalid TIMEZONE '{settings.TIMEZONE}': {e}\n"
         "Use valid IANA timezone name (e.g., Europe/Moscow, UTC, America/New_York)."
     )
-
 
 # ==================== ВАЛИДАЦИЯ Yookassa ====================
 if settings.YOOKASSA_SHOP_ID or settings.YOOKASSA_API_KEY:

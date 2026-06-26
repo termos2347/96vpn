@@ -3,6 +3,8 @@ import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import json  # НОВОЕ
+from pathlib import Path  # НОВОЕ
 
 from aiogram import F, Bot, Dispatcher, types
 from aiogram.filters import Command, StateFilter
@@ -52,6 +54,7 @@ async def startup():
     admin_bot = Bot(token=ADMIN_BOT_TOKEN)
     main_bot = Bot(token=MAIN_BOT_TOKEN)
     await admin_bot.set_my_commands([
+        BotCommand(command="start", description="🚀 Запустить бота"),
         BotCommand(command="health", description="Проверка состояния"),
         BotCommand(command="errors", description="Последние ошибки"),
         BotCommand(command="broadcast", description="Рассылка текста или медиа (reply на сообщение)"),
@@ -64,6 +67,8 @@ async def startup():
         BotCommand(command="removeserver", description="Удалить сервер по ID"),
         BotCommand(command="serversetactive", description="Включить/отключить сервер"),
         BotCommand(command="menu", description="Показать список команд"),
+        BotCommand(command="yookassa_ips", description="Показать доверенные IP-адреса ЮKassa"),
+        BotCommand(command="set_yookassa_ips", description="Установить доверенные IP-адреса (JSON-массив)"),
     ])
     logger.info("Admin bot started")
 
@@ -88,6 +93,7 @@ async def cmd_start(message: types.Message):
 async def cmd_menu(message: types.Message):
     text = (
         "📋 Доступные команды:\n\n"
+        "/start – 🚀 Запустить бота\n"
         "/health – состояние системы\n"
         "/errors – последние ошибки\n"
         "/broadcast – рассылка (reply на сообщение)\n"
@@ -99,6 +105,8 @@ async def cmd_menu(message: types.Message):
         "/listservers – список всех серверов\n"
         "/removeserver <id> – удалить сервер по ID\n"
         "/serversetactive <id> <0|1> – включить/отключить сервер\n"
+        "/yookassa_ips – показать доверенные IP ЮKassa\n"
+        "/set_yookassa_ips <JSON> – установить доверенные IP (пример: [\"185.71.76.0/24\", ...])\n"
     )
     await message.answer(text)
 
@@ -607,3 +615,74 @@ async def cmd_stats(message: types.Message):
         f"⚪ Без подписки: {no_sub}"
     )
     await message.answer(text)
+
+# ---------- Команды для управления IP-адресами ЮKassa (НОВОЕ) ----------
+@dp.message(Command("yookassa_ips"))
+async def cmd_show_yookassa_ips(message: types.Message):
+    """Показать текущий список доверенных IP-адресов ЮKassa."""
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+    
+    ips = settings.YOOKASSA_TRUSTED_IPS
+    if not ips:
+        await message.answer("⚠️ Список доверенных IP пуст (это опасно!).")
+        return
+    
+    formatted = json.dumps(ips, indent=2, ensure_ascii=False)
+    await message.answer(f"📋 Текущие доверенные IP-адреса ЮKassa:\n\n```json\n{formatted}\n```", parse_mode="Markdown")
+
+@dp.message(Command("set_yookassa_ips"))
+async def cmd_set_yookassa_ips(message: types.Message):
+    """Установить новый список доверенных IP-адресов ЮKassa."""
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+    
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "❗ Используйте: `/set_yookassa_ips <JSON-массив>`\n"
+            "Пример: `/set_yookassa_ips [\"185.71.76.0/24\", \"185.71.77.0/24\"]`"
+        )
+        return
+    
+    try:
+        new_ips = json.loads(args[1])
+        if not isinstance(new_ips, list) or not new_ips:
+            raise ValueError("Список должен быть непустым массивом строк.")
+        if not all(isinstance(item, str) for item in new_ips):
+            raise ValueError("Все элементы должны быть строками (IP или CIDR).")
+        
+        # 1. Обновляем в памяти (применяется мгновенно)
+        settings.YOOKASSA_TRUSTED_IPS = new_ips
+        
+        # 2. Сохраняем в .env (чтобы после перезапуска значение сохранилось)
+        env_path = Path(".env")
+        if env_path.exists():
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            new_lines = []
+            found = False
+            for line in lines:
+                if line.strip().startswith("YOOKASSA_TRUSTED_IPS="):
+                    new_line = f"YOOKASSA_TRUSTED_IPS='{json.dumps(new_ips)}'"
+                    new_lines.append(new_line)
+                    found = True
+                else:
+                    new_lines.append(line)
+            if not found:
+                new_lines.append(f"YOOKASSA_TRUSTED_IPS='{json.dumps(new_ips)}'")
+            env_path.write_text("\n".join(new_lines), encoding="utf-8")
+        else:
+            await message.answer("⚠️ Файл .env не найден, переменная сохранена только в памяти.")
+        
+        await message.answer(
+            f"✅ Список доверенных IP обновлён.\n\n```json\n{json.dumps(new_ips, indent=2, ensure_ascii=False)}\n```",
+            parse_mode="Markdown"
+        )
+    except json.JSONDecodeError:
+        await message.answer("❌ Некорректный JSON. Проверьте формат.")
+    except ValueError as e:
+        await message.answer(f"❌ {e}")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")

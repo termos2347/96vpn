@@ -11,17 +11,6 @@ from services.payment_yookassa import yookassa_service
 
 logger = logging.getLogger(__name__)
 
-# Официальные IP-адреса ЮKassa для проверки вебхуков
-YOOKASSA_IPS = {
-    "185.71.76.0/24",
-    "185.71.77.0/24",
-    "77.75.153.0/25",
-    "77.75.156.11",
-    "77.75.156.35",
-    "77.75.154.128/25",
-    "2a02:5180::/32"
-}
-
 _main_bot = None
 _main_dp = None
 _admin_bot = None
@@ -32,16 +21,19 @@ def set_main_dp(dp): global _main_dp; _main_dp = dp
 def set_admin_bot(bot): global _admin_bot; _admin_bot = bot
 def set_admin_dp(dp): global _admin_dp; _admin_dp = dp
 
-def ip_in_network(ip: str, networks: set) -> bool:
-    """Простая утилита для проверки вхождения IP в подсети ЮKassa"""
+def ip_in_network(ip: str) -> bool:
+    """Проверяет, входит ли IP-адрес в одну из доверенных сетей ЮKassa (из настроек)."""
     import ipaddress
+    trusted = settings.YOOKASSA_TRUSTED_IPS  # это уже непустой список, благодаря валидации
     try:
         ip_obj = ipaddress.ip_address(ip)
-        for net in networks:
+        for net in trusted:
             if "/" in net:
-                if ip_obj in ipaddress.ip_network(net): return True
+                if ip_obj in ipaddress.ip_network(net):
+                    return True
             else:
-                if ip_obj == ipaddress.ip_address(net): return True
+                if ip_obj == ipaddress.ip_address(net):
+                    return True
     except Exception as e:
         logger.error(f"IP validation error: {e}")
     return False
@@ -96,7 +88,7 @@ async def yookassa_webhook(request):
     forwarded_for = request.headers.get("X-Forwarded-For")
     client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.remote
 
-    if not client_ip or not ip_in_network(client_ip, YOOKASSA_IPS):
+    if not client_ip or not ip_in_network(client_ip):
         logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
         return web.json_response({"error": "forbidden"}, status=403)
 
@@ -106,7 +98,6 @@ async def yookassa_webhook(request):
             logger.error("Main bot not set, cannot process yookassa webhook")
             return web.json_response({"error": "main bot not ready"}, status=503)
         
-        # Передаем обработку сервису (внутри будет Double-Check запрос к API ЮKassa)
         async with AsyncSessionLocal() as session:
             success = await yookassa_service.process_webhook(data, session, _main_bot)
             
