@@ -1,99 +1,113 @@
 import asyncio
+import json
 import logging
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-import json
-from pathlib import Path
 
-from aiogram import F, Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F
+from aiogram import types
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import BotCommand, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
-from sqlalchemy import select, text, func
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile
+from sqlalchemy import engine, func, select, text
 
-from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN, save_trusted_ips, settings
-from handlers import get_vpn_manager
-from db.base import engine, AsyncSessionLocal
+from config import ADMIN_CHAT_ID, save_trusted_ips, settings
+from db.base import AsyncSessionLocal
+from db.crud import get_user_by_telegram_id, get_user_full_data, update_vpn_subscription
 from db.models import BotUser
-from db.crud import (
-    get_or_create_bot_user, get_user_by_telegram_id, set_vpn_client_id,
-    is_vpn_active, get_vpn_client_id, update_vpn_subscription, get_user_full_data
-)
-from services.vpn_manager import VPNManager
-from .servers import router as servers_router
-from handlers import get_server_pool
+from handlers import get_server_pool, get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
-error_log = deque(maxlen=10)
-admin_bot: Bot | None = None
-main_bot: Bot | None = None
+# Глобальные переменные
+admin_bot: Bot = None
+dp = Dispatcher()
+main_bot: Bot = None
 
-# ---------- Состояние для рассылки ----------
+error_log = []
+_broadcast_cancel_flags = {}
+
+_router_attached = False
+
+# ========== Вспомогательные функции ==========
+def log_error(message: str, notify_admin: bool = False):
+    """Логирует ошибку и сохраняет в список для команды /errors."""
+    logger.error(message)
+    error_log.append(message)
+    if len(error_log) > 100:
+        error_log.pop(0)
+    if notify_admin:
+        asyncio.create_task(send_admin_alert(message))
+
+async def send_admin_alert(message: str):
+    """Отправляет уведомление администратору."""
+    try:
+        if admin_bot and settings.ADMIN_CHAT_ID:
+            await admin_bot.send_message(
+                chat_id=settings.ADMIN_CHAT_ID,
+                text=f"⚠️ **Административное уведомление:**\n\n{message}",
+                parse_mode="Markdown"
+            )
+    except TelegramAPIError as e:
+        logger.error(f"Не удалось отправить уведомление админу: {e}")
+
+
+# ========== FSM для рассылки ==========
 class BroadcastStates(StatesGroup):
     confirm = State()
 
-_broadcast_cancel_flags = {}
-
-# ---------- Вспомогательные функции ----------
-async def send_admin_alert(message: str):
-    global admin_bot
-    if not admin_bot or not ADMIN_CHAT_ID:
-        logger.warning("Admin bot not initialized, alert not sent")
-        return
-    try:
-        await admin_bot.send_message(ADMIN_CHAT_ID, f"🚨 {message}")
-    except Exception as e:
-        logger.error("Failed to send admin alert", exc_info=True)
-
-# ---------- log_error ----------
-def log_error(error_message: str, notify_admin: bool = True):
-    """
-    Добавляет ошибку в error_log и опционально отправляет уведомление админу.
-    """
-    error_log.append(error_message)
-    logger.error(error_message)
-    if notify_admin:
-        asyncio.create_task(send_admin_alert(f"❌ {error_message}"))
-
+# ========== Запуск и остановка ==========
 async def startup():
-    global admin_bot, main_bot
-    admin_bot = Bot(token=ADMIN_BOT_TOKEN)
-    main_bot = Bot(token=MAIN_BOT_TOKEN)
+    """Инициализация админ-бота."""
+    global admin_bot, dp, _router_attached
+
+    if admin_bot is None:
+        admin_bot = Bot(token=settings.ADMIN_BOT_TOKEN)
+        dp = Dispatcher()
+        logger.info("Admin bot instance created")
+
+    # Роутеры не подключаем — все команды определены в этом файле
+    if not _router_attached:
+        _router_attached = True
+        logger.info("Admin bot ready (no external routers)")
+
+    # Устанавливаем команды
     await admin_bot.set_my_commands([
-        BotCommand(command="start", description="🚀 Запустить бота"),
-        BotCommand(command="health", description="Проверка состояния"),
+        BotCommand(command="start", description="Запуск бота"),
+        BotCommand(command="menu", description="Показать все команды"),
+        BotCommand(command="health", description="Проверка состояния системы"),
         BotCommand(command="errors", description="Последние ошибки"),
-        BotCommand(command="broadcast", description="Рассылка текста или медиа (reply на сообщение)"),
-        BotCommand(command="userinfo", description="Информация о пользователе (telegram_id)"),
-        BotCommand(command="grant", description="Выдать/продлить VPN-подписку (telegram_id дни)"),
-        BotCommand(command="revoke", description="Отозвать VPN-подписку (telegram_id)"),
+        BotCommand(command="broadcast", description="Рассылка (ответьте на сообщение)"),
+        BotCommand(command="userinfo", description="Информация о пользователе (/userinfo id)"),
+        BotCommand(command="grant", description="Выдать подписку (/grant id days)"),
+        BotCommand(command="revoke", description="Отозвать подписку (/revoke id)"),
         BotCommand(command="stats", description="Статистика по подпискам"),
-        BotCommand(command="addserver", description="Добавить VPN-сервер в пул"),
-        BotCommand(command="listservers", description="Список всех серверов"),
-        BotCommand(command="removeserver", description="Удалить сервер по ID"),
-        BotCommand(command="serversetactive", description="Включить/отключить сервер"),
-        BotCommand(command="menu", description="Показать список команд"),
-        BotCommand(command="yookassa_ips", description="Показать доверенные IP-адреса ЮKassa"),
-        BotCommand(command="set_yookassa_ips", description="Установить доверенные IP-адреса (JSON-массив)"),
+        BotCommand(command="addserver", description="Добавить VPN-сервер"),
+        BotCommand(command="listservers", description="Список серверов"),
+        BotCommand(command="removeserver", description="Удалить сервер (ID)"),
+        BotCommand(command="serversetactive", description="Вкл/выкл сервер (ID 0/1)"),
+        BotCommand(command="yookassa_ips", description="Показать доверенные IP ЮKassa"),
+        BotCommand(command="set_yookassa_ips", description="Установить доверенные IP (JSON)"),
     ])
-    logger.info("Admin bot started")
+
+    logger.info("Admin bot startup complete")
 
 async def shutdown():
-    global admin_bot, main_bot
+    """Завершение работы админ-бота."""
+    global admin_bot, dp, _router_attached
     if admin_bot:
-        await admin_bot.session.close()
-        admin_bot = None
-    if main_bot:
-        await main_bot.session.close()
-        main_bot = None
+        try:
+            await admin_bot.delete_webhook()
+            await admin_bot.session.close()
+            logger.info("Admin bot session closed")
+        except Exception as e:
+            logger.error(f"Ошибка при завершении админ-бота: {e}")
+    _router_attached = False
+    logger.info("Admin bot shutdown complete")
 
-dp = Dispatcher()
-dp.include_router(servers_router)
-
-# ---------- Базовые команды ----------
+# ========== Базовые команды ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer("🛡️ Админ-бот 96VPN. Все команды: /menu")
@@ -128,8 +142,8 @@ async def cmd_health(message: types.Message):
         status += "• БД: подключена\n"
     except Exception as e:
         status += f"• БД: ошибка ({e})\n"
-        log_error(f"Health check DB error: {e}", notify_admin=False)  # <-- добавлен log_error
-    
+        log_error(f"Health check DB error: {e}", notify_admin=False)
+
     pool = get_server_pool()
     if pool.servers:
         first_server = pool.servers[0]
@@ -142,12 +156,12 @@ async def cmd_health(message: types.Message):
                     status += "• VPN-панель: не удалось авторизоваться\n"
             except Exception as e:
                 status += f"• VPN-панель: ошибка при авторизации ({e})\n"
-                log_error(f"Health check VPN error: {e}", notify_admin=False)  # <-- добавлен log_error
+                log_error(f"Health check VPN error: {e}", notify_admin=False)
         else:
             status += "• VPN-панель: провайдер не найден\n"
     else:
         status += "• VPN-панель: нет активных серверов в пуле\n"
-    
+
     await message.answer(status)
 
 @dp.message(Command("errors"))
@@ -160,7 +174,7 @@ async def cmd_errors(message: types.Message):
         text_lines += f"{i}. {err}\n"
     await message.answer(text_lines)
 
-# ---------- Рассылка ----------
+# ========== Рассылка ==========
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -270,7 +284,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         await original_msg.delete()
     except Exception as e:
         logger.error("Failed to fetch original message for broadcast", exc_info=True)
-        log_error(f"Broadcast fetch error: {e}", notify_admin=True)  # <-- добавлен log_error
+        log_error(f"Broadcast fetch error: {e}", notify_admin=True)
         await callback.message.answer(f"❌ Не удалось получить сообщение для рассылки: {e}")
         return
 
@@ -302,7 +316,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
             media_bytes = buf.getvalue()
         except Exception as e:
             logger.error("Failed to download media for broadcast", exc_info=True)
-            log_error(f"Broadcast media download error: {e}", notify_admin=True)  # <-- добавлен log_error
+            log_error(f"Broadcast media download error: {e}", notify_admin=True)
             await status_msg.edit_text(f"❌ Не удалось скачать файл: {e}")
             _broadcast_cancel_flags.pop(cancel_flag_key, None)
             return
@@ -371,7 +385,7 @@ async def stop_broadcast(callback: types.CallbackQuery):
     await callback.answer("⏳ Останавливаю рассылку...")
     await callback.message.edit_reply_markup(reply_markup=None)
 
-# ---------- Управление пользователями ----------
+# ========== Управление пользователями ==========
 @dp.message(Command("userinfo"))
 async def cmd_userinfo(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -386,7 +400,7 @@ async def cmd_userinfo(message: types.Message):
         tid = int(args[1])
     except ValueError:
         await message.answer("❌ Неверный формат telegram_id.")
-        log_error(f"Invalid telegram_id in userinfo: {args[1]}", notify_admin=False)  # <-- добавлен log_error
+        log_error(f"Invalid telegram_id in userinfo: {args[1]}", notify_admin=False)
         return
 
     data = await get_user_full_data(tid)
@@ -440,7 +454,7 @@ async def cmd_grant(message: types.Message):
         days = int(args[2])
     except ValueError:
         await message.answer("❌ Неверный формат.")
-        log_error(f"Invalid args in grant: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
+        log_error(f"Invalid args in grant: {args[1:]}", notify_admin=False)
         return
     if days <= 0:
         await message.answer("❌ Дни должны быть положительным числом.")
@@ -479,7 +493,7 @@ async def cmd_revoke(message: types.Message):
         tid = int(args[1])
     except ValueError:
         await message.answer("❌ Неверный формат.")
-        log_error(f"Invalid args in revoke: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
+        log_error(f"Invalid args in revoke: {args[1:]}", notify_admin=False)
         return
 
     async with AsyncSessionLocal() as session:
@@ -495,7 +509,7 @@ async def cmd_revoke(message: types.Message):
     else:
         await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}. Проверьте логи.")
 
-# ---------- Статистика ----------
+# ========== Статистика ==========
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -596,21 +610,21 @@ async def cmd_stats(message: types.Message):
         await message.answer(text)
     except Exception as e:
         logger.error(f"Error in stats: {e}", exc_info=True)
-        log_error(f"Stats error: {e}", notify_admin=True)  # <-- добавлен log_error
+        log_error(f"Stats error: {e}", notify_admin=True)
         await message.answer("❌ Ошибка при получении статистики.")
 
-# ---------- Команды для управления IP-адресами ЮKassa ----------
+# ========== Команды для управления IP-адресами ЮKassa ==========
 @dp.message(Command("yookassa_ips"))
 async def cmd_show_yookassa_ips(message: types.Message):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
-    
+
     ips = settings.YOOKASSA_TRUSTED_IPS
     if not ips:
         await message.answer("⚠️ Список доверенных IP пуст (это опасно!).")
         return
-    
+
     formatted = json.dumps(ips, indent=2, ensure_ascii=False)
     await message.answer(f"📋 Текущие доверенные IP-адреса ЮKassa:\n\n```json\n{formatted}\n```", parse_mode="Markdown")
 
@@ -647,10 +661,10 @@ async def cmd_set_yookassa_ips(message: types.Message):
         )
     except json.JSONDecodeError:
         await message.answer("❌ Некорректный JSON. Проверьте формат.")
-        log_error(f"Invalid JSON in set_yookassa_ips: {args[1]}", notify_admin=False)  # <-- добавлен log_error
+        log_error(f"Invalid JSON in set_yookassa_ips: {args[1]}", notify_admin=False)
     except ValueError as e:
         await message.answer(f"❌ {e}")
-        log_error(f"ValueError in set_yookassa_ips: {e}", notify_admin=False)  # <-- добавлен log_error
+        log_error(f"ValueError in set_yookassa_ips: {e}", notify_admin=False)
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
-        log_error(f"Error in set_yookassa_ips: {e}", notify_admin=True)  # <-- добавлен log_error
+        log_error(f"Error in set_yookassa_ips: {e}", notify_admin=True)

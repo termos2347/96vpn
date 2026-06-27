@@ -7,7 +7,7 @@ from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_CHAT_ID
 from db.crud_servers import add_server, get_all_servers, update_server, delete_server
 from handlers import get_server_pool
-from admin.bot import log_error
+import admin.bot
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -54,7 +54,7 @@ async def process_base_url(message: types.Message, state: FSMContext):
         host, port, api_path = parse_panel_url(raw_url)
     except Exception as e:
         await message.answer(f"Не удалось распознать URL: {e}\nПопробуйте ещё раз:")
-        log_error(f"Parse URL error in addserver: {e}", notify_admin=False)  # <-- добавлен log_error
+        admin.bot.log_error(f"Parse URL error in addserver: {e}", notify_admin=False)  # <-- добавлен log_error
         return
     await state.update_data(base_url=raw_url, host=host, port=port, api_path=api_path)
     await state.set_state(ServerForm.inbound_id)
@@ -66,7 +66,7 @@ async def process_inbound_id(message: types.Message, state: FSMContext):
         inbound_id = int(message.text.strip())
     except ValueError:
         await message.answer("inbound_id должен быть числом. Попробуйте ещё раз:")
-        log_error(f"Invalid inbound_id in addserver: {message.text}", notify_admin=False)  # <-- добавлен log_error
+        admin.bot.log_error(f"Invalid inbound_id in addserver: {message.text}", notify_admin=False)  # <-- добавлен log_error
         return
     await state.update_data(inbound_id=inbound_id)
     await state.set_state(ServerForm.username)
@@ -146,7 +146,7 @@ async def cmd_removeserver(message: types.Message):
         server_id = int(args[1])
     except ValueError:
         await message.answer("ID должен быть числом.")
-        log_error(f"Invalid server id in removeserver: {args[1]}", notify_admin=False)  # <-- добавлен log_error
+        admin.bot.log_error(f"Invalid server id in removeserver: {args[1]}", notify_admin=False)  # <-- добавлен log_error
         return
 
     from sqlalchemy import select, func
@@ -186,7 +186,7 @@ async def cmd_serversetactive(message: types.Message):
         is_active = bool(int(args[2]))
     except ValueError:
         await message.answer("ID и статус (0 или 1) должны быть числами.")
-        log_error(f"Invalid args in serversetactive: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
+        admin.bot.log_error(f"Invalid args in serversetactive: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
         return
     if await update_server(server_id, is_active=is_active):
         pool = get_server_pool()

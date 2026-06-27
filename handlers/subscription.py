@@ -1,61 +1,122 @@
 import logging
-from aiogram import Router, F, types
-from admin.bot import log_error
-from db.crud import is_vpn_active, get_vpn_client_id
-from utils.decorators import rate_limit
-from utils.validators import validate_user_id, ValidationError
-from config import settings
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+
 from handlers import get_vpn_manager
+from utils.decorators import rate_limit
+from db.crud import get_or_create_bot_user
+from db.base import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
-router = Router()
+router = Router(name="subscription")
 
-@router.message(F.text == "🚀 Подключить VPN")
-@rate_limit(max_per_minute=10)
-async def connect_vpn(message: types.Message):
-    try:
-        user_id = message.from_user.id
-        validate_user_id(user_id)
+# ------------------------------------------------------------
+# Локальные функции для клавиатур (без внешних импортов)
+# ------------------------------------------------------------
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Главное меню с основными действиями."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🚀 Подключить VPN", callback_data="connect_vpn"),
+                InlineKeyboardButton(text="💳 Оплатить VPN", callback_data="pay_vpn")
+            ],
+            [
+                InlineKeyboardButton(text="📊 Мой статус", callback_data="status"),
+                InlineKeyboardButton(text="❓ Помощь", callback_data="help")
+            ]
+        ]
+    )
 
-        active = await is_vpn_active(user_id)
-        if not active:
-            logger.info(f"User {user_id} tried to connect without active subscription")
-            await message.answer(
-                "❌ У вас нет активной VPN подписки.\n\n"
-                "💳 Оплатите подписку в разделе '💳 Оплатить VPN'"
-            )
-            return
+def get_payment_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора тарифа."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1 месяц (199₽)", callback_data="pay_vpn_1m"),
+                InlineKeyboardButton(text="3 месяца (499₽)", callback_data="pay_vpn_3m")
+            ],
+            [
+                InlineKeyboardButton(text="6 месяцев (899₽)", callback_data="pay_vpn_6m"),
+                InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")
+            ]
+        ]
+    )
 
-        client_id = await get_vpn_client_id(user_id)
-        if not client_id:
-            logger.warning(f"User {user_id} has active subscription but no client_id, will create new key")
+# ------------------------------------------------------------
+# Команда /vpn
+# ------------------------------------------------------------
+@router.message(Command("vpn"))
+@rate_limit(max_per_minute=3)
+async def cmd_vpn(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_bot_user(session, user_id)
 
-        vpn_manager = get_vpn_manager()
-        if not vpn_manager:
-            await message.answer("⚠️ Сервис временно недоступен. Попробуйте позже.")
-            return
+    if user.vpn_subscription_end:
+        end_date = user.vpn_subscription_end.strftime("%d.%m.%Y")
+        status_text = f"✅ Ваша VPN-подписка активна до **{end_date}**."
+    else:
+        status_text = "❌ У вас нет активной VPN-подписки."
 
-        link = await vpn_manager.get_or_create_link(user_id)
-        if link:
-            logger.info(f"VPN link generated for user {user_id}")
-            await message.answer(
-                f"✅ Ваша VPN подписка активна!\n\n"
-                f"🔗 Ссылка для подключения:\n`{link}`\n\n"
-                f"💡 Скопируйте ссылку и вставьте в VPN приложение",
-                parse_mode="Markdown"
-            )
-        else:
-            logger.error(f"Failed to get/create VPN link for user {user_id}")
-            await message.answer(
-                "⚠️ Не удалось получить ключ VPN.\n\n"
-                f"Попробуйте позже или обратитесь в поддержку: @{settings.SUPPORT_USERNAME}"
-            )
+    await message.answer(
+        f"📡 **VPN-подписка**\n\n{status_text}\n\n"
+        "Нажмите «Подключить VPN», чтобы получить ссылку для настройки.",
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode="Markdown"
+    )
 
-    except ValidationError as e:
-        logger.warning(f"Validation error in connect_vpn: {e}")
-        log_error(f"Validation error in connect_vpn for user {user_id}: {e}", notify_admin=False)  # <-- добавлен log_error
-        await message.answer("❌ Ошибка при получении ссылки. Попробуйте позже.")
-    except Exception as e:
-        logger.error(f"Exception in connect_vpn", exc_info=True)
-        log_error(f"Exception in connect_vpn for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
-        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+# ------------------------------------------------------------
+# Обработчик кнопки "Подключить VPN"
+# ------------------------------------------------------------
+@router.callback_query(F.data == "connect_vpn")
+@rate_limit(max_per_minute=2)
+async def callback_connect_vpn(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    vpn_manager = get_vpn_manager()
+
+    link = await vpn_manager.get_or_create_link(user_id)
+
+    if link is None:
+        await callback.answer(
+            "❌ Ваша подписка истекла или отсутствует. Оплатите продление.",
+            show_alert=True
+        )
+        await callback.message.edit_text(
+            "⏳ Ваша VPN-подписка неактивна.\n"
+            "Пожалуйста, выберите тариф и оплатите продление:",
+            reply_markup=get_payment_keyboard()
+        )
+        return
+
+    await callback.answer("✅ Ссылка получена", show_alert=False)
+    await callback.message.edit_text(
+        f"🔗 **Ваша ссылка для подключения:**\n\n`{link}`\n\n"
+        "Скопируйте её и вставьте в VPN-приложение.",
+        parse_mode="Markdown",
+        reply_markup=get_main_menu_keyboard()
+    )
+
+# ------------------------------------------------------------
+# Команда /getlink
+# ------------------------------------------------------------
+@router.message(Command("getlink"))
+@rate_limit(max_per_minute=2)
+async def cmd_getlink(message: Message):
+    user_id = message.from_user.id
+    vpn_manager = get_vpn_manager()
+
+    link = await vpn_manager.get_or_create_link(user_id)
+
+    if link is None:
+        await message.answer(
+            "❌ Ваша VPN-подписка неактивна. Пожалуйста, оплатите продление."
+        )
+        return
+
+    await message.answer(
+        f"🔗 Ваша ссылка для подключения:\n`{link}`",
+        parse_mode="Markdown"
+    )

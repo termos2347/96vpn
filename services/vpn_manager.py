@@ -95,7 +95,25 @@ class VPNManager:
         return None
 
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
-        return await self.create_key(user_id, 30)
+        """
+        Возвращает ссылку для подключения, только если у пользователя активна подписка.
+        Если подписка активна, но ключ отсутствует – создаёт новый.
+        Если подписка неактивна – возвращает None.
+        """
+        lock = await self._get_user_lock(user_id)
+        async with lock:
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    user = await get_or_create_bot_user(session, user_id)
+                    now = datetime.now(timezone.utc)
+                    # Проверяем, активна ли подписка
+                    if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
+                        logger.info(f"User {user_id} has no active subscription (end={user.vpn_subscription_end})")
+                        return None
+                    # Если активна – создаём/получаем ключ (create_key не проверяет срок, но мы уже убедились)
+                    # Передаём 30 дней, но это значение не используется для обновления срока,
+                    # только для создания клиента, если его нет.
+                    return await self._create_key_unsafe(user_id, 30, session)
 
     async def revoke_key(self, user_id: int) -> bool:
         lock = await self._get_user_lock(user_id)
