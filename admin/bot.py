@@ -65,15 +65,12 @@ async def startup():
 
     if admin_bot is None:
         admin_bot = Bot(token=settings.ADMIN_BOT_TOKEN)
-        dp = Dispatcher()
         logger.info("Admin bot instance created")
 
-    # Роутеры не подключаем — все команды определены в этом файле
     if not _router_attached:
         _router_attached = True
         logger.info("Admin bot ready (no external routers)")
 
-    # Устанавливаем команды
     await admin_bot.set_my_commands([
         BotCommand(command="start", description="Запуск бота"),
         BotCommand(command="menu", description="Показать все команды"),
