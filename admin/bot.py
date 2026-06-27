@@ -3,8 +3,8 @@ import logging
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-import json  # НОВОЕ
-from pathlib import Path  # НОВОЕ
+import json
+from pathlib import Path
 
 from aiogram import F, Bot, Dispatcher, types
 from aiogram.filters import Command, StateFilter
@@ -35,7 +35,6 @@ main_bot: Bot | None = None
 class BroadcastStates(StatesGroup):
     confirm = State()
 
-# Словарь для флагов отмены рассылки (key: chat_id)
 _broadcast_cancel_flags = {}
 
 # ---------- Вспомогательные функции ----------
@@ -48,6 +47,16 @@ async def send_admin_alert(message: str):
         await admin_bot.send_message(ADMIN_CHAT_ID, f"🚨 {message}")
     except Exception as e:
         logger.error("Failed to send admin alert", exc_info=True)
+
+# ---------- log_error ----------
+def log_error(error_message: str, notify_admin: bool = True):
+    """
+    Добавляет ошибку в error_log и опционально отправляет уведомление админу.
+    """
+    error_log.append(error_message)
+    logger.error(error_message)
+    if notify_admin:
+        asyncio.create_task(send_admin_alert(f"❌ {error_message}"))
 
 async def startup():
     global admin_bot, main_bot
@@ -113,18 +122,16 @@ async def cmd_menu(message: types.Message):
 @dp.message(Command("health"))
 async def cmd_health(message: types.Message):
     status = "✅ Статус:\n"
-    # Проверка базы данных
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         status += "• БД: подключена\n"
     except Exception as e:
         status += f"• БД: ошибка ({e})\n"
+        log_error(f"Health check DB error: {e}", notify_admin=False)  # <-- добавлен log_error
     
-    # Проверка VPN-панели через пул серверов (без глобального провайдера)
     pool = get_server_pool()
     if pool.servers:
-        # Берём первый активный сервер для проверки
         first_server = pool.servers[0]
         provider = await pool.get_provider(first_server.id)
         if provider:
@@ -135,6 +142,7 @@ async def cmd_health(message: types.Message):
                     status += "• VPN-панель: не удалось авторизоваться\n"
             except Exception as e:
                 status += f"• VPN-панель: ошибка при авторизации ({e})\n"
+                log_error(f"Health check VPN error: {e}", notify_admin=False)  # <-- добавлен log_error
         else:
             status += "• VPN-панель: провайдер не найден\n"
     else:
@@ -152,8 +160,7 @@ async def cmd_errors(message: types.Message):
         text_lines += f"{i}. {err}\n"
     await message.answer(text_lines)
 
-# ---------- Рассылка с подтверждением и ограничениями ----------
-# ---------- Рассылка с подтверждением и ограничениями ----------
+# ---------- Рассылка ----------
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message, state: FSMContext):
     if str(message.from_user.id) != ADMIN_CHAT_ID:
@@ -194,7 +201,6 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # action == "confirm"
     await callback.message.edit_text("⏳ Подготовка к рассылке...")
     await callback.answer()
 
@@ -203,7 +209,6 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     reply_chat_id = data.get("reply_chat_id")
     await state.clear()
 
-    # Получаем содержимое сообщения
     try:
         original_msg = await callback.bot.forward_message(
             chat_id=callback.message.chat.id,
@@ -215,14 +220,12 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         file_id = None
         filename = "file"
 
-        # ---- НАЧАЛО: проверка размера файла ----
         MAX_SIZE = settings.MAX_BROADCAST_FILE_SIZE_MB * 1024 * 1024
 
         if original_msg.photo:
             media_type = "photo"
             file_id = original_msg.photo[-1].file_id
             filename = "image.jpg"
-            # Проверяем размер фото, если он известен
             if original_msg.photo[-1].file_size and original_msg.photo[-1].file_size > MAX_SIZE:
                 await callback.message.answer(
                     f"❌ Файл слишком большой ({original_msg.photo[-1].file_size // (1024*1024)} МБ). "
@@ -263,15 +266,14 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                 )
                 await original_msg.delete()
                 return
-        # ---- КОНЕЦ: проверка размера файла ----
 
         await original_msg.delete()
     except Exception as e:
         logger.error("Failed to fetch original message for broadcast", exc_info=True)
+        log_error(f"Broadcast fetch error: {e}", notify_admin=True)  # <-- добавлен log_error
         await callback.message.answer(f"❌ Не удалось получить сообщение для рассылки: {e}")
         return
 
-    # Получаем список пользователей
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(BotUser.telegram_id))
         user_ids = [row[0] for row in result.all()]
@@ -292,7 +294,6 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=cancel_kb
     )
 
-    # Скачиваем медиа (если есть) один раз
     media_bytes = None
     if media_type:
         try:
@@ -301,11 +302,11 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
             media_bytes = buf.getvalue()
         except Exception as e:
             logger.error("Failed to download media for broadcast", exc_info=True)
+            log_error(f"Broadcast media download error: {e}", notify_admin=True)  # <-- добавлен log_error
             await status_msg.edit_text(f"❌ Не удалось скачать файл: {e}")
             _broadcast_cancel_flags.pop(cancel_flag_key, None)
             return
 
-    # Параметры ограничения скорости
     SEMAPHORE_LIMIT = 5
     DELAY_BETWEEN_BATCH = 1
     semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
@@ -330,7 +331,6 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
 
     success = 0
     fail = 0
-    # Отправляем пачками
     for i in range(0, total, SEMAPHORE_LIMIT):
         if _broadcast_cancel_flags.get(cancel_flag_key, False):
             await status_msg.edit_text(f"🛑 Рассылка остановлена пользователем. Отправлено: {success}, ошибок: {fail}")
@@ -350,7 +350,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                     reply_markup=cancel_kb
                 )
             except Exception:
-                pass  # если сообщение не изменилось, игнорируем
+                pass
         await asyncio.sleep(DELAY_BETWEEN_BATCH)
 
     _broadcast_cancel_flags.pop(cancel_flag_key, None)
@@ -374,12 +374,10 @@ async def stop_broadcast(callback: types.CallbackQuery):
 # ---------- Управление пользователями ----------
 @dp.message(Command("userinfo"))
 async def cmd_userinfo(message: types.Message):
-    # Проверка прав администратора
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
 
-    # Разбор аргументов
     args = message.text.split()
     if len(args) < 2:
         await message.answer("❗ Используйте: /userinfo <telegram_id>")
@@ -388,15 +386,14 @@ async def cmd_userinfo(message: types.Message):
         tid = int(args[1])
     except ValueError:
         await message.answer("❌ Неверный формат telegram_id.")
+        log_error(f"Invalid telegram_id in userinfo: {args[1]}", notify_admin=False)  # <-- добавлен log_error
         return
 
-    # Получение данных пользователя
     data = await get_user_full_data(tid)
     if not data:
         await message.answer(f"❌ Пользователь с ID {tid} не найден.")
         return
 
-    # Расчёт оставшихся дней
     now = datetime.now(timezone.utc)
     vpn_end = data["vpn_subscription_end"]
     bypass_end = data["bypass_subscription_end"]
@@ -406,7 +403,6 @@ async def cmd_userinfo(message: types.Message):
     vpn_active = vpn_left > 0
     bypass_active = bypass_left > 0
 
-    # Форматирование дат
     vpn_end_str = vpn_end.strftime('%d.%m.%Y %H:%M') if vpn_end else "—"
     bypass_end_str = bypass_end.strftime('%d.%m.%Y %H:%M') if bypass_end else "—"
     created_str = data["created_at"].strftime('%d.%m.%Y %H:%M') if data["created_at"] else "—"
@@ -414,7 +410,6 @@ async def cmd_userinfo(message: types.Message):
     vpn_key = data["vpn_client_id"] or "не создан"
     server_id = data["server_id"] or "—"
 
-    # Формирование ответа
     text = (
         f"👤 **Пользователь**: {tid}\n"
         f"🔹 **Username**: @{data['username'] or '—'}\n"
@@ -429,7 +424,6 @@ async def cmd_userinfo(message: types.Message):
         f"   Окончание: {bypass_end_str}\n"
         f"   Осталось: {bypass_left} дн."
     )
-
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("grant"))
@@ -446,24 +440,19 @@ async def cmd_grant(message: types.Message):
         days = int(args[2])
     except ValueError:
         await message.answer("❌ Неверный формат.")
+        log_error(f"Invalid args in grant: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
         return
     if days <= 0:
         await message.answer("❌ Дни должны быть положительным числом.")
         return
 
-    # Проверяем существование пользователя
     async with AsyncSessionLocal() as session:
         user = await get_user_by_telegram_id(session, tid)
         if not user:
             await message.answer(f"❌ Пользователь с ID {tid} не найден в базе.")
             return
-
-        # Обновляем подписку
         user = await update_vpn_subscription(session, tid, days)
-        # (update_vpn_subscription теперь не создаёт нового пользователя,
-        #  но на всякий случай оставим проверку выше)
 
-    # Создаём/обновляем ключ
     manager = get_vpn_manager()
     link = await manager.create_key(tid, days)
     if link:
@@ -490,6 +479,7 @@ async def cmd_revoke(message: types.Message):
         tid = int(args[1])
     except ValueError:
         await message.answer("❌ Неверный формат.")
+        log_error(f"Invalid args in revoke: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
         return
 
     async with AsyncSessionLocal() as session:
@@ -519,107 +509,99 @@ async def cmd_stats(message: types.Message):
     week_later = now + timedelta(days=7)
     month_later = now + timedelta(days=30)
 
-    # Все запросы выполняем в одной сессии
-    async with AsyncSessionLocal() as session:
-        # Общее количество пользователей
-        total_res = await session.execute(select(func.count(BotUser.id)))
-        total = total_res.scalar() or 0
+    try:
+        async with AsyncSessionLocal() as session:
+            total_res = await session.execute(select(func.count(BotUser.id)))
+            total = total_res.scalar() or 0
 
-        # Новые сегодня
-        new_today_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= today_start)
-        )
-        new_today = new_today_res.scalar() or 0
-
-        # Новые за неделю
-        new_week_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago)
-        )
-        new_week = new_week_res.scalar() or 0
-
-        # Новые за месяц
-        new_month_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago)
-        )
-        new_month = new_month_res.scalar() or 0
-
-        # Активные подписки (vpn_subscription_end > now)
-        active_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now)
-        )
-        active = active_res.scalar() or 0
-
-        # Истекают сегодня (до конца дня)
-        expire_today_res = await session.execute(
-            select(func.count(BotUser.id)).where(
-                BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= today_start + timedelta(days=1)
+            new_today_res = await session.execute(
+                select(func.count(BotUser.id)).where(BotUser.created_at >= today_start)
             )
-        )
-        expire_today = expire_today_res.scalar() or 0
+            new_today = new_today_res.scalar() or 0
 
-        # Истекают в течение 7 дней
-        expire_7d_res = await session.execute(
-            select(func.count(BotUser.id)).where(
-                BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= week_later
+            new_week_res = await session.execute(
+                select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago)
             )
-        )
-        expire_7d = expire_7d_res.scalar() or 0
+            new_week = new_week_res.scalar() or 0
 
-        # Истекают в течение 30 дней
-        expire_30d_res = await session.execute(
-            select(func.count(BotUser.id)).where(
-                BotUser.vpn_subscription_end > now,
-                BotUser.vpn_subscription_end <= month_later
+            new_month_res = await session.execute(
+                select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago)
             )
-        )
-        expire_30d = expire_30d_res.scalar() or 0
+            new_month = new_month_res.scalar() or 0
 
-        # Истекшие (vpn_subscription_end <= now и не NULL)
-        expired_res = await session.execute(
-            select(func.count(BotUser.id)).where(
-                BotUser.vpn_subscription_end <= now,
-                BotUser.vpn_subscription_end.isnot(None)
+            active_res = await session.execute(
+                select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now)
             )
-        )
-        expired = expired_res.scalar() or 0
+            active = active_res.scalar() or 0
 
-        # Без подписки (vpn_subscription_end IS NULL)
-        no_sub_res = await session.execute(
-            select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None))
-        )
-        no_sub = no_sub_res.scalar() or 0
-
-        # Средний остаток дней у активных (используем функцию avg)
-        avg_days_res = await session.execute(
-            select(func.avg(BotUser.vpn_subscription_end - now)).where(
-                BotUser.vpn_subscription_end > now
+            expire_today_res = await session.execute(
+                select(func.count(BotUser.id)).where(
+                    BotUser.vpn_subscription_end > now,
+                    BotUser.vpn_subscription_end <= today_start + timedelta(days=1)
+                )
             )
+            expire_today = expire_today_res.scalar() or 0
+
+            expire_7d_res = await session.execute(
+                select(func.count(BotUser.id)).where(
+                    BotUser.vpn_subscription_end > now,
+                    BotUser.vpn_subscription_end <= week_later
+                )
+            )
+            expire_7d = expire_7d_res.scalar() or 0
+
+            expire_30d_res = await session.execute(
+                select(func.count(BotUser.id)).where(
+                    BotUser.vpn_subscription_end > now,
+                    BotUser.vpn_subscription_end <= month_later
+                )
+            )
+            expire_30d = expire_30d_res.scalar() or 0
+
+            expired_res = await session.execute(
+                select(func.count(BotUser.id)).where(
+                    BotUser.vpn_subscription_end <= now,
+                    BotUser.vpn_subscription_end.isnot(None)
+                )
+            )
+            expired = expired_res.scalar() or 0
+
+            no_sub_res = await session.execute(
+                select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None))
+            )
+            no_sub = no_sub_res.scalar() or 0
+
+            avg_days_res = await session.execute(
+                select(func.avg(BotUser.vpn_subscription_end - now)).where(
+                    BotUser.vpn_subscription_end > now
+                )
+            )
+            avg_days_val = avg_days_res.scalar()
+            avg_days = int(avg_days_val) if avg_days_val is not None else 0
+
+        text = (
+            "📊 Статистика VPN-клиентов:\n"
+            f"• Всего пользователей: {total}\n"
+            f"• Новые сегодня: {new_today}\n"
+            f"• Новые за 7 дней: {new_week}\n"
+            f"• Новые за 30 дней: {new_month}\n\n"
+            f"🚀 Активные подписки: {active}\n"
+            f"   – истекают сегодня: {expire_today}\n"
+            f"   – истекают в течение 7 дн.: {expire_7d}\n"
+            f"   – истекают в течение 30 дн.: {expire_30d}\n"
+            f"   – средний остаток: {avg_days} дн.\n\n"
+            f"❌ Истекшие подписки: {expired}\n"
+            f"⚪ Без подписки: {no_sub}"
         )
-        avg_days_val = avg_days_res.scalar()
-        avg_days = int(avg_days_val) if avg_days_val is not None else 0
+        await message.answer(text)
+    except Exception as e:
+        logger.error(f"Error in stats: {e}", exc_info=True)
+        log_error(f"Stats error: {e}", notify_admin=True)  # <-- добавлен log_error
+        await message.answer("❌ Ошибка при получении статистики.")
 
-    text = (
-        "📊 Статистика VPN-клиентов:\n"
-        f"• Всего пользователей: {total}\n"
-        f"• Новые сегодня: {new_today}\n"
-        f"• Новые за 7 дней: {new_week}\n"
-        f"• Новые за 30 дней: {new_month}\n\n"
-        f"🚀 Активные подписки: {active}\n"
-        f"   – истекают сегодня: {expire_today}\n"
-        f"   – истекают в течение 7 дн.: {expire_7d}\n"
-        f"   – истекают в течение 30 дн.: {expire_30d}\n"
-        f"   – средний остаток: {avg_days} дн.\n\n"
-        f"❌ Истекшие подписки: {expired}\n"
-        f"⚪ Без подписки: {no_sub}"
-    )
-    await message.answer(text)
-
-# ---------- Команды для управления IP-адресами ЮKassa (НОВОЕ) ----------
+# ---------- Команды для управления IP-адресами ЮKassa ----------
 @dp.message(Command("yookassa_ips"))
 async def cmd_show_yookassa_ips(message: types.Message):
-    """Показать текущий список доверенных IP-адресов ЮKassa."""
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
@@ -653,12 +635,10 @@ async def cmd_set_yookassa_ips(message: types.Message):
         if not all(isinstance(item, str) for item in new_ips):
             raise ValueError("Все элементы должны быть строками (IP или CIDR).")
 
-        # Сохраняем в файл
         if not save_trusted_ips(new_ips):
             await message.answer("❌ Не удалось сохранить файл. Проверьте права доступа.")
             return
 
-        # Обновляем в памяти
         settings.YOOKASSA_TRUSTED_IPS = new_ips
 
         await message.answer(
@@ -667,7 +647,10 @@ async def cmd_set_yookassa_ips(message: types.Message):
         )
     except json.JSONDecodeError:
         await message.answer("❌ Некорректный JSON. Проверьте формат.")
+        log_error(f"Invalid JSON in set_yookassa_ips: {args[1]}", notify_admin=False)  # <-- добавлен log_error
     except ValueError as e:
         await message.answer(f"❌ {e}")
+        log_error(f"ValueError in set_yookassa_ips: {e}", notify_admin=False)  # <-- добавлен log_error
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
+        log_error(f"Error in set_yookassa_ips: {e}", notify_admin=True)  # <-- добавлен log_error

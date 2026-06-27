@@ -7,6 +7,7 @@ from aiogram.fsm.state import StatesGroup, State
 from config import ADMIN_CHAT_ID
 from db.crud_servers import add_server, get_all_servers, update_server, delete_server
 from handlers import get_server_pool
+from admin.bot import log_error
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -20,19 +21,16 @@ class ServerForm(StatesGroup):
     password = State()
     weight = State()
 
-# ---------- Вспомогательные функции ----------
 def is_admin(user_id: int) -> bool:
     return str(user_id) == ADMIN_CHAT_ID
 
 def parse_panel_url(url: str):
-    """Извлекает host, port, api_path из полного URL панели 3x‑UI."""
     parsed = urlparse(url)
     host = parsed.hostname
     port = parsed.port if parsed.port else 443
     api_path = parsed.path.rstrip('/')
     return host, port, api_path
 
-# ---------- Поэтапное добавление сервера ----------
 @router.message(Command("addserver"))
 async def cmd_addserver_start(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
@@ -56,6 +54,7 @@ async def process_base_url(message: types.Message, state: FSMContext):
         host, port, api_path = parse_panel_url(raw_url)
     except Exception as e:
         await message.answer(f"Не удалось распознать URL: {e}\nПопробуйте ещё раз:")
+        log_error(f"Parse URL error in addserver: {e}", notify_admin=False)  # <-- добавлен log_error
         return
     await state.update_data(base_url=raw_url, host=host, port=port, api_path=api_path)
     await state.set_state(ServerForm.inbound_id)
@@ -67,6 +66,7 @@ async def process_inbound_id(message: types.Message, state: FSMContext):
         inbound_id = int(message.text.strip())
     except ValueError:
         await message.answer("inbound_id должен быть числом. Попробуйте ещё раз:")
+        log_error(f"Invalid inbound_id in addserver: {message.text}", notify_admin=False)  # <-- добавлен log_error
         return
     await state.update_data(inbound_id=inbound_id)
     await state.set_state(ServerForm.username)
@@ -112,7 +112,6 @@ async def process_weight(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Сервер с именем '{data['name']}' уже существует.")
     await state.clear()
 
-# ---------- Вспомогательные команды ----------
 @router.message(Command("listservers"))
 async def cmd_listservers(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -147,9 +146,9 @@ async def cmd_removeserver(message: types.Message):
         server_id = int(args[1])
     except ValueError:
         await message.answer("ID должен быть числом.")
+        log_error(f"Invalid server id in removeserver: {args[1]}", notify_admin=False)  # <-- добавлен log_error
         return
 
-    # Проверяем, есть ли пользователи с таким server_id
     from sqlalchemy import select, func
     from db.base import AsyncSessionLocal
     from db.models import BotUser
@@ -166,7 +165,6 @@ async def cmd_removeserver(message: types.Message):
             )
             return
 
-    # Если нет пользователей – удаляем
     if await delete_server(server_id):
         pool = get_server_pool()
         await pool.refresh_servers()
@@ -188,6 +186,7 @@ async def cmd_serversetactive(message: types.Message):
         is_active = bool(int(args[2]))
     except ValueError:
         await message.answer("ID и статус (0 или 1) должны быть числами.")
+        log_error(f"Invalid args in serversetactive: {args[1:]}", notify_admin=False)  # <-- добавлен log_error
         return
     if await update_server(server_id, is_active=is_active):
         pool = get_server_pool()

@@ -129,18 +129,15 @@ async def get_user_full_data(telegram_id: int) -> Optional[dict]:
                 "updated_at": row[8]
             }
         return None
+
 # ---------- Новая атомарная активация ----------
 async def activate_subscription(
     session: AsyncSession,
     telegram_id: int,
     product_type: str,
     period: str,
-    payment_id: Optional[str] = None   # оставляем для совместимости, но не используем
+    payment_id: Optional[str] = None
 ) -> bool:
-    """
-    Атомарно активирует подписку (vpn/bypass) для пользователя.
-    Не занимается платежами – только обновляет дату окончания.
-    """
     days = settings.PERIOD_DAYS.get(period)
     if not days:
         raise ValueError(f"Unknown period: {period}")
@@ -162,7 +159,6 @@ async def activate_subscription(
         raise ValueError(f"Unknown product: {product_type}")
 
     user.updated_at = now
-    # Изменения закоммитятся вызывающим кодом (process_webhook)
     return True
 
 # ---------- Вспомогательные функции для проверки ----------

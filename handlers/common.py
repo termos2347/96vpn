@@ -14,6 +14,7 @@ from utils.validators import validate_user_id, ValidationError
 from utils.cache import get_cache, set_cache
 from config import settings
 from .keyboards import main_keyboard
+from admin.bot import log_error
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -47,12 +48,14 @@ async def cmd_start(message: types.Message):
         logger.info(f"User {message.from_user.id} blocked the bot")
     except ValidationError as e:
         logger.warning(f"Validation error in /start: {e}")
+        log_error(f"Validation error in /start for user {user_id}: {e}", notify_admin=False)  # <-- добавлен log_error
         try:
             await message.answer("❌ Ошибка при инициализации. Попробуйте позже.")
         except TelegramForbiddenError:
             pass
     except Exception as e:
         logger.error(f"Exception in /start: {e}", exc_info=True)
+        log_error(f"Exception in /start for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
         try:
             await message.answer("❌ Произошла ошибка. Попробуйте позже.")
         except TelegramForbiddenError:
@@ -88,7 +91,6 @@ async def info(message: types.Message):
             set_cache(cache_key_vpn, vpn_active, 300)
             set_cache(cache_key_bypass, bypass_active, 300)
 
-        # Получаем количество дней (отдельно, с обработкой ошибок)
         vpn_status = ""
         if vpn_active:
             try:
@@ -123,7 +125,9 @@ async def info(message: types.Message):
         )
     except ValidationError as e:
         logger.warning(f"Validation error in info: {e}")
+        log_error(f"Validation error in info for user {user_id}: {e}", notify_admin=False)  # <-- добавлен log_error
         await message.answer("❌ Ошибка при получении информации.")
     except Exception as e:
         logger.exception(f"Exception in info: {e}")
+        log_error(f"Exception in info for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
         await message.answer("❌ Произошла ошибка при получении информации.")

@@ -10,6 +10,7 @@ from db.models import BotUser
 from db.crud import set_vpn_client_id, set_vpn_server_id, get_or_create_bot_user
 from handlers import get_server_pool, get_vpn_manager
 from admin import send_admin_alert
+from admin.bot import log_error  # <-- добавлен импорт
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,7 @@ async def check_expired_subscriptions(bot):
                                     await asyncio.sleep(2 ** attempt)
 
                         if success:
-                            # ✅ Поля vpn_client_id и server_id уже обнулены внутри revoke_key,
-                            # дополнительных операций с БД не требуется.
                             logger.info(f"Ключ {client_uuid} отозван для user_id={user.telegram_id}")
-
                             try:
                                 await bot.send_message(
                                     user.telegram_id,
@@ -82,8 +80,9 @@ async def check_expired_subscriptions(bot):
             logger.info("Task check_expired_subscriptions cancelled")
             raise
         except Exception as e:
-            logger.error(f"Критическая ошибка в задаче проверки подписок: {e}", exc_info=True)
-            await send_admin_alert(f"Критическая ошибка в задаче проверки подписок: {e}")
+            error_text = f"Critical error in check_expired_subscriptions: {e}"
+            logger.error(error_text, exc_info=True)
+            log_error(error_text, notify_admin=True)  # <-- добавлен log_error
             await asyncio.sleep(60)
 
 async def send_expiry_reminders(bot):
@@ -123,7 +122,7 @@ async def send_expiry_reminders(bot):
                                 break
                             except TelegramForbiddenError:
                                 logger.info(f"User {user.telegram_id} blocked the bot, skipping reminders")
-                                break  # не пытаемся больше отправлять этому пользователю
+                                break
                             except Exception as e:
                                 logger.warning(f"Не удалось отправить напоминание пользователю {user.telegram_id}, attempt {attempt+1}: {e}")
                                 if attempt < 2:
@@ -139,14 +138,16 @@ async def send_expiry_reminders(bot):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"Ошибка в задаче напоминаний: {e}", exc_info=True)
+                error_text = f"Error in send_expiry_reminders: {e}"
+                logger.error(error_text, exc_info=True)
+                log_error(error_text, notify_admin=True)  # <-- добавлен log_error
 
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         logger.info("Task send_expiry_reminders cancelled")
         raise
 
-async def refresh_server_pool_periodically(interval_seconds: int = 3600):
+async def refresh_server_pool_periodically(interval_seconds: int = 1800):
     """
     Фоновая задача: периодически обновляет пул серверов из БД,
     пересоздаёт провайдеров и выполняет повторный логин.
@@ -155,22 +156,22 @@ async def refresh_server_pool_periodically(interval_seconds: int = 3600):
         try:
             logger.info("🔄 Scheduled server pool refresh started")
             pool = get_server_pool()
-            # wait_for_login=True, чтобы дождаться логина (с таймаутом 10 сек)
             await pool.refresh_servers(wait_for_login=True, login_timeout=10.0)
             logger.info("✅ Server pool refreshed successfully")
         except asyncio.CancelledError:
             logger.info("Task refresh_server_pool_periodically cancelled")
             raise
         except Exception as e:
-            logger.error(f"❌ Error refreshing server pool: {e}", exc_info=True)
-            await send_admin_alert(f"Ошибка при обновлении пула серверов: {e}")
+            error_text = f"Error refreshing server pool: {e}"
+            logger.error(error_text, exc_info=True)
+            log_error(error_text, notify_admin=True)  # <-- добавлен log_error
 
         await asyncio.sleep(interval_seconds)
-        
+
 async def start_scheduler(bot):
     """Запускает все фоновые задачи и возвращает их для управления."""
     task1 = asyncio.create_task(check_expired_subscriptions(bot))
     task2 = asyncio.create_task(send_expiry_reminders(bot))
-    task3 = asyncio.create_task(refresh_server_pool_periodically(interval_seconds=1800))  # каждые 30 минут
+    task3 = asyncio.create_task(refresh_server_pool_periodically(interval_seconds=1800))
     logger.info("Фоновые задачи запущены: проверка подписок, напоминания, обновление пула серверов")
     return [task1, task2, task3]

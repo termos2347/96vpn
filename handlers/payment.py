@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 
 from db.base import AsyncSessionLocal
-from db.models import BotPayment  # Импортируем обновленную модель
+from db.models import BotPayment
 from db.crud import activate_subscription, update_bypass_subscription, update_vpn_subscription 
 from config import settings
 from services.payment_yookassa import yookassa_service
@@ -16,11 +16,11 @@ from utils.decorators import rate_limit
 from utils.validators import validate_user_id, validate_currency, ValidationError
 from handlers import get_vpn_manager
 from admin import send_admin_alert
+from admin.bot import log_error
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-# ---------- Оплата через ЮKassa (RUB, USDT) ----------
 @router.message(F.text == "💳 Оплатить VPN")
 @rate_limit(max_per_minute=10)
 async def pay_vpn(message: types.Message):
@@ -29,6 +29,7 @@ async def pay_vpn(message: types.Message):
         await message.answer("💎 Выберите валюту для оплаты VPN:", reply_markup=vpn_currency_keyboard())
     except ValidationError as e:
         logger.warning(f"Validation error in pay_vpn: {e}")
+        log_error(f"Validation error in pay_vpn for user {message.from_user.id}: {e}", notify_admin=False)  # <-- добавлен log_error
         await message.answer("❌ Ошибка валидации. Попробуйте позже.")
 
 @router.callback_query(F.data.startswith("vpn_currency_"))
@@ -45,6 +46,7 @@ async def vpn_choose_period(callback: types.CallbackQuery):
         await callback.answer()
     except ValidationError as e:
         logger.warning(f"Validation error: {e}")
+        log_error(f"Validation error in vpn_choose_period for user {callback.from_user.id}: {e}", notify_admin=False)  # <-- добавлен log_error
         await callback.answer("❌ Ошибка", show_alert=True)
 
 @router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|usdt)$"))
@@ -55,11 +57,7 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
     price = settings.VPN_PRICES[currency][period]
     description = f"VPN подписка {period} ({currency})"
 
-    # ЮKassa работает только с RUB официально. 
-    # Если валюта не RUB, обработка должна идти через другие шлюзы, но для ЮKassa жестко пишем RUB/валюту сверки
     db_currency = currency.upper()
-
-    # 1. Защита: Генерируем временный ID для предварительной записи в БД
     local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
 
     try:
@@ -75,7 +73,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
                 )
                 session.add(new_payment)
         
-        # 2. Формируем метаданные для ЮKassa
         metadata = {
             "source": "bot",
             "telegram_id": user_id,
@@ -84,7 +81,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
             "currency": db_currency
         }
 
-        # 3. Запрашиваем платежную ссылку у ЮKassa
         payment = await yookassa_service.create_payment(price, description, metadata)
         if not payment:
             await callback.answer("❌ Ошибка создания платежа в платежной системе", show_alert=True)
@@ -97,7 +93,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
             await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
             return
 
-        # 4. Защита: Обновляем временный ID на реальный payment_id от ЮKassa
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 stmt = select(BotPayment).where(BotPayment.payment_id == local_tx_id)
@@ -110,7 +105,6 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
                     await callback.answer("❌ Системная ошибка. Попробуйте заново.", show_alert=True)
                     return
 
-        # 5. Выдаем ссылку пользователю
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Оплатить", url=url)]
         ])
@@ -125,9 +119,9 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in vpn_payment_rub_usdt chain: {e}", exc_info=True)
+        log_error(f"Error in vpn_payment_rub_usdt for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
         await callback.answer("❌ Произошла внутренняя ошибка сервера", show_alert=True)
 
-# ---------- Оплата через Telegram Stars ----------
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
@@ -161,6 +155,7 @@ async def successful_payment(message: types.Message):
                 )
     except Exception as e:
         logger.exception(f"Activation error for payment {telegram_payment_id}")
+        log_error(f"Activation error for payment {telegram_payment_id}: {e}", notify_admin=True)  # <-- добавлен log_error
         await message.answer("❌ Ошибка при активации подписки. Обратитесь в поддержку.")
         return
 
@@ -177,7 +172,6 @@ async def successful_payment(message: types.Message):
                 if link:
                     await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
                 else:
-                    # Ключ не создан – уведомляем пользователя и админа
                     await message.answer(
                         "✅ Ваша VPN-подписка активирована, но не удалось создать ключ автоматически.\n"
                         "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту – ключ будет создан.\n"
@@ -190,6 +184,7 @@ async def successful_payment(message: types.Message):
                 await message.answer(f"✅ VPN подписка на {days} дней активирована! (сервис ключей временно недоступен)")
         except Exception as e:
             logger.exception(f"Key creation failed for user {target_user_id}")
+            log_error(f"Key creation failed for user {target_user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
             await message.answer(
                 "✅ Подписка активирована, но произошла ошибка при создании ключа.\n"
                 "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту."
