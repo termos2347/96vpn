@@ -14,7 +14,7 @@ from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
 from db.migrate import run_migrations
 from db.base import engine
-from internal_api import create_internal_app, set_main_bot, set_main_dp, set_admin_bot, set_admin_dp
+from internal_api import create_internal_app
 import admin.bot
 from utils.logger import setup_logger
 
@@ -113,16 +113,14 @@ async def on_startup():
         await setup_bot_commands(main_bot)
         logger.info("✅ Main bot initialized")
 
-        # Передаём экземпляры во внутреннее API
-        set_main_bot(main_bot)
-        set_main_dp(main_dp)
-        set_admin_bot(admin.bot.admin_bot)
-        set_admin_dp(admin.bot.dp)
-        logger.info("   Internal API hooks set")
-
-        # 5. Внутренний API сервер
+        # 5. Внутренний API сервер – передаём объекты напрямую
         logger.info("Step 5/7: Starting internal API server...")
-        internal_app = create_internal_app()
+        internal_app = create_internal_app(
+            main_bot=main_bot,
+            main_dp=main_dp,
+            admin_bot=admin.bot.admin_bot,
+            admin_dp=admin.bot.dp
+        )
         internal_runner = web.AppRunner(internal_app)
         await internal_runner.setup()
         site = web.TCPSite(

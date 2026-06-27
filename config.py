@@ -2,12 +2,13 @@ import os
 import sys
 import logging
 import zoneinfo
+import json
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, ValidationError
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
-import json
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ class Settings(BaseSettings):
     INTERNAL_API_SECRET: str = Field(..., min_length=1)
     VERIFY_SSL: bool = True
 
-    # ---------- Yookassa (все обязательны) ----------
+    # ---------- Yookassa ----------
     YOOKASSA_SHOP_ID: str = Field(..., min_length=1)
     YOOKASSA_API_KEY: str = Field(..., min_length=1)
     YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
@@ -166,6 +167,7 @@ class Settings(BaseSettings):
             "6m": self.PERIOD_DAYS_6M,
         }
 
+
 # ---------- Создание экземпляра с обработкой ошибок ----------
 try:
     settings = Settings()
@@ -176,7 +178,7 @@ except ValidationError as e:
         logging.error(f"  - {error.get('loc')[0]}: {error.get('msg')}")
     sys.exit(1)
 
-# Экспорт для обратной совместимости
+# ---------- Экспорт для обратной совместимости ----------
 TOKEN = settings.BOT_TOKEN
 DATABASE_URL = settings.DATABASE_URL
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
@@ -187,3 +189,55 @@ INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 INTERNAL_API_URL = settings.INTERNAL_API_URL
+
+
+# ---------- НОВЫЙ БЛОК: работа с yookassa_ip.json ----------
+IPS_FILE = Path("yookassa_ip.json")
+
+def load_trusted_ips() -> Optional[List[str]]:
+    """Загружает список доверенных IP из файла. Возвращает None при ошибке или отсутствии."""
+    if not IPS_FILE.exists():
+        return None
+    try:
+        with open(IPS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list) and all(isinstance(x, str) for x in data):
+            return data
+        else:
+            logging.warning("yookassa_ip.json has invalid format, expected list of strings")
+            return None
+    except Exception as e:
+        logging.error(f"Failed to load yookassa_ip.json: {e}")
+        return None
+
+def save_trusted_ips(ips: List[str]) -> bool:
+    """Сохраняет список IP в файл. Возвращает True при успехе."""
+    try:
+        with open(IPS_FILE, "w", encoding="utf-8") as f:
+            json.dump(ips, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to save yookassa_ip.json: {e}")
+        return False
+
+# Если файл не существует, создаём его с текущим списком из .env
+if not IPS_FILE.exists():
+    initial_ips = settings.YOOKASSA_TRUSTED_IPS
+    if save_trusted_ips(initial_ips):
+        logging.info(f"✅ Created yookassa_ip.json with initial IPs from .env ({len(initial_ips)} entries)")
+    else:
+        logging.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
+
+# Загружаем из файла (если он существует, даже только что создан)
+_loaded_ips = load_trusted_ips()
+if _loaded_ips is not None:
+    if _loaded_ips:
+        settings.YOOKASSA_TRUSTED_IPS = _loaded_ips
+        logging.info(f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)")
+    else:
+        logging.warning("⚠️ yookassa_ip.json contains an empty list. Keeping value from .env.")
+        # Можно также создать файл заново с .env, чтобы исправить ситуацию:
+        # save_trusted_ips(settings.YOOKASSA_TRUSTED_IPS)
+else:
+    logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
+    

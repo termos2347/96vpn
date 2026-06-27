@@ -31,7 +31,7 @@ pip install -r requirements.txt
 
 ## Запуск
 ```
-npx localtunnel --port 5001 --subdomain my-test
+npx localtunnel --port 5001 --subdomain my-test-96
 ```
 
 ```

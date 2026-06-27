@@ -13,7 +13,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import BotCommand, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, text, func
 
-from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN, settings
+from config import ADMIN_BOT_TOKEN, ADMIN_CHAT_ID, TOKEN as MAIN_BOT_TOKEN, save_trusted_ips, settings
 from handlers import get_vpn_manager
 from db.base import engine, AsyncSessionLocal
 from db.models import BotUser
@@ -634,11 +634,10 @@ async def cmd_show_yookassa_ips(message: types.Message):
 
 @dp.message(Command("set_yookassa_ips"))
 async def cmd_set_yookassa_ips(message: types.Message):
-    """Установить новый список доверенных IP-адресов ЮKassa."""
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
-    
+
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
@@ -646,36 +645,22 @@ async def cmd_set_yookassa_ips(message: types.Message):
             "Пример: `/set_yookassa_ips [\"185.71.76.0/24\", \"185.71.77.0/24\"]`"
         )
         return
-    
+
     try:
         new_ips = json.loads(args[1])
         if not isinstance(new_ips, list) or not new_ips:
             raise ValueError("Список должен быть непустым массивом строк.")
         if not all(isinstance(item, str) for item in new_ips):
             raise ValueError("Все элементы должны быть строками (IP или CIDR).")
-        
-        # 1. Обновляем в памяти (применяется мгновенно)
+
+        # Сохраняем в файл
+        if not save_trusted_ips(new_ips):
+            await message.answer("❌ Не удалось сохранить файл. Проверьте права доступа.")
+            return
+
+        # Обновляем в памяти
         settings.YOOKASSA_TRUSTED_IPS = new_ips
-        
-        # 2. Сохраняем в .env (чтобы после перезапуска значение сохранилось)
-        env_path = Path(".env")
-        if env_path.exists():
-            lines = env_path.read_text(encoding="utf-8").splitlines()
-            new_lines = []
-            found = False
-            for line in lines:
-                if line.strip().startswith("YOOKASSA_TRUSTED_IPS="):
-                    new_line = f"YOOKASSA_TRUSTED_IPS='{json.dumps(new_ips)}'"
-                    new_lines.append(new_line)
-                    found = True
-                else:
-                    new_lines.append(line)
-            if not found:
-                new_lines.append(f"YOOKASSA_TRUSTED_IPS='{json.dumps(new_ips)}'")
-            env_path.write_text("\n".join(new_lines), encoding="utf-8")
-        else:
-            await message.answer("⚠️ Файл .env не найден, переменная сохранена только в памяти.")
-        
+
         await message.answer(
             f"✅ Список доверенных IP обновлён.\n\n```json\n{json.dumps(new_ips, indent=2, ensure_ascii=False)}\n```",
             parse_mode="Markdown"
