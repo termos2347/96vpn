@@ -10,14 +10,15 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile, Message,  CallbackQuery
 from sqlalchemy import engine, func, select, text
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
-from db.base import AsyncSessionLocal
+from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import get_user_by_telegram_id, get_user_full_data, update_vpn_subscription
-from db.models import BotUser
+from db.models import BotPayment, BotUser
 from handlers import get_server_pool, get_vpn_manager
+from utils.validators import validate_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -172,33 +173,141 @@ async def cmd_errors(message: types.Message):
     await message.answer(text_lines)
 
 # ========== Рассылка ==========
-@dp.message(Command("broadcast"))
-async def cmd_broadcast(message: types.Message, state: FSMContext):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    if not message.reply_to_message:
-        await message.answer("❗ Ответьте на сообщение, которое нужно разослать, и пришлите /broadcast.")
-        return
+@retry_db_operation(max_retries=3)
+async def cmd_broadcast(message: Message):
+    """
+    Рассылает сообщение всем пользователям бота (или только с активной подпиской).
+    Формат: /broadcast [--active] <текст сообщения>
+    --active — опциональный флаг, отправляет только пользователям с активной VPN-подпиской.
+    Пример: /broadcast Всем привет!
+    Пример: /broadcast --active Важная информация для активных пользователей.
+    """
+    try:
+        text_parts = message.text.split(maxsplit=1)
+        if len(text_parts) < 2:
+            await message.answer(
+                "❌ Неверный формат.\n"
+                "Используйте: `/broadcast [--active] <сообщение>`\n"
+                "Пример: `/broadcast Всем привет!`",
+                parse_mode="Markdown"
+            )
+            return
 
-    reply = message.reply_to_message
-    await state.update_data(
-        reply_message_id=reply.message_id,
-        reply_chat_id=reply.chat.id
+        # Разбираем аргументы
+        arg_part = text_parts[1]  # всё после команды
+        only_active = False
+        broadcast_text = arg_part
+
+        if arg_part.startswith("--active"):
+            # Удаляем флаг
+            broadcast_text = arg_part[len("--active"):].lstrip()
+            only_active = True
+
+        if not broadcast_text:
+            await message.answer("❌ Сообщение не может быть пустым.")
+            return
+
+        # Сохраняем данные в контексте для callback'а (можно использовать FSM или глобальный словарь)
+        # Временно сохраним в памяти с привязкой к пользователю-админу
+        if not hasattr(cmd_broadcast, "pending_broadcasts"):
+            cmd_broadcast.pending_broadcasts = {}
+
+        admin_id = message.from_user.id
+        cmd_broadcast.pending_broadcasts[admin_id] = {
+            "text": broadcast_text,
+            "only_active": only_active,
+            "original_message": message
+        }
+
+        # Отправляем запрос на подтверждение
+        await message.answer(
+            f"⚠️ Вы собираетесь отправить сообщение **всем {'активным ' if only_active else ''}пользователям**.\n\n"
+            f"Сообщение:\n```\n{broadcast_text}\n```\n\n"
+            f"Подтвердите действие:",
+            parse_mode="Markdown",
+            reply_markup=get_confirm_keyboard()
+        )
+
+    except Exception as e:
+        logger.error(f"Error in cmd_broadcast: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при подготовке рассылки.")
+
+def get_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да", callback_data="broadcast_confirm_yes"),
+                InlineKeyboardButton(text="❌ Нет", callback_data="broadcast_confirm_no")
+            ]
+        ]
     )
-    await state.set_state(BroadcastStates.confirm)
+    
+@dp.callback_query(F.data.startswith("broadcast_confirm_"))
+async def broadcast_confirm_callback(callback: CallbackQuery):
+    """
+    Обрабатывает нажатие кнопок подтверждения рассылки.
+    """
+    try:
+        await callback.answer()
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, начать рассылку", callback_data="broadcast_confirm")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast_cancel")]
-    ])
-    await message.answer(
-        "⚠️ Вы уверены, что хотите разослать это сообщение ВСЕМ пользователям?\n"
-        "Это действие нельзя отменить.\n\n"
-        "Нажмите 'Да, начать рассылку' для запуска.",
-        reply_markup=kb
-    )
+        admin_id = callback.from_user.id
+        pending = getattr(cmd_broadcast, "pending_broadcasts", {}).get(admin_id)
 
+        if not pending:
+            await callback.message.edit_text("⏳ Данные о рассылке устарели. Попробуйте снова.")
+            return
+
+        if callback.data == "broadcast_confirm_no":
+            await callback.message.edit_text("❌ Рассылка отменена.")
+            # Удаляем данные
+            cmd_broadcast.pending_broadcasts.pop(admin_id, None)
+            return
+
+        # Подтверждение "Да"
+        broadcast_text = pending["text"]
+        only_active = pending["only_active"]
+        original_message = pending["original_message"]
+
+        await callback.message.edit_text("⏳ Начинаю рассылку...")
+
+        # Собираем пользователей
+        async with AsyncSessionLocal() as session:
+            stmt = select(BotUser.telegram_id)
+            if only_active:
+                stmt = stmt.where(BotUser.vpn_subscription_end > datetime.now(timezone.utc))
+            result = await session.execute(stmt)
+            user_ids = result.scalars().all()
+
+        if not user_ids:
+            await callback.message.edit_text("📭 Нет пользователей для рассылки.")
+            cmd_broadcast.pending_broadcasts.pop(admin_id, None)
+            return
+
+        # Отправляем
+        success_count = 0
+        fail_count = 0
+        for uid in user_ids:
+            try:
+                await callback.bot.send_message(uid, broadcast_text)
+                success_count += 1
+                await asyncio.sleep(0.05)  # защита от лимитов
+            except Exception as e:
+                fail_count += 1
+                logger.warning(f"Broadcast failed for user {uid}: {e}")
+
+        await callback.message.edit_text(
+            f"✅ Рассылка завершена.\n"
+            f"Отправлено: {success_count}\n"
+            f"Не удалось: {fail_count}"
+        )
+
+        # Удаляем данные
+        cmd_broadcast.pending_broadcasts.pop(admin_id, None)
+
+    except Exception as e:
+        logger.error(f"Error in broadcast_confirm_callback: {e}", exc_info=True)
+        await callback.message.edit_text("❌ Ошибка при выполнении рассылки.")
+        
 @dp.callback_query(StateFilter(BroadcastStates.confirm), F.data.startswith("broadcast_"))
 async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     if str(callback.from_user.id) != ADMIN_CHAT_ID:
@@ -437,177 +546,184 @@ async def cmd_userinfo(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-@dp.message(Command("grant"))
-async def cmd_grant(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split()
-    if len(args) < 3:
-        await message.answer("❗ Используйте: /grant <telegram_id> <days>")
-        return
+@retry_db_operation(max_retries=3)
+async def cmd_grant(message: Message):
+    """
+    Формат: /grant <telegram_id> <days>
+    Пример: /grant 123456789 30
+    Выдаёт VPN-подписку указанному пользователю на заданное количество дней.
+    """
     try:
-        tid = int(args[1])
+        args = message.text.split()
+        if len(args) != 3:
+            await message.answer(
+                "❌ Неверный формат.\n"
+                "Используйте: `/grant <telegram_id> <days>`\n"
+                "Пример: `/grant 123456789 30`",
+                parse_mode="Markdown"
+            )
+            return
+
+        telegram_id = int(args[1])
         days = int(args[2])
-    except ValueError:
-        await message.answer("❌ Неверный формат.")
-        log_error(f"Invalid args in grant: {args[1:]}", notify_admin=False)
-        return
-    if days <= 0:
-        await message.answer("❌ Дни должны быть положительным числом.")
-        return
 
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(session, tid)
-        if not user:
-            await message.answer(f"❌ Пользователь с ID {tid} не найден в базе.")
+        # Проверка валидности дней (можно использовать validate_days из utils.validators)
+        valid_days = [30, 90, 180]
+        if days not in valid_days:
+            await message.answer(
+                f"❌ Количество дней должно быть одним из: {valid_days}"
+            )
             return
-        user = await update_vpn_subscription(session, tid, days)
 
-    manager = get_vpn_manager()
-    link = await manager.create_key(tid, days)
-    if link:
-        await message.answer(
-            f"✅ VPN-подписка для {tid} активирована на {days} дн.\n"
-            f"🔗 Ключ: {link}"
-        )
-    else:
-        await message.answer(
-            f"⚠️ Подписка для {tid} обновлена, но не удалось получить/создать ключ.\n"
-            "Пользователь может нажать «🚀 Подключить VPN» для повторной попытки."
-        )
+        vpn_manager = get_vpn_manager()
+        if not vpn_manager:
+            await message.answer("❌ VPN менеджер не инициализирован.")
+            return
 
-@dp.message(Command("revoke"))
-async def cmd_revoke(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer("❗ Используйте: /revoke <telegram_id>")
-        return
+        # Создаём ключ (этот метод уже обёрнут в retry_db_operation внутри vpn_manager)
+        link = await vpn_manager.create_key(telegram_id, days)
+
+        if link:
+            # Дополнительно можно обновить дату окончания подписки в БД,
+            # но create_key уже делает это через активацию.
+            await message.answer(
+                f"✅ VPN-подписка выдана пользователю `{telegram_id}` на **{days}** дней.\n"
+                f"🔗 Ссылка: `{link}`",
+                parse_mode="Markdown"
+            )
+            # Отправим уведомление пользователю (если бот не заблокирован)
+            try:
+                await message.bot.send_message(
+                    telegram_id,
+                    f"🎉 Администратор выдал вам VPN-подписку на {days} дней.\n"
+                    f"🔗 Ссылка для подключения: `{link}`\n\n"
+                    f"Скопируйте ссылку и вставьте в VPN-приложение.",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
+        else:
+            await message.answer(
+                f"❌ Не удалось создать VPN-ключ для пользователя `{telegram_id}`.\n"
+                "Проверьте логи и доступность серверов.",
+                parse_mode="Markdown"
+            )
+
+    except ValueError:
+        await message.answer("❌ Неверный формат аргументов. Убедитесь, что telegram_id и days – числа.")
+    except Exception as e:
+        logger.error(f"Error in cmd_grant: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при выполнении команды.")
+
+@retry_db_operation(max_retries=3)
+async def cmd_revoke(message: Message):
+    """
+    Отзывает VPN-ключ у пользователя.
+    Формат: /revoke <telegram_id>
+    Пример: /revoke 123456789
+    """
     try:
-        tid = int(args[1])
-    except ValueError:
-        await message.answer("❌ Неверный формат.")
-        log_error(f"Invalid args in revoke: {args[1:]}", notify_admin=False)
-        return
-
-    async with AsyncSessionLocal() as session:
-        user = await get_user_by_telegram_id(session, tid)
-        if not user:
-            await message.answer(f"❌ Пользователь с ID {tid} не найден.")
+        args = message.text.split()
+        if len(args) != 2:
+            await message.answer(
+                "❌ Неверный формат.\n"
+                "Используйте: `/revoke <telegram_id>`\n"
+                "Пример: `/revoke 123456789`",
+                parse_mode="Markdown"
+            )
             return
 
-    manager = get_vpn_manager()
-    success = await manager.revoke_key(tid)
-    if success:
-        await message.answer(f"✅ VPN-подписка для {tid} отозвана, ключ удалён.")
-    else:
-        await message.answer(f"⚠️ Не удалось отозвать ключ для {tid}. Проверьте логи.")
+        telegram_id = int(args[1])
+        validate_user_id(telegram_id)  # проверка валидности
+
+        vpn_manager = get_vpn_manager()
+        if not vpn_manager:
+            await message.answer("❌ VPN менеджер не инициализирован.")
+            return
+
+        success = await vpn_manager.revoke_key(telegram_id)
+
+        if success:
+            await message.answer(
+                f"✅ VPN-ключ для пользователя `{telegram_id}` отозван.",
+                parse_mode="Markdown"
+            )
+            # Уведомляем пользователя
+            try:
+                await message.bot.send_message(
+                    telegram_id,
+                    "❌ Ваш VPN-ключ был отозван администратором."
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
+        else:
+            await message.answer(
+                f"❌ Не удалось отозвать ключ для пользователя `{telegram_id}`.\n"
+                "Проверьте логи.",
+                parse_mode="Markdown"
+            )
+
+    except ValueError as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    except Exception as e:
+        logger.error(f"Error in cmd_revoke: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при выполнении команды.")
 
 # ========== Статистика ==========
-@dp.message(Command("stats"))
-async def cmd_stats(message: types.Message):
-    if str(message.from_user.id) != ADMIN_CHAT_ID:
-        await message.answer("❌ Нет доступа.")
-        return
-
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_ago = now - timedelta(days=7)
-    month_ago = now - timedelta(days=30)
-    week_later = now + timedelta(days=7)
-    month_later = now + timedelta(days=30)
-
+@retry_db_operation(max_retries=3)
+async def cmd_stats(message: Message):
+    """
+    Выводит сводную статистику:
+    - всего пользователей
+    - активных VPN-подписок
+    - активных подписок на обход DPI
+    - количество платежей за сегодня/всего
+    """
     try:
         async with AsyncSessionLocal() as session:
-            total_res = await session.execute(select(func.count(BotUser.id)))
-            total = total_res.scalar() or 0
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-            new_today_res = await session.execute(
-                select(func.count(BotUser.id)).where(BotUser.created_at >= today_start)
+            # Общее число пользователей
+            total_users = await session.scalar(select(func.count()).select_from(BotUser))
+
+            # Активные VPN-подписки (vpn_subscription_end > now)
+            active_vpn = await session.scalar(
+                select(func.count()).select_from(BotUser)
+                .where(BotUser.vpn_subscription_end > now)
             )
-            new_today = new_today_res.scalar() or 0
 
-            new_week_res = await session.execute(
-                select(func.count(BotUser.id)).where(BotUser.created_at >= week_ago)
+            # Активные подписки на обход DPI (bypass_subscription_end > now)
+            active_bypass = await session.scalar(
+                select(func.count()).select_from(BotUser)
+                .where(BotUser.bypass_subscription_end > now)
             )
-            new_week = new_week_res.scalar() or 0
 
-            new_month_res = await session.execute(
-                select(func.count(BotUser.id)).where(BotUser.created_at >= month_ago)
+            # Платежи сегодня
+            payments_today = await session.scalar(
+                select(func.count()).select_from(BotPayment)
+                .where(BotPayment.created_at >= today_start)
             )
-            new_month = new_month_res.scalar() or 0
 
-            active_res = await session.execute(
-                select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end > now)
+            # Все успешные платежи (is_paid=True)
+            total_payments = await session.scalar(
+                select(func.count()).select_from(BotPayment)
+                .where(BotPayment.is_paid == True)
             )
-            active = active_res.scalar() or 0
 
-            expire_today_res = await session.execute(
-                select(func.count(BotUser.id)).where(
-                    BotUser.vpn_subscription_end > now,
-                    BotUser.vpn_subscription_end <= today_start + timedelta(days=1)
-                )
+            stats_text = (
+                "📊 **Статистика бота**\n\n"
+                f"👥 Всего пользователей: **{total_users}**\n"
+                f"🟢 Активных VPN: **{active_vpn}**\n"
+                f"🟡 Активных обход DPI: **{active_bypass}**\n"
+                f"💰 Платежей сегодня: **{payments_today}**\n"
+                f"💳 Всего успешных платежей: **{total_payments}**\n"
             )
-            expire_today = expire_today_res.scalar() or 0
 
-            expire_7d_res = await session.execute(
-                select(func.count(BotUser.id)).where(
-                    BotUser.vpn_subscription_end > now,
-                    BotUser.vpn_subscription_end <= week_later
-                )
-            )
-            expire_7d = expire_7d_res.scalar() or 0
+            await message.answer(stats_text, parse_mode="Markdown")
 
-            expire_30d_res = await session.execute(
-                select(func.count(BotUser.id)).where(
-                    BotUser.vpn_subscription_end > now,
-                    BotUser.vpn_subscription_end <= month_later
-                )
-            )
-            expire_30d = expire_30d_res.scalar() or 0
-
-            expired_res = await session.execute(
-                select(func.count(BotUser.id)).where(
-                    BotUser.vpn_subscription_end <= now,
-                    BotUser.vpn_subscription_end.isnot(None)
-                )
-            )
-            expired = expired_res.scalar() or 0
-
-            no_sub_res = await session.execute(
-                select(func.count(BotUser.id)).where(BotUser.vpn_subscription_end.is_(None))
-            )
-            no_sub = no_sub_res.scalar() or 0
-
-            avg_days_res = await session.execute(
-                select(func.avg(BotUser.vpn_subscription_end - now)).where(
-                    BotUser.vpn_subscription_end > now
-                )
-            )
-            avg_days_val = avg_days_res.scalar()
-            avg_days = int(avg_days_val) if avg_days_val is not None else 0
-
-        text = (
-            "📊 Статистика VPN-клиентов:\n"
-            f"• Всего пользователей: {total}\n"
-            f"• Новые сегодня: {new_today}\n"
-            f"• Новые за 7 дней: {new_week}\n"
-            f"• Новые за 30 дней: {new_month}\n\n"
-            f"🚀 Активные подписки: {active}\n"
-            f"   – истекают сегодня: {expire_today}\n"
-            f"   – истекают в течение 7 дн.: {expire_7d}\n"
-            f"   – истекают в течение 30 дн.: {expire_30d}\n"
-            f"   – средний остаток: {avg_days} дн.\n\n"
-            f"❌ Истекшие подписки: {expired}\n"
-            f"⚪ Без подписки: {no_sub}"
-        )
-        await message.answer(text)
     except Exception as e:
-        logger.error(f"Error in stats: {e}", exc_info=True)
-        log_error(f"Stats error: {e}", notify_admin=True)
+        logger.error(f"Error in cmd_stats: {e}", exc_info=True)
         await message.answer("❌ Ошибка при получении статистики.")
 
 # ========== Команды для управления IP-адресами ЮKassa ==========

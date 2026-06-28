@@ -49,6 +49,26 @@ _shutting_down = False
 _background_tasks = []
 
 # ------------------------------------------------------------
+# Проверка БД с повторными попытками
+# ------------------------------------------------------------
+async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
+    """Проверяет подключение к БД с повторными попытками."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("✅ Database connection successful")
+            return True
+        except Exception as e:
+            logger.warning(
+                f"DB connection attempt {attempt}/{max_retries} failed: {e}"
+            )
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(delay)
+    return False  # не достижимо
+
+# ------------------------------------------------------------
 # Установка вебхука с повторными попытками
 # ------------------------------------------------------------
 async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
@@ -86,11 +106,10 @@ async def on_startup():
     try:
         logger.info("Step 1/7: Checking database connection...")
         try:
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
+            await check_db_with_retry()
             logger.info("✅ Database connection successful")
         except Exception as e:
-            logger.error(f"❌ Database connection failed: {e}")
+            logger.error(f"❌ Database connection failed after retries: {e}")
             raise
 
         logger.info("Step 2/7: Initializing ServerPool and VPNManager...")
@@ -114,7 +133,7 @@ async def on_startup():
         logger.info("✅ Main bot initialized")
 
         # Передаём main_bot в admin модуль (для рассылки)
-        admin.bot.main_bot = main_bot  # <-- добавлено
+        admin.bot.main_bot = main_bot
 
         logger.info("Step 5/7: Starting internal API server...")
         internal_app = create_internal_app(

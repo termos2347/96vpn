@@ -3,10 +3,10 @@ from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
-from db.base import AsyncSessionLocal
-from db.crud import get_or_create_bot_user, set_vpn_client_id, set_vpn_server_id
+from db.base import AsyncSessionLocal, retry_db_operation
+from db.crud import get_or_create_bot_user
 from services.server_pool import ServerPool
-import aiohttp  # для обработки сетевых ошибок
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class VPNManager:
                 self._user_locks[user_id] = asyncio.Lock()
             return self._user_locks[user_id]
 
+    @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
         lock = await self._get_user_lock(user_id)
         async with lock:
@@ -42,7 +43,6 @@ class VPNManager:
                 user = await get_or_create_bot_user(session, user_id)
                 email = f"user_{user_id}@96vpn.bot"
 
-                # Если есть существующий ключ – пробуем вернуть ссылку
                 if user.vpn_client_id and user.server_id:
                     provider = await self.pool.get_provider(user.server_id)
                     if provider:
@@ -56,7 +56,6 @@ class VPNManager:
                             user.vpn_client_id = None
                             user.server_id = None
 
-                # Выбираем сервер
                 server = await self.pool.get_server()
                 if not server:
                     logger.error("No active servers available")
@@ -75,7 +74,6 @@ class VPNManager:
                 client_uuid = client_data['uuid']
                 sub_id = client_data['subId']
 
-                # Обновляем пользователя
                 user.vpn_client_id = client_uuid
                 user.server_id = server.id
 
@@ -88,33 +86,26 @@ class VPNManager:
                 if attempt == max_retries - 1:
                     logger.error(f"All retries failed for user {user_id}")
                     return None
-                await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
+                await asyncio.sleep(2 ** attempt)
             except Exception as e:
                 logger.exception(f"Unexpected error creating key for user {user_id}")
                 return None
         return None
 
+    @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
-        """
-        Возвращает ссылку для подключения, только если у пользователя активна подписка.
-        Если подписка активна, но ключ отсутствует – создаёт новый.
-        Если подписка неактивна – возвращает None.
-        """
         lock = await self._get_user_lock(user_id)
         async with lock:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
                     user = await get_or_create_bot_user(session, user_id)
                     now = datetime.now(timezone.utc)
-                    # Проверяем, активна ли подписка
                     if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
                         logger.info(f"User {user_id} has no active subscription (end={user.vpn_subscription_end})")
                         return None
-                    # Если активна – создаём/получаем ключ (create_key не проверяет срок, но мы уже убедились)
-                    # Передаём 30 дней, но это значение не используется для обновления срока,
-                    # только для создания клиента, если его нет.
                     return await self._create_key_unsafe(user_id, 30, session)
 
+    @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:
         lock = await self._get_user_lock(user_id)
         async with lock:
@@ -153,7 +144,6 @@ class VPNManager:
                         user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
                         return True
                     else:
-                        # revoke_client вернул False – возможно клиент уже удалён
                         client_info = await provider.get_client_by_uuid(client_id)
                         if client_info is None:
                             logger.info(f"Client {client_id} not found on panel, assuming already revoked. Updating DB.")
@@ -167,7 +157,7 @@ class VPNManager:
                     logger.exception(f"Error revoking client on panel for user {user_id}, attempt {attempt+1}: {e}")
                     if attempt == max_retries - 1:
                         return False
-                    await asyncio.sleep(2 ** attempt)  # экспоненциальная задержка
+                    await asyncio.sleep(2 ** attempt)
 
             logger.error(f"All retries failed to revoke client {client_id} for user {user_id}")
             return False

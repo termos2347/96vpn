@@ -1,13 +1,20 @@
+from datetime import datetime, timezone
 import logging
 from urllib.parse import urlparse
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import Message
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from config import ADMIN_CHAT_ID
+from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud_servers import add_server, get_all_servers, update_server, delete_server
+from db.models import VPNServer
 from handlers import get_server_pool
 import admin.bot
+from utils.encryption import encrypt_password
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -31,13 +38,69 @@ def parse_panel_url(url: str):
     api_path = parsed.path.rstrip('/')
     return host, port, api_path
 
-@router.message(Command("addserver"))
-async def cmd_addserver_start(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ Нет доступа.")
-        return
-    await state.set_state(ServerForm.name)
-    await message.answer("Введите название сервера (например, Main Server):")
+@retry_db_operation(max_retries=3)
+async def cmd_addserver(message: Message):
+    """
+    Добавляет новый VPN-сервер в БД.
+    Формат: /addserver <name> <host> <port> <inbound_id> <username> <password> <api_path> <sub_port> [weight]
+    Пример: /addserver MainServer vpn.example.com 443 1 admin pass /api 2096 10
+    Все параметры обязательны, кроме weight (по умолчанию 1).
+    """
+    try:
+        args = message.text.split()
+        if len(args) < 8 or len(args) > 9:
+            await message.answer(
+                "❌ Неверный формат.\n"
+                "Используйте: `/addserver <name> <host> <port> <inbound_id> <username> <password> <api_path> <sub_port> [weight]`\n"
+                "Пример: `/addserver MainServer vpn.example.com 443 1 admin pass /api 2096 10`",
+                parse_mode="Markdown"
+            )
+            return
+
+        name = args[1]
+        host = args[2]
+        port = int(args[3])
+        inbound_id = int(args[4])
+        username = args[5]
+        password = args[6]
+        api_path = args[7]
+        sub_port = int(args[8])
+        weight = int(args[9]) if len(args) == 9 else 1
+
+        # Шифруем пароль перед сохранением
+        encrypted_password = encrypt_password(password)
+
+        async with AsyncSessionLocal() as session:
+            new_server = VPNServer(
+                name=name,
+                host=host,
+                port=port,
+                inbound_id=inbound_id,
+                username=username,
+                password=encrypted_password,
+                api_path=api_path,
+                sub_port=sub_port,
+                is_active=True,
+                weight=weight,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc)
+            )
+            session.add(new_server)
+            await session.commit()
+
+        await message.answer(
+            f"✅ Сервер **{name}** успешно добавлен (ID: {new_server.id}).",
+            parse_mode="Markdown"
+        )
+        logger.info(f"Admin added server {name} (ID: {new_server.id})")
+
+    except ValueError as e:
+        await message.answer(f"❌ Ошибка в аргументах: {e}")
+    except IntegrityError as e:
+        await message.answer("❌ Сервер с таким именем уже существует.")
+    except Exception as e:
+        logger.error(f"Error in cmd_addserver: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при добавлении сервера.")
 
 @router.message(ServerForm.name)
 async def process_name(message: types.Message, state: FSMContext):
@@ -112,26 +175,53 @@ async def process_weight(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Сервер с именем '{data['name']}' уже существует.")
     await state.clear()
 
-@router.message(Command("listservers"))
-async def cmd_listservers(message: types.Message):
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ Нет доступа.")
-        return
-    servers = await get_all_servers()
-    if not servers:
-        await message.answer("Нет добавленных серверов.")
-        return
-    text = "📋 Список серверов:\n\n"
-    for s in servers:
-        text += (
-            f"ID: {s.id}\n"
-            f"Название: {s.name}\n"
-            f"URL: https://{s.host}:{s.port}{s.api_path or ''}\n"
-            f"Активен: {'✅' if s.is_active else '❌'}\n"
-            f"Вес: {s.weight}\n"
-            f"-----------------\n"
-        )
-    await message.answer(text)
+@retry_db_operation(max_retries=3)
+async def cmd_listservers(message: Message):
+    """
+    Выводит список всех VPN-серверов с их статусом.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(VPNServer).order_by(VPNServer.id)
+            )
+            servers = result.scalars().all()
+
+            if not servers:
+                await message.answer("📭 Список серверов пуст.")
+                return
+
+            text = "🖥️ **Список VPN-серверов**\n\n"
+            for s in servers:
+                status_emoji = "🟢" if s.is_active else "🔴"
+                # Расшифровываем пароль только для отображения (если нужно)
+                # Но лучше не выводить пароль в открытом виде
+                text += (
+                    f"{status_emoji} **ID:** {s.id}\n"
+                    f"   **Название:** {s.name}\n"
+                    f"   **Хост:** {s.host}:{s.port}\n"
+                    f"   **Inbound ID:** {s.inbound_id}\n"
+                    f"   **Вес:** {s.weight}\n"
+                    f"   **Активен:** {'Да' if s.is_active else 'Нет'}\n"
+                    f"   **Создан:** {s.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                    f"   **Обновлён:** {s.updated_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+                )
+
+            # Если слишком длинное сообщение, обрезаем или разбиваем
+            if len(text) > 4000:
+                # Отправляем по частям или сохраняем в файл
+                await message.answer("⚠️ Список слишком большой. Отправляю файлом.")
+                # Можно сохранить в txt и отправить документом
+                import io
+                file = io.BytesIO(text.encode('utf-8'))
+                file.name = "servers.txt"
+                await message.answer_document(file, caption="Список серверов")
+            else:
+                await message.answer(text, parse_mode="Markdown")
+
+    except Exception as e:
+        logger.error(f"Error in cmd_listservers: {e}", exc_info=True)
+        await message.answer("❌ Ошибка при получении списка серверов.")
 
 @router.message(Command("removeserver"))
 async def cmd_removeserver(message: types.Message):

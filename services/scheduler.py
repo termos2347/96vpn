@@ -6,14 +6,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from aiogram.exceptions import TelegramForbiddenError
 
-from db.base import AsyncSessionLocal
+from db.base import AsyncSessionLocal, retry_db_operation
 from db.models import BotUser
 from handlers import get_vpn_manager, get_server_pool
 from admin import send_admin_alert
 from admin.bot import log_error
 
 logger = logging.getLogger(__name__)
-
 
 async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
     """
@@ -35,34 +34,42 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
             logger.warning(f"Task {task_name} finished unexpectedly, restarting in {restart_delay}s")
             await asyncio.sleep(restart_delay)
 
-
+@retry_db_operation(max_retries=3)
 async def check_expired_subscriptions(bot):
     """Проверяет истёкшие VPN-подписки и отзывает ключи (один проход)."""
     retry_count = 3
     try:
         async with AsyncSessionLocal() as session:
             now = datetime.now(timezone.utc)
-            result = await session.execute(
-                select(BotUser).where(
+
+            stmt = (
+                select(BotUser)
+                .where(
                     BotUser.vpn_subscription_end < now,
                     BotUser.vpn_client_id.isnot(None)
                 )
+                .with_for_update()  # блокируем строки
             )
+            result = await session.execute(stmt)
             expired_users = result.scalars().all()
 
             if not expired_users:
                 logger.debug("Нет истёкших подписок для отзыва")
                 return
 
-            logger.info(f"Найдено {len(expired_users)} истёкших подписок для отзыва")
+            logger.info(f"Найдено {len(expired_users)} истёкших подписок для отзыва (заблокированы)")
             vpn_manager = get_vpn_manager()
 
             for user in expired_users:
+                if user.vpn_subscription_end >= now:
+                    logger.info(f"Пользователь {user.telegram_id} продлил подписку, пропускаем")
+                    continue
+
                 client_uuid = user.vpn_client_id
                 success = False
                 for attempt in range(retry_count):
                     try:
-                        success = await vpn_manager.revoke_key(user.telegram_id)
+                        success = await vpn_manager._revoke_key_unsafe(user.telegram_id, session)
                         if success:
                             break
                     except Exception as e:
@@ -92,11 +99,12 @@ async def check_expired_subscriptions(bot):
                     await send_admin_alert(
                         f"Не удалось отозвать ключ {client_uuid} для user_id={user.telegram_id}"
                     )
+
     except Exception as e:
         logger.exception(f"Ошибка в check_expired_subscriptions: {e}")
         raise
 
-
+@retry_db_operation(max_retries=3)
 async def send_expiry_reminders(bot):
     """Отправляет напоминания о скором истечении подписки (один проход)."""
     try:
@@ -148,7 +156,7 @@ async def send_expiry_reminders(bot):
         logger.exception(f"Ошибка в send_expiry_reminders: {e}")
         raise
 
-
+@retry_db_operation(max_retries=3)
 async def refresh_server_pool_periodically():
     """Обновляет пул серверов из БД (один проход, вызывается по расписанию)."""
     try:
@@ -159,7 +167,6 @@ async def refresh_server_pool_periodically():
     except Exception as e:
         logger.exception(f"Ошибка при обновлении пула серверов: {e}")
         raise
-
 
 async def start_scheduler(bot):
     """

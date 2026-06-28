@@ -13,24 +13,28 @@ logger = logging.getLogger(__name__)
 async def get_or_create_bot_user(
     session: AsyncSession,
     telegram_id: int,
-    username: Optional[str] = None,
-    email: Optional[str] = None
+    username: Optional[str] = None
 ) -> BotUser:
-    """Получить или создать пользователя. Вызывается только внутри переданной сессии."""
-    result = await session.execute(
-        select(BotUser).where(BotUser.telegram_id == telegram_id)
-    )
-    user = result.scalars().first()
+    """
+    Получить пользователя по telegram_id, при необходимости создать.
+    Если передан username, обновить поле (если изменилось).
+    """
+    stmt = select(BotUser).where(BotUser.telegram_id == telegram_id)
+    result = await session.execute(stmt)
+    user = result.scalar_one_or_none()
+
     if not user:
-        user = BotUser(
-            telegram_id=telegram_id,
-            username=username,
-            email=email,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
-        )
+        user = BotUser(telegram_id=telegram_id, username=username)
         session.add(user)
         await session.flush()
+        logger.info(f"Created new user {telegram_id} with username {username}")
+    else:
+        # Обновляем username, если он изменился
+        if username and user.username != username:
+            user.username = username
+            session.add(user)
+            logger.debug(f"Updated username for user {telegram_id} to {username}")
+
     return user
 
 async def update_vpn_subscription(
@@ -136,29 +140,48 @@ async def activate_subscription(
     telegram_id: int,
     product_type: str,
     period: str,
-    payment_id: Optional[str] = None
+    payment_id: Optional[str] = None,
+    user: Optional[BotUser] = None
 ) -> bool:
+    """
+    Активирует подписку пользователя.
+    Если передан user, он уже должен быть заблокирован (FOR UPDATE) и находиться в сессии.
+    """
+    if user is None:
+        # Если пользователь не передан, запрашиваем и блокируем
+        stmt = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
+        user = (await session.execute(stmt)).scalar_one_or_none()
+        if not user:
+            user = BotUser(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+
     days = settings.PERIOD_DAYS.get(period)
     if not days:
-        raise ValueError(f"Unknown period: {period}")
+        logger.error(f"Invalid period: {period}")
+        return False
 
-    user = await get_or_create_bot_user(session, telegram_id)
     now = datetime.now(timezone.utc)
-
     if product_type == "vpn":
         if user.vpn_subscription_end and user.vpn_subscription_end > now:
-            user.vpn_subscription_end = user.vpn_subscription_end + timedelta(days=days)
+            new_end = user.vpn_subscription_end + timedelta(days=days)
         else:
-            user.vpn_subscription_end = now + timedelta(days=days)
+            new_end = now + timedelta(days=days)
+        user.vpn_subscription_end = new_end
+        # Не сбрасываем client_id, чтобы сохранить существующий ключ, если он есть
     elif product_type == "bypass":
         if user.bypass_subscription_end and user.bypass_subscription_end > now:
-            user.bypass_subscription_end = user.bypass_subscription_end + timedelta(days=days)
+            new_end = user.bypass_subscription_end + timedelta(days=days)
         else:
-            user.bypass_subscription_end = now + timedelta(days=days)
+            new_end = now + timedelta(days=days)
+        user.bypass_subscription_end = new_end
     else:
-        raise ValueError(f"Unknown product: {product_type}")
+        logger.error(f"Unknown product_type: {product_type}")
+        return False
 
-    user.updated_at = now
+    session.add(user)
+    # Если нужно сохранить связь с payment_id, можно добавить в отдельную таблицу
+    logger.info(f"Subscription activated for user {telegram_id}, product {product_type}, period {period}, new end {new_end}")
     return True
 
 # ---------- Вспомогательные функции для проверки ----------

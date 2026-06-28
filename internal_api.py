@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from config import INTERNAL_API_SECRET, settings
 from db.crud import activate_subscription
-from db.base import AsyncSessionLocal
+from db.base import AsyncSessionLocal, retry_db_operation
 from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
 
@@ -37,6 +37,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
     app = web.Application()
 
     # ---------- Обработчик /activate ----------
+    @retry_db_operation(max_retries=3)
     async def handle_activation(request):
         auth = request.headers.get("Authorization")
         if not auth or auth != f"Bearer {INTERNAL_API_SECRET}":
