@@ -9,8 +9,14 @@ from db.base import AsyncSessionLocal, retry_db_operation
 from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
 
-logger = logging.getLogger(__name__)
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+    TelegramNetworkError,
+)
+from aiohttp import ClientError
 
+logger = logging.getLogger(__name__)
 
 def ip_in_network(ip: str) -> bool:
     """Проверяет, входит ли IP-адрес в одну из доверенных сетей ЮKassa (из настроек)."""
@@ -57,20 +63,17 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         period = data["period"]
         payment_id = data.get("payment_id")
 
-        # ===== ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ =====
         if not isinstance(telegram_id, int) or telegram_id <= 0:
             return web.json_response({"error": "invalid telegram_id"}, status=400)
         if product_type not in ("vpn", "bypass"):
             return web.json_response({"error": "invalid product_type"}, status=400)
         if period not in settings.PERIOD_DAYS:
             return web.json_response({"error": "invalid period"}, status=400)
-        # Дополнительно можно проверить, что для bypass допустимы только 1m и 3m
         if product_type == "bypass" and period not in ("1m", "3m"):
             return web.json_response(
                 {"error": "bypass supports only 1m and 3m periods"},
                 status=400
             )
-        # ======================================
 
         try:
             async with AsyncSessionLocal() as session:
@@ -85,13 +88,28 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                         days = settings.PERIOD_DAYS[period]
                         link = await vpn_manager.create_key(telegram_id, days)
                         if link and main_bot:
+                            # --- ОТПРАВКА ССЫЛКИ с полной обработкой ошибок ---
                             try:
                                 await main_bot.send_message(
                                     telegram_id,
                                     f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
                                 )
+                            except TelegramForbiddenError:
+                                logger.info(f"User {telegram_id} blocked bot, cannot send link from API")
+                            except TelegramRetryAfter as e:
+                                logger.warning(f"Flood limit for {telegram_id} (API), waiting {e.retry_after}s")
+                                await asyncio.sleep(e.retry_after)
+                                try:
+                                    await main_bot.send_message(
+                                        telegram_id,
+                                        f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
+                                    )
+                                except Exception:
+                                    pass
+                            except (TelegramNetworkError, ClientError) as e:
+                                logger.warning(f"Network error sending link to {telegram_id} from API: {e}")
                             except Exception as e:
-                                logger.error(f"Failed to send link to user {telegram_id}: {e}")
+                                logger.error(f"Unexpected error sending link to {telegram_id} from API: {e}")
                 return web.json_response({"status": "ok"})
             return web.json_response({"status": "already_activated"}, status=200)
         except Exception as e:

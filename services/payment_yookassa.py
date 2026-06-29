@@ -14,6 +14,14 @@ from db.models import BotPayment, BotUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Добавляем импорты исключений aiogram
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+    TelegramNetworkError,
+)
+from aiohttp import ClientError
+
 from handlers import get_vpn_manager
 from admin import send_admin_alert
 from db.base import retry_db_operation
@@ -123,14 +131,11 @@ class YookassaService:
 
             # ШАГ 3: ОДНА ТРАНЗАКЦИЯ – обновление статуса + активация с блокировкой пользователя
             async with session.begin():
-                # БЛОКИРУЕМ ЗАПИСЬ ПЛАТЕЖА С ПРОПУСКОМ УЖЕ ЗАБЛОКИРОВАННЫХ СТРОК
-                # Это предотвращает взаимную блокировку при параллельных вебхуках
                 stmt_lock = select(BotPayment).where(BotPayment.payment_id == payment_id).with_for_update(skip_locked=True)
                 result_lock = await session.execute(stmt_lock)
                 db_payment = result_lock.scalar_one_or_none()
 
                 if db_payment is None:
-                    # Другой процесс уже обрабатывает этот платёж
                     logger.info(f"Payment {payment_id} is locked by another transaction, skipping")
                     return True
 
@@ -152,12 +157,9 @@ class YookassaService:
                     logger.warning(f"Incomplete metadata in payment {payment_id}")
                     return False
 
-                # БЛОКИРУЕМ ПОЛЬЗОВАТЕЛЯ перед активацией
-                # Здесь skip_locked не используем, чтобы гарантировать последовательное обновление
                 stmt_user = select(BotUser).where(BotUser.telegram_id == int(telegram_id)).with_for_update()
                 user = (await session.execute(stmt_user)).scalar_one_or_none()
 
-                # Активация подписки с уже заблокированным пользователем
                 success = await activate_subscription(
                     session, int(telegram_id), product_type, period, payment_id, user=user
                 )
@@ -176,34 +178,56 @@ class YookassaService:
                         logger.error("VPNManager not initialized, cannot create key")
                         raise RuntimeError("VPNManager is None")
 
-                    # Используем get_or_create_link – он сам проверит активность подписки и найдёт существующий клиент
                     link = await vpn_manager.get_or_create_link(int(telegram_id))
 
                     if link and bot:
-                        await bot.send_message(
-                            telegram_id,
-                            f"✅ VPN подписка активирована!\n\n"
-                            f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
-                            f"Скопируйте ссылку и вставьте в VPN-приложение.",
-                            parse_mode="Markdown"
-                        )
-                        logger.info(f"VPN link sent to user {telegram_id}")
-                    else:
-                        # Не удалось получить ключ даже через get_or_create_link
-                        if bot:
+                        # --- ОТПРАВКА ССЫЛКИ с полной обработкой ошибок ---
+                        try:
                             await bot.send_message(
                                 telegram_id,
-                                "✅ Ваша VPN-подписка активирована!\n\n"
-                                "🔑 Мы автоматически создаём ключ, это может занять несколько минут. "
-                                "Как только ключ будет готов, мы пришлём его вам.\n\n"
-                                "Если через 10 минут ничего не пришло – нажмите кнопку «🚀 Подключить VPN»."
+                                f"✅ VPN подписка активирована!\n\n"
+                                f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
+                                f"Скопируйте ссылку и вставьте в VPN-приложение.",
+                                parse_mode="Markdown"
                             )
-                        # Отправляем администратору предупреждение (не критичное)
+                            logger.info(f"VPN link sent to user {telegram_id}")
+                        except TelegramForbiddenError:
+                            logger.info(f"User {telegram_id} blocked bot, cannot send link")
+                        except TelegramRetryAfter as e:
+                            logger.warning(f"Flood limit for {telegram_id}, waiting {e.retry_after}s")
+                            await asyncio.sleep(e.retry_after)
+                            try:
+                                await bot.send_message(
+                                    telegram_id,
+                                    f"✅ VPN подписка активирована!\n\n"
+                                    f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
+                                    f"Скопируйте ссылку и вставьте в VPN-приложение.",
+                                    parse_mode="Markdown"
+                                )
+                            except Exception:
+                                pass
+                        except (TelegramNetworkError, ClientError) as e:
+                            logger.warning(f"Network error sending link to {telegram_id}: {e}")
+                        except Exception as e:
+                            logger.exception(f"Unexpected error sending link to {telegram_id}")
+                    else:
+                        # Не удалось получить ключ
+                        if bot:
+                            try:
+                                await bot.send_message(
+                                    telegram_id,
+                                    "✅ Ваша VPN-подписка активирована!\n\n"
+                                    "🔑 Мы автоматически создаём ключ, это может занять несколько минут. "
+                                    "Как только ключ будет готов, мы пришлём его вам.\n\n"
+                                    "Если через 10 минут ничего не пришло – нажмите кнопку «🚀 Подключить VPN»."
+                                )
+                            except Exception as e:
+                                logger.error(f"Failed to send waiting message to {telegram_id}: {e}")
                         await send_admin_alert(
                             f"⚠️ Не удалось сразу создать VPN-ключ для {telegram_id} после оплаты. "
                             f"Запланирована автоматическая повторная попытка в фоновой задаче."
                         )
-                        logger.warning(f"Не удалось создать ключ для {telegram_id} сразу после оплаты, будет повторная попытка")
+                        logger.warning(f"Не удалось создать ключ для {telegram_id} сразу после оплаты")
                 except Exception as e:
                     logger.exception(f"Ошибка при создании ключа для {telegram_id} после оплаты: {e}")
                     await send_admin_alert(

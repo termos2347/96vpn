@@ -1,11 +1,16 @@
-# services/scheduler.py
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from aiogram.exceptions import TelegramForbiddenError
+# Добавляем недостающие исключения aiogram и aiohttp
+from aiogram.exceptions import (
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+    TelegramNetworkError,
+)
+from aiohttp import ClientError
 
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.models import BotUser
@@ -32,7 +37,6 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
             await send_admin_alert(f"❌ Фоновая задача {task_name} упала: {e}. Будет перезапущена через {restart_delay}с.")
             await asyncio.sleep(restart_delay)
         else:
-            # Если задача завершилась без ошибок (чего не должно быть), перезапускаем
             logger.warning(f"Task {task_name} finished unexpectedly, restarting in {restart_delay}s")
             await asyncio.sleep(restart_delay)
 
@@ -43,7 +47,6 @@ async def check_expired_subscriptions(bot):
     Проверяет истёкшие VPN-подписки и отзывает ключи.
     Каждый пользователь обрабатывается в отдельной короткой транзакции с skip_locked.
     """
-    # 1. Получаем список пользователей с истекшей подпиской (без блокировки)
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         stmt = select(BotUser).where(
@@ -72,31 +75,25 @@ async def check_expired_subscriptions(bot):
         client_uuid = user.vpn_client_id
         server_id = user.server_id
 
-        # Проверяем, не продлили ли подписку (повторная проверка внутри транзакции)
-        # Сначала пытаемся отозвать ключ на панели (вне транзакции)
         revoked_on_panel = False
 
-        # Если нет server_id – не можем отозвать на панели, просто очищаем БД
         if not server_id:
             logger.warning(f"User {telegram_id} has no server_id, skipping panel revoke, will clean DB")
-            revoked_on_panel = True  # считаем, что отзыв не нужен, просто очистим БД
+            revoked_on_panel = True
         else:
-            # Пытаемся отозвать на панели с повторными попытками
             for attempt in range(retry_count):
                 try:
                     provider = await vpn_manager.pool.get_provider(server_id)
                     if not provider:
                         logger.error(f"Provider for server {server_id} not found, cannot revoke for user {telegram_id}")
-                        break  # не удалось получить провайдера
+                        break
 
-                    # Отзываем ключ на панели
                     revoked = await provider.revoke_client(client_uuid)
                     if revoked:
                         logger.info(f"Key {client_uuid} revoked on panel for user {telegram_id}")
                         revoked_on_panel = True
                         break
                     else:
-                        # Проверяем, существует ли клиент на панели
                         client_info = await provider.get_client_by_uuid(client_uuid)
                         if client_info is None:
                             logger.info(f"Client {client_uuid} not found on panel, assuming already revoked")
@@ -109,7 +106,6 @@ async def check_expired_subscriptions(bot):
                     if attempt < retry_count - 1:
                         await asyncio.sleep(2 ** attempt)
 
-        # Если отзыв на панели не удался, пропускаем обновление БД (будет повторная попытка в следующий раз)
         if not revoked_on_panel:
             logger.error(f"Не удалось отозвать ключ {client_uuid} для user_id={telegram_id} после {retry_count} попыток")
             await send_admin_alert(
@@ -117,30 +113,25 @@ async def check_expired_subscriptions(bot):
             )
             continue
 
-        # Обновляем БД в короткой транзакции с блокировкой только этого пользователя
         async with AsyncSessionLocal() as session_upd:
             async with session_upd.begin():
-                # Блокируем только одну строку с skip_locked=True
                 stmt_lock = select(BotUser).where(BotUser.id == user.id).with_for_update(skip_locked=True)
                 db_user = (await session_upd.execute(stmt_lock)).scalar_one_or_none()
                 if not db_user:
                     logger.warning(f"User {telegram_id} already locked or deleted, skipping")
                     continue
 
-                # Повторно проверяем, что подписка всё ещё истекла (могла быть продлена)
                 if db_user.vpn_subscription_end >= now:
                     logger.info(f"User {telegram_id} subscription was extended, skipping")
                     continue
 
-                # Отзываем в БД
                 db_user.vpn_client_id = None
                 db_user.server_id = None
                 db_user.vpn_subscription_end = now - timedelta(days=1)
-                # commit произойдёт автоматически при выходе из блока
 
         logger.info(f"Key {client_uuid} revoked for user {telegram_id} (DB updated)")
 
-        # Отправляем уведомление (после транзакции)
+        # --- ОТПРАВКА УВЕДОМЛЕНИЯ с полной обработкой ошибок ---
         try:
             await bot.send_message(
                 telegram_id,
@@ -148,14 +139,26 @@ async def check_expired_subscriptions(bot):
             )
         except TelegramForbiddenError:
             logger.info(f"User {telegram_id} blocked the bot, skipping notification")
+        except TelegramRetryAfter as e:
+            logger.warning(f"Flood limit for {telegram_id}, waiting {e.retry_after}s")
+            await asyncio.sleep(e.retry_after)
+            # Повторяем один раз
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    "❌ Ваша VPN-подписка истекла. Для продления перейдите в раздел оплаты."
+                )
+            except Exception:
+                pass
+        except (TelegramNetworkError, ClientError) as e:
+            logger.warning(f"Network error notifying {telegram_id}: {e}")
         except Exception as e:
-            logger.error(f"Не удалось отправить уведомление пользователю {telegram_id}: {e}")
+            logger.error(f"Unexpected error notifying {telegram_id}: {e}")
 
 
 @retry_db_operation(max_retries=3)
 async def send_expiry_reminders(bot):
     """Отправляет напоминания о скором истечении подписки (один проход)."""
-    # 1. Получаем всех пользователей с активной подпиской и ключом (без блокировки)
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         result = await session.execute(
@@ -176,14 +179,13 @@ async def send_expiry_reminders(bot):
         if days_left not in (7, 3, 1):
             continue
 
-        # Проверяем, не отправляли ли уже сегодня
         if user.last_reminder_sent and user.last_reminder_sent.date() == today:
             continue
 
         day_word = {7: "7 дней", 3: "3 дня", 1: "1 день"}[days_left]
         message_sent = False
 
-        # Отправляем сообщение с повторными попытками (вне транзакции)
+        # Отправка с повторными попытками (до 3 раз)
         for attempt in range(3):
             try:
                 await bot.send_message(
@@ -197,27 +199,32 @@ async def send_expiry_reminders(bot):
             except TelegramForbiddenError:
                 logger.info(f"User {user.telegram_id} blocked the bot, skipping reminders")
                 break
-            except Exception as e:
-                logger.warning(f"Не удалось отправить напоминание пользователю {user.telegram_id}, attempt {attempt+1}: {e}")
+            except TelegramRetryAfter as e:
+                logger.warning(f"Flood limit for {user.telegram_id}, wait {e.retry_after}s")
                 if attempt < 2:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(e.retry_after)
+                else:
+                    break
+            except (TelegramNetworkError, ClientError) as e:
+                logger.warning(f"Network error sending reminder to {user.telegram_id}, attempt {attempt+1}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error(f"Unexpected error sending reminder to {user.telegram_id}: {e}")
+                break
 
-        # Если сообщение успешно отправлено, обновляем last_reminder_sent в короткой транзакции
         if message_sent:
             async with AsyncSessionLocal() as session_upd:
                 async with session_upd.begin():
-                    # Блокируем только этого пользователя с skip_locked=True
                     stmt_lock = select(BotUser).where(BotUser.id == user.id).with_for_update(skip_locked=True)
                     db_user = (await session_upd.execute(stmt_lock)).scalar_one_or_none()
                     if not db_user:
                         logger.warning(f"User {user.telegram_id} already locked or deleted, skipping")
                         continue
-                    # Повторно проверяем, что напоминание ещё не отправлено (защита от гонок)
                     if db_user.last_reminder_sent and db_user.last_reminder_sent.date() == today:
                         logger.info(f"Reminder for {user.telegram_id} already sent today, skipping")
                         continue
                     db_user.last_reminder_sent = now
-                    # commit автоматический
 
             logger.info(f"Отправлено напоминание за {days_left} дн. пользователю {user.telegram_id}")
         else:
@@ -248,7 +255,6 @@ async def retry_missing_keys(bot):
     """
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
-        # Выбираем пользователей с активной подпиской и без ключа
         stmt = select(BotUser).where(
             BotUser.vpn_subscription_end > now,
             BotUser.vpn_client_id.is_(None)
@@ -268,31 +274,26 @@ async def retry_missing_keys(bot):
         return
 
     for user in users:
-        # Отдельная транзакция для каждого пользователя
         async with AsyncSessionLocal() as sess:
             async with sess.begin():
-                # Блокируем строку с skip_locked, чтобы избежать гонок
                 stmt_lock = select(BotUser).where(BotUser.id == user.id).with_for_update(skip_locked=True)
                 db_user = (await sess.execute(stmt_lock)).scalar_one_or_none()
                 if not db_user:
                     logger.debug(f"Пользователь {user.telegram_id} уже заблокирован или удалён, пропускаем")
                     continue
 
-                # Повторно проверяем, что ключ всё ещё отсутствует
                 if db_user.vpn_client_id is not None:
                     logger.debug(f"У пользователя {user.telegram_id} уже есть ключ, пропускаем")
                     continue
 
-                # Проверяем, что подписка активна
                 if db_user.vpn_subscription_end <= now:
                     logger.debug(f"Подписка пользователя {user.telegram_id} истекла, пропускаем")
                     continue
 
                 try:
-                    # Используем get_or_create_link – он найдёт существующий клиент или создаст новый
                     link = await vpn_manager.get_or_create_link(db_user.telegram_id)
                     if link:
-                        # Успешно создали – отправляем ссылку пользователю
+                        # --- ОТПРАВКА КЛЮЧА с полной обработкой ошибок ---
                         try:
                             await bot.send_message(
                                 db_user.telegram_id,
@@ -300,28 +301,40 @@ async def retry_missing_keys(bot):
                                 parse_mode="Markdown"
                             )
                             logger.info(f"Ключ успешно создан для {db_user.telegram_id} через фоновую задачу")
+                        except TelegramForbiddenError:
+                            logger.info(f"User {db_user.telegram_id} blocked the bot, skipping key send")
+                        except TelegramRetryAfter as e:
+                            logger.warning(f"Flood limit for {db_user.telegram_id}, waiting {e.retry_after}s")
+                            await asyncio.sleep(e.retry_after)
+                            # Повторяем один раз
+                            try:
+                                await bot.send_message(
+                                    db_user.telegram_id,
+                                    f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте ссылку и вставьте в приложение.",
+                                    parse_mode="Markdown"
+                                )
+                                logger.info(f"Ключ успешно отправлен после задержки для {db_user.telegram_id}")
+                            except Exception:
+                                pass
+                        except (TelegramNetworkError, ClientError) as e:
+                            logger.warning(f"Network error sending key to {db_user.telegram_id}: {e}")
                         except Exception as e:
-                            logger.error(f"Не удалось отправить ключ пользователю {db_user.telegram_id}: {e}")
+                            logger.error(f"Unexpected error sending key to {db_user.telegram_id}: {e}")
                     else:
-                        # Если не удалось, просто логируем – на следующем цикле повторим
-                        logger.warning(f"Не удалось создать ключ для {db_user.telegram_id} в фоновой задаче (get_or_create_link вернул None)")
+                        logger.warning(f"Не удалось создать ключ для {db_user.telegram_id} в фоновой задаче")
                 except Exception as e:
                     logger.exception(f"Ошибка создания ключа для {db_user.telegram_id} в фоновой задаче: {e}")
-                    # Пропускаем – на следующем цикле повторим
 
 
 async def start_scheduler(bot):
     """
     Запускает фоновые задачи с автоматическим перезапуском и возвращает список задач.
-    Каждая задача выполняется в цикле с заданным интервалом (внутри самой функции).
     """
-    # Интервалы между выполнениями (в секундах)
     INTERVAL_CHECK_EXPIRED = 3600   # 1 час
     INTERVAL_REMINDERS = 3600        # 1 час
     INTERVAL_REFRESH_SERVERS = 1800  # 30 минут
     INTERVAL_RETRY_KEYS = 300        # 5 минут
 
-    # Оборачиваем каждую функцию в бесконечный цикл с перезапуском и добавляем задержку между итерациями
     async def run_check_expired():
         while True:
             try:
@@ -366,7 +379,6 @@ async def start_scheduler(bot):
                 await send_admin_alert(f"retry_missing_keys failed: {e}")
             await asyncio.sleep(INTERVAL_RETRY_KEYS)
 
-    # Создаём и возвращаем задачи (обёрнутые в run_with_restart для защиты от падений)
     tasks = [
         asyncio.create_task(run_with_restart(run_check_expired, "check_expired")),
         asyncio.create_task(run_with_restart(run_reminders, "reminders")),
