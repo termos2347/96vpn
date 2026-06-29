@@ -18,6 +18,10 @@ from internal_api import create_internal_app
 import admin.bot
 from utils.logger import setup_logger
 
+# <-- НОВОЕ: импорты для проверки миграций
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 try:
     from pyfiglet import Figlet
     HAS_PYFIGLET = True
@@ -68,6 +72,52 @@ async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
             await asyncio.sleep(delay)
     return False  # не достижимо
 
+# <-- НОВОЕ: проверка миграций
+async def check_migrations() -> None:
+    """Проверяет, что текущая ревизия БД соответствует head-миграции."""
+    logger.info("Step 1b/7: Checking database migration status...")
+
+    # Пропускаем проверку, если установлен флаг
+    if getattr(settings, "SKIP_MIGRATION_CHECK", False):
+        logger.warning("⚠️ Skipping migration check (SKIP_MIGRATION_CHECK=true)")
+        return
+
+    alembic_cfg = Config("alembic.ini")
+    script = ScriptDirectory.from_config(alembic_cfg)
+    head_rev = script.get_current_head()
+
+    if head_rev is None:
+        logger.error("❌ No migration revisions found. Please run 'alembic upgrade head' first.")
+        raise RuntimeError("No Alembic revisions")
+
+    # Получаем текущую ревизию из БД
+    async with engine.connect() as conn:
+        # Проверяем, существует ли таблица alembic_version
+        result = await conn.execute(
+            text("SELECT to_regclass('alembic_version')")
+        )
+        if result.scalar() is None:
+            logger.error("❌ Table 'alembic_version' does not exist. Database not initialized with migrations.")
+            raise RuntimeError("Database not migrated. Run 'alembic upgrade head'.")
+
+        # Получаем текущую версию
+        result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+        row = result.fetchone()
+        if row is None:
+            logger.error("❌ alembic_version table is empty.")
+            raise RuntimeError("Alembic version missing")
+        current_rev = row[0]
+
+    if current_rev != head_rev:
+        logger.error(
+            f"❌ Database revision mismatch! "
+            f"Current: {current_rev}, Expected (head): {head_rev}. "
+            f"Please run 'alembic upgrade head'."
+        )
+        raise RuntimeError("Migration mismatch")
+    else:
+        logger.info(f"✅ Database is up-to-date (revision {head_rev})")
+
 # ------------------------------------------------------------
 # Установка вебхука с повторными попытками
 # ------------------------------------------------------------
@@ -111,6 +161,9 @@ async def on_startup():
         except Exception as e:
             logger.error(f"❌ Database connection failed after retries: {e}")
             raise
+
+        # <-- НОВОЕ: вызов проверки миграций
+        await check_migrations()
 
         logger.info("Step 2/7: Initializing ServerPool and VPNManager...")
         server_pool = ServerPool()

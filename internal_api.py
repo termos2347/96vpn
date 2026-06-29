@@ -57,6 +57,21 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         period = data["period"]
         payment_id = data.get("payment_id")
 
+        # ===== ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ =====
+        if not isinstance(telegram_id, int) or telegram_id <= 0:
+            return web.json_response({"error": "invalid telegram_id"}, status=400)
+        if product_type not in ("vpn", "bypass"):
+            return web.json_response({"error": "invalid product_type"}, status=400)
+        if period not in settings.PERIOD_DAYS:
+            return web.json_response({"error": "invalid period"}, status=400)
+        # Дополнительно можно проверить, что для bypass допустимы только 1m и 3m
+        if product_type == "bypass" and period not in ("1m", "3m"):
+            return web.json_response(
+                {"error": "bypass supports only 1m and 3m periods"},
+                status=400
+            )
+        # ======================================
+
         try:
             async with AsyncSessionLocal() as session:
                 async with session.begin():

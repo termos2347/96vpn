@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # ---------- Режимы ----------
     DEBUG: bool = False
+    SKIP_MIGRATION_CHECK: bool = False
 
     # ---------- Telegram ----------
     BOT_TOKEN: str = Field(..., min_length=1)
