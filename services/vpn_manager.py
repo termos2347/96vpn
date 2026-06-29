@@ -50,6 +50,10 @@ class VPNManager:
                         if client and client.get("subId"):
                             link = provider.get_subscription_link(client["subId"])
                             logger.info(f"Existing key for user {user_id}: {link}")
+                            # Синхронизация: обновляем vpn_client_id на случай, если он изменился
+                            user.vpn_client_id = client["uuid"]
+                            # server_id оставляем прежним (он уже верный)
+                            await session.commit()
                             return link
                         else:
                             logger.warning(f"Stale client_id {user.vpn_client_id} for user {user_id}, will recreate")

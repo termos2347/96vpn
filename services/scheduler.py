@@ -240,6 +240,76 @@ async def refresh_server_pool_periodically():
         raise
 
 
+@retry_db_operation(max_retries=3)
+async def retry_missing_keys(bot):
+    """
+    Периодически пытается создать VPN-ключи для пользователей,
+    у которых подписка активна, но ключ отсутствует.
+    """
+    async with AsyncSessionLocal() as session:
+        now = datetime.now(timezone.utc)
+        # Выбираем пользователей с активной подпиской и без ключа
+        stmt = select(BotUser).where(
+            BotUser.vpn_subscription_end > now,
+            BotUser.vpn_client_id.is_(None)
+        )
+        result = await session.execute(stmt)
+        users = result.scalars().all()
+
+    if not users:
+        logger.debug("Нет пользователей с активной подпиской и без ключа")
+        return
+
+    logger.info(f"Найдено {len(users)} пользователей с активной подпиской и без ключа")
+
+    vpn_manager = get_vpn_manager()
+    if not vpn_manager:
+        logger.error("VPNManager не инициализирован, пропускаем создание ключей")
+        return
+
+    for user in users:
+        # Отдельная транзакция для каждого пользователя
+        async with AsyncSessionLocal() as sess:
+            async with sess.begin():
+                # Блокируем строку с skip_locked, чтобы избежать гонок
+                stmt_lock = select(BotUser).where(BotUser.id == user.id).with_for_update(skip_locked=True)
+                db_user = (await sess.execute(stmt_lock)).scalar_one_or_none()
+                if not db_user:
+                    logger.debug(f"Пользователь {user.telegram_id} уже заблокирован или удалён, пропускаем")
+                    continue
+
+                # Повторно проверяем, что ключ всё ещё отсутствует
+                if db_user.vpn_client_id is not None:
+                    logger.debug(f"У пользователя {user.telegram_id} уже есть ключ, пропускаем")
+                    continue
+
+                # Проверяем, что подписка активна
+                if db_user.vpn_subscription_end <= now:
+                    logger.debug(f"Подписка пользователя {user.telegram_id} истекла, пропускаем")
+                    continue
+
+                try:
+                    # Используем get_or_create_link – он найдёт существующий клиент или создаст новый
+                    link = await vpn_manager.get_or_create_link(db_user.telegram_id)
+                    if link:
+                        # Успешно создали – отправляем ссылку пользователю
+                        try:
+                            await bot.send_message(
+                                db_user.telegram_id,
+                                f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте ссылку и вставьте в приложение.",
+                                parse_mode="Markdown"
+                            )
+                            logger.info(f"Ключ успешно создан для {db_user.telegram_id} через фоновую задачу")
+                        except Exception as e:
+                            logger.error(f"Не удалось отправить ключ пользователю {db_user.telegram_id}: {e}")
+                    else:
+                        # Если не удалось, просто логируем – на следующем цикле повторим
+                        logger.warning(f"Не удалось создать ключ для {db_user.telegram_id} в фоновой задаче (get_or_create_link вернул None)")
+                except Exception as e:
+                    logger.exception(f"Ошибка создания ключа для {db_user.telegram_id} в фоновой задаче: {e}")
+                    # Пропускаем – на следующем цикле повторим
+
+
 async def start_scheduler(bot):
     """
     Запускает фоновые задачи с автоматическим перезапуском и возвращает список задач.
@@ -249,6 +319,7 @@ async def start_scheduler(bot):
     INTERVAL_CHECK_EXPIRED = 3600   # 1 час
     INTERVAL_REMINDERS = 3600        # 1 час
     INTERVAL_REFRESH_SERVERS = 1800  # 30 минут
+    INTERVAL_RETRY_KEYS = 300        # 5 минут
 
     # Оборачиваем каждую функцию в бесконечный цикл с перезапуском и добавляем задержку между итерациями
     async def run_check_expired():
@@ -284,11 +355,23 @@ async def start_scheduler(bot):
                 await send_admin_alert(f"refresh_server_pool_periodically failed: {e}")
             await asyncio.sleep(INTERVAL_REFRESH_SERVERS)
 
+    async def run_retry_keys():
+        while True:
+            try:
+                await retry_missing_keys(bot)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"retry_missing_keys failed: {e}", exc_info=True)
+                await send_admin_alert(f"retry_missing_keys failed: {e}")
+            await asyncio.sleep(INTERVAL_RETRY_KEYS)
+
     # Создаём и возвращаем задачи (обёрнутые в run_with_restart для защиты от падений)
     tasks = [
         asyncio.create_task(run_with_restart(run_check_expired, "check_expired")),
         asyncio.create_task(run_with_restart(run_reminders, "reminders")),
         asyncio.create_task(run_with_restart(run_refresh_servers, "refresh_servers")),
+        asyncio.create_task(run_with_restart(run_retry_keys, "retry_keys")),
     ]
     logger.info("Фоновые задачи запущены с автоматическим перезапуском")
     return tasks

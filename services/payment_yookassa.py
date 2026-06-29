@@ -123,10 +123,16 @@ class YookassaService:
 
             # ШАГ 3: ОДНА ТРАНЗАКЦИЯ – обновление статуса + активация с блокировкой пользователя
             async with session.begin():
-                # Блокируем запись платежа
-                stmt_lock = select(BotPayment).where(BotPayment.payment_id == payment_id).with_for_update()
+                # БЛОКИРУЕМ ЗАПИСЬ ПЛАТЕЖА С ПРОПУСКОМ УЖЕ ЗАБЛОКИРОВАННЫХ СТРОК
+                # Это предотвращает взаимную блокировку при параллельных вебхуках
+                stmt_lock = select(BotPayment).where(BotPayment.payment_id == payment_id).with_for_update(skip_locked=True)
                 result_lock = await session.execute(stmt_lock)
                 db_payment = result_lock.scalar_one_or_none()
+
+                if db_payment is None:
+                    # Другой процесс уже обрабатывает этот платёж
+                    logger.info(f"Payment {payment_id} is locked by another transaction, skipping")
+                    return True
 
                 if db_payment.is_paid:
                     logger.info(f"Payment {payment_id} was already processed (double-check inside transaction).")
@@ -147,6 +153,7 @@ class YookassaService:
                     return False
 
                 # БЛОКИРУЕМ ПОЛЬЗОВАТЕЛЯ перед активацией
+                # Здесь skip_locked не используем, чтобы гарантировать последовательное обновление
                 stmt_user = select(BotUser).where(BotUser.telegram_id == int(telegram_id)).with_for_update()
                 user = (await session.execute(stmt_user)).scalar_one_or_none()
 
@@ -164,39 +171,41 @@ class YookassaService:
             # ШАГ 4: Создание VPN-ключа (после фиксации транзакции)
             if product_type == "vpn":
                 try:
-                    days = settings.PERIOD_DAYS.get(period, 30)
                     vpn_manager = get_vpn_manager()
-                    link = await vpn_manager.create_key(int(telegram_id), days)
+                    if not vpn_manager:
+                        logger.error("VPNManager not initialized, cannot create key")
+                        raise RuntimeError("VPNManager is None")
+
+                    # Используем get_or_create_link – он сам проверит активность подписки и найдёт существующий клиент
+                    link = await vpn_manager.get_or_create_link(int(telegram_id))
 
                     if link and bot:
                         await bot.send_message(
                             telegram_id,
-                            f"✅ VPN подписка активирована на {days} дней!\n\n"
+                            f"✅ VPN подписка активирована!\n\n"
                             f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
                             f"Скопируйте ссылку и вставьте в VPN-приложение.",
                             parse_mode="Markdown"
                         )
                         logger.info(f"VPN link sent to user {telegram_id}")
                     else:
-                        error_msg = (
-                            "✅ Ваша VPN-подписка активирована, но не удалось создать ключ автоматически.\n"
-                            "Пожалуйста, через пару минут нажмите кнопку «🚀 Подключить VPN» — "
-                            "ключ будет создан повторно.\n"
-                            "Если проблема сохраняется, обратитесь в поддержку."
-                        )
+                        # Не удалось получить ключ даже через get_or_create_link
                         if bot:
-                            await bot.send_message(telegram_id, error_msg)
-                        else:
-                            logger.error("Bot instance is None, cannot send error message to user")
-
-                        alert_msg = (
-                            f"⚠️ Не удалось создать VPN-ключ для пользователя {telegram_id} "
-                            f"после успешной оплаты (payment {payment_id}). Пользователь уведомлён, требуется контроль."
+                            await bot.send_message(
+                                telegram_id,
+                                "✅ Ваша VPN-подписка активирована!\n\n"
+                                "🔑 Мы автоматически создаём ключ, это может занять несколько минут. "
+                                "Как только ключ будет готов, мы пришлём его вам.\n\n"
+                                "Если через 10 минут ничего не пришло – нажмите кнопку «🚀 Подключить VPN»."
+                            )
+                        # Отправляем администратору предупреждение (не критичное)
+                        await send_admin_alert(
+                            f"⚠️ Не удалось сразу создать VPN-ключ для {telegram_id} после оплаты. "
+                            f"Запланирована автоматическая повторная попытка в фоновой задаче."
                         )
-                        await send_admin_alert(alert_msg)
-                        logger.error(f"Failed to create VPN key for user {telegram_id} after payment {payment_id}")
+                        logger.warning(f"Не удалось создать ключ для {telegram_id} сразу после оплаты, будет повторная попытка")
                 except Exception as e:
-                    logger.exception(f"Error creating VPN key for user {telegram_id}: {e}")
+                    logger.exception(f"Ошибка при создании ключа для {telegram_id} после оплаты: {e}")
                     await send_admin_alert(
                         f"❌ Критическая ошибка при создании ключа для {telegram_id} после оплаты: {e}"
                     )
@@ -204,9 +213,9 @@ class YookassaService:
                         try:
                             await bot.send_message(
                                 telegram_id,
-                                "✅ Ваша VPN-подписка активирована, но произошла техническая ошибка.\n"
-                                "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту – ключ будет создан.\n"
-                                "Приносим извинения за неудобства."
+                                "✅ Ваша VPN-подписка активирована, но произошла техническая ошибка при создании ключа.\n"
+                                "Мы автоматически повторим попытку в течение нескольких минут. "
+                                "Если ключ не придёт, нажмите «🚀 Подключить VPN»."
                             )
                         except Exception:
                             pass

@@ -142,6 +142,28 @@ class Settings(BaseSettings):
             raise ValueError("YOOKASSA_API_KEY too short")
         return v
 
+    # ---------- НОВЫЙ ВАЛИДАТОР ДЛЯ ВЕБХУК-URL ----------
+    @field_validator('WEBHOOK_URL', 'ADMIN_WEBHOOK_URL')
+    @classmethod
+    def validate_webhook_url(cls, v: str, info) -> str:
+        debug = info.data.get('DEBUG', False)
+        if not debug:
+            # Продакшен – только HTTPS
+            if not v.startswith('https://'):
+                raise ValueError(
+                    f"{info.field_name} must use HTTPS in production (got {v})"
+                )
+        else:
+            # Режим DEBUG – разрешаем HTTP только для локальных адресов
+            if v.startswith('http://'):
+                allowed_local = ('http://localhost', 'http://127.0.0.1')
+                if not any(v.startswith(prefix) for prefix in allowed_local):
+                    raise ValueError(
+                        f"In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1 (got {v})"
+                    )
+            # Если HTTPS – всегда разрешён
+        return v
+
     # ---------- Свойства ----------
     @property
     def VPN_PRICES(self) -> dict:
@@ -236,8 +258,5 @@ if _loaded_ips is not None:
         logging.info(f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)")
     else:
         logging.warning("⚠️ yookassa_ip.json contains an empty list. Keeping value from .env.")
-        # Можно также создать файл заново с .env, чтобы исправить ситуацию:
-        # save_trusted_ips(settings.YOOKASSA_TRUSTED_IPS)
 else:
     logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
-    
