@@ -8,17 +8,17 @@ from aiogram import Bot, Dispatcher
 from sqlalchemy import text
 
 from config import TOKEN, settings
-from handlers import router as main_router
+from handlers import router as main_router, init_vpn_components, set_vpn_manager, get_vpn_manager
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
-from services.server_pool import ServerPool
 from services.vpn_manager import VPNManager
+from services.vpn_provider import XUIVPNProvider
 from db.base import engine
 from internal_api import create_internal_app
 import admin.bot
 from utils.logger import setup_logger
 
-# <-- НОВОЕ: импорты для проверки миграций
+# Проверка миграций
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 
@@ -28,7 +28,6 @@ try:
 except ImportError:
     HAS_PYFIGLET = False
 
-# ---------- Глобальный обработчик для asyncio ----------
 def handle_asyncio_exception(loop, context):
     logger = logging.getLogger(__name__)
     logger.error(f"Asyncio exception: {context.get('message')}")
@@ -38,25 +37,20 @@ def handle_asyncio_exception(loop, context):
         error_text = f"Asyncio exception: {exception}"
     else:
         error_text = f"Asyncio exception: {context.get('message')}"
-    # Добавляем в error_log
     from admin.bot import log_error
     log_error(error_text, notify_admin=True)
 
 setup_logger()
 logger = logging.getLogger(__name__)
 
-# Глобальные объекты
 main_bot = None
 main_dp = None
 internal_runner = None
 _shutting_down = False
 _background_tasks = []
 
-# ------------------------------------------------------------
-# Проверка БД с повторными попытками
-# ------------------------------------------------------------
+
 async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
-    """Проверяет подключение к БД с повторными попытками."""
     for attempt in range(1, max_retries + 1):
         try:
             async with engine.connect() as conn:
@@ -64,63 +58,41 @@ async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
             logger.info("✅ Database connection successful")
             return True
         except Exception as e:
-            logger.warning(
-                f"DB connection attempt {attempt}/{max_retries} failed: {e}"
-            )
+            logger.warning(f"DB connection attempt {attempt}/{max_retries} failed: {e}")
             if attempt == max_retries:
                 raise
             await asyncio.sleep(delay)
-    return False  # не достижимо
+    return False
 
-# <-- НОВОЕ: проверка миграций
+
 async def check_migrations() -> None:
-    """Проверяет, что текущая ревизия БД соответствует head-миграции."""
-    logger.info("Step 1b/7: Checking database migration status...")
-
-    # Пропускаем проверку, если установлен флаг
     if getattr(settings, "SKIP_MIGRATION_CHECK", False):
         logger.warning("⚠️ Skipping migration check (SKIP_MIGRATION_CHECK=true)")
         return
-
     alembic_cfg = Config("alembic.ini")
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
-
     if head_rev is None:
-        logger.error("❌ No migration revisions found. Please run 'alembic upgrade head' first.")
+        logger.error("❌ No migration revisions found. Please run 'alembic upgrade head'.")
         raise RuntimeError("No Alembic revisions")
-
-    # Получаем текущую ревизию из БД
     async with engine.connect() as conn:
-        # Проверяем, существует ли таблица alembic_version
-        result = await conn.execute(
-            text("SELECT to_regclass('alembic_version')")
-        )
+        result = await conn.execute(text("SELECT to_regclass('alembic_version')"))
         if result.scalar() is None:
             logger.error("❌ Table 'alembic_version' does not exist. Database not initialized with migrations.")
             raise RuntimeError("Database not migrated. Run 'alembic upgrade head'.")
-
-        # Получаем текущую версию
         result = await conn.execute(text("SELECT version_num FROM alembic_version"))
         row = result.fetchone()
         if row is None:
             logger.error("❌ alembic_version table is empty.")
             raise RuntimeError("Alembic version missing")
         current_rev = row[0]
-
     if current_rev != head_rev:
-        logger.error(
-            f"❌ Database revision mismatch! "
-            f"Current: {current_rev}, Expected (head): {head_rev}. "
-            f"Please run 'alembic upgrade head'."
-        )
+        logger.error(f"❌ Database revision mismatch! Current: {current_rev}, Expected (head): {head_rev}.")
         raise RuntimeError("Migration mismatch")
     else:
         logger.info(f"✅ Database is up-to-date (revision {head_rev})")
 
-# ------------------------------------------------------------
-# Установка вебхука с повторными попытками
-# ------------------------------------------------------------
+
 async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
                                  max_retries: int = 5, base_delay: float = 1.0) -> bool:
     for attempt in range(1, max_retries + 1):
@@ -135,18 +107,14 @@ async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
                 logger.warning(f"Webhook URL mismatch: expected {url}, got {info.url}")
         except Exception as e:
             logger.error(f"Attempt {attempt} failed: {e}")
-
         if attempt < max_retries:
             delay = base_delay * (2 ** (attempt - 1))
             logger.info(f"Retrying in {delay} seconds...")
             await asyncio.sleep(delay)
-
     logger.error(f"❌ Failed to set webhook after {max_retries} attempts")
     return False
 
-# ------------------------------------------------------------
-# Основные функции запуска и остановки
-# ------------------------------------------------------------
+
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
     logger.info("=" * 50)
@@ -155,24 +123,23 @@ async def on_startup():
 
     try:
         logger.info("Step 1/7: Checking database connection...")
-        try:
-            await check_db_with_retry()
-            logger.info("✅ Database connection successful")
-        except Exception as e:
-            logger.error(f"❌ Database connection failed after retries: {e}")
-            raise
+        await check_db_with_retry()
+        logger.info("✅ Database connection successful")
 
-        # <-- НОВОЕ: вызов проверки миграций
         await check_migrations()
 
-        logger.info("Step 2/7: Initializing ServerPool and VPNManager...")
-        server_pool = ServerPool()
-        await server_pool.refresh_servers()
-        logger.info("   Servers loaded: %d active", len(server_pool.servers))
-        from handlers import set_server_pool, set_vpn_manager
-        set_server_pool(server_pool)
-        set_vpn_manager(VPNManager(server_pool))
-        logger.info("✅ ServerPool and VPNManager ready")
+        logger.info("Step 2/7: Initializing VPN components (single 3x-UI panel)...")
+        provider = XUIVPNProvider(
+            base_url=settings.XUI_BASE_URL,
+            username=settings.XUI_USERNAME,
+            password=settings.XUI_PASSWORD,
+            inbound_id=settings.XUI_INBOUND_ID,
+            sub_port=settings.XUI_SUB_PORT
+        )
+        vpn_manager = VPNManager(provider)
+        set_vpn_manager(vpn_manager)
+        init_vpn_components()
+        logger.info("✅ VPN components initialized")
 
         logger.info("Step 3/7: Starting admin bot...")
         await admin.bot.startup()
@@ -185,7 +152,6 @@ async def on_startup():
         await setup_bot_commands(main_bot)
         logger.info("✅ Main bot initialized")
 
-        # Передаём main_bot в admin модуль (для рассылки)
         admin.bot.main_bot = main_bot
 
         logger.info("Step 5/7: Starting internal API server...")
@@ -207,19 +173,11 @@ async def on_startup():
         logger.info(f"✅ Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
 
         logger.info("Step 6/7: Setting up webhooks with retry...")
-        if not settings.WEBHOOK_URL:
-            raise ValueError("WEBHOOK_URL is required for webhook mode")
-        if not settings.ADMIN_WEBHOOK_URL:
-            raise ValueError("ADMIN_WEBHOOK_URL is required for webhook mode")
+        if not settings.WEBHOOK_URL or not settings.ADMIN_WEBHOOK_URL:
+            raise ValueError("WEBHOOK_URL and ADMIN_WEBHOOK_URL are required")
 
-        try:
-            await main_bot.delete_webhook()
-        except Exception as e:
-            logger.debug(f"Could not delete main webhook: {e}")
-        try:
-            await admin.bot.admin_bot.delete_webhook()
-        except Exception as e:
-            logger.debug(f"Could not delete admin webhook: {e}")
+        await main_bot.delete_webhook()
+        await admin.bot.admin_bot.delete_webhook()
 
         if not await set_webhook_with_retry(main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET):
             raise RuntimeError("Failed to set main bot webhook after retries")
@@ -242,7 +200,7 @@ async def on_startup():
                 ascii_art = f.renderText('96VPN BOT')
                 print("\n" + ascii_art)
             except Exception:
-                print("(ASCII art not available)")
+                pass
         else:
             print("""
              ╔═══╗ ╔╗   ╔╗╔══╗   ╔╗╔══╗
@@ -260,13 +218,12 @@ async def on_startup():
         logger.error(traceback.format_exc())
         raise
 
+
 async def on_shutdown():
     global _shutting_down, _background_tasks
     if _shutting_down:
-        logger.info("Shutdown already in progress, skipping")
         return
     _shutting_down = True
-
     logger.info("Shutting down...")
 
     if _background_tasks:
@@ -280,43 +237,51 @@ async def on_shutdown():
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
+    # --- Закрываем VPN-провайдер (освобождаем HTTP-сессии) ---
+    vpn_manager = get_vpn_manager()
+    if vpn_manager and hasattr(vpn_manager, 'provider'):
+        try:
+            await vpn_manager.provider.close()
+            logger.info("VPN provider closed")
+        except Exception as e:
+            logger.warning(f"Error closing VPN provider: {e}")
+
     if main_bot:
         try:
             await main_bot.delete_webhook()
-        except Exception as e:
-            logger.debug(f"Error deleting main webhook: {e}")
+        except Exception:
+            pass
         try:
             await main_bot.session.close()
-        except Exception as e:
-            logger.debug(f"Error closing main bot session: {e}")
+        except Exception:
+            pass
 
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
-        except Exception as e:
-            logger.debug(f"Error deleting admin webhook: {e}")
+        except Exception:
+            pass
         try:
             await admin.bot.admin_bot.session.close()
-        except Exception as e:
-            logger.debug(f"Error closing admin bot session: {e}")
+        except Exception:
+            pass
 
     await admin.bot.shutdown()
 
     if internal_runner:
         try:
             await internal_runner.cleanup()
-            logger.info("Internal API cleaned up")
-        except Exception as e:
-            logger.error(f"Error cleaning internal API: {e}")
+        except Exception:
+            pass
 
     if engine:
         try:
             await engine.dispose()
-            logger.info("Database engine disposed")
-        except Exception as e:
-            logger.error(f"Error disposing engine: {e}")
+        except Exception:
+            pass
 
     logger.info("Shutdown complete.")
+
 
 async def shutdown_with_timeout():
     try:
@@ -325,6 +290,7 @@ async def shutdown_with_timeout():
         logger.error("Shutdown timed out after 10 seconds, forcing exit")
     except Exception as e:
         logger.exception(f"Unexpected error during shutdown: {e}")
+
 
 async def main():
     try:
@@ -352,6 +318,7 @@ async def main():
     finally:
         await shutdown_with_timeout()
         await asyncio.sleep(0.5)
+
 
 if __name__ == "__main__":
     try:

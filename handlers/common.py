@@ -1,133 +1,60 @@
 import logging
+from aiogram import Router, types
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
 from datetime import datetime, timezone
-from aiogram import Router, F, types
-from aiogram.filters import Command
-from aiogram.types import BotCommand
-from aiogram.exceptions import TelegramForbiddenError
-from sqlalchemy import select
 
-from db.base import AsyncSessionLocal
-from db.models import BotUser
 from db.crud import get_or_create_bot_user
+from db.base import AsyncSessionLocal
+from . import get_vpn_manager
 from utils.decorators import rate_limit
-from utils.validators import validate_user_id, ValidationError
-from utils.cache import get_cache, set_cache
-from config import settings
-from .keyboards import main_keyboard
-from admin.bot import log_error
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-async def setup_bot_commands(bot):
-    commands = [
-        BotCommand(command="start", description="🚀 Главное меню"),
-    ]
-    await bot.set_my_commands(commands)
+@router.message(Command("getkey"))
+@rate_limit(max_per_minute=3)
+async def cmd_get_key(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    # Проверяем наличие активной подписки в БД
+    async with AsyncSessionLocal() as session:
+        user = await get_or_create_bot_user(session, user_id)
+        now = datetime.now(timezone.utc)
+        if not user.vpn_subscription_end or user.vpn_subscription_end <= now:
+            await message.answer(
+                "❌ У вас нет активной VPN-подписки. Оплатите в разделе 💳 Оплатить VPN."
+            )
+            return
 
-@router.message(Command("start"))
-@rate_limit(max_per_minute=10)
-async def cmd_start(message: types.Message):
+    # Пытаемся получить или создать ключ
+    vpn_manager = get_vpn_manager()
+    if not vpn_manager:
+        await message.answer("⚠️ Техническая ошибка: VPN-сервис временно недоступен. Администратор уведомлён.")
+        logger.error("VPNManager not initialized in cmd_get_key")
+        return
+
     try:
-        user_id = message.from_user.id
-        username = message.from_user.username
-
-        validate_user_id(user_id)
-        
-        async with AsyncSessionLocal() as session:
-            await get_or_create_bot_user(session, user_id, username)
-
-        logger.info(f"User {user_id} (@{username}) started the bot")
-
-        await message.answer(
-            "🎉 Добро пожаловать в 96VPN Bot!\n\n"
-            "Выберите нужный раздел в меню ниже:",
-            reply_markup=main_keyboard()
-        )
-    except TelegramForbiddenError:
-        logger.info(f"User {message.from_user.id} blocked the bot")
-    except ValidationError as e:
-        logger.warning(f"Validation error in /start: {e}")
-        log_error(f"Validation error in /start for user {user_id}: {e}", notify_admin=False)  # <-- добавлен log_error
-        try:
-            await message.answer("❌ Ошибка при инициализации. Попробуйте позже.")
-        except TelegramForbiddenError:
-            pass
-    except Exception as e:
-        logger.error(f"Exception in /start: {e}", exc_info=True)
-        log_error(f"Exception in /start for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
-        try:
-            await message.answer("❌ Произошла ошибка. Попробуйте позже.")
-        except TelegramForbiddenError:
-            pass
-
-@router.message(F.text == "ℹ️ Инфо")
-@rate_limit(max_per_minute=10)
-async def info(message: types.Message):
-    try:
-        user_id = message.from_user.id
-        validate_user_id(user_id)
-
-        cache_key_vpn = f"vpn_status:{user_id}"
-        cache_key_bypass = f"bypass_status:{user_id}"
-        vpn_active = get_cache(cache_key_vpn)
-        bypass_active = get_cache(cache_key_bypass)
-
-        if vpn_active is None or bypass_active is None:
-            async with AsyncSessionLocal() as session:
-                stmt = select(
-                    BotUser.vpn_subscription_end,
-                    BotUser.bypass_subscription_end
-                ).where(BotUser.telegram_id == user_id)
-                result = await session.execute(stmt)
-                row = result.first()
-
-            vpn_end = row.vpn_subscription_end if row else None
-            bypass_end = row.bypass_subscription_end if row else None
-
-            vpn_active = vpn_end and vpn_end > datetime.now(timezone.utc)
-            bypass_active = bypass_end and bypass_end > datetime.now(timezone.utc)
-
-            set_cache(cache_key_vpn, vpn_active, 300)
-            set_cache(cache_key_bypass, bypass_active, 300)
-
-        vpn_status = ""
-        if vpn_active:
-            try:
-                async with AsyncSessionLocal() as session:
-                    stmt = select(BotUser.vpn_subscription_end).where(BotUser.telegram_id == user_id)
-                    end = (await session.execute(stmt)).scalar()
-                    if end and end > datetime.now(timezone.utc):
-                        days_left = (end - datetime.now(timezone.utc)).days
-                        vpn_status = f"✅ активна, осталось {days_left} дн."
-                    else:
-                        vpn_status = "✅ активна"
-            except Exception as e:
-                logger.exception(f"DB error in info for user {user_id}")
-                vpn_status = "✅ активна (ошибка получения срока)"
+        link = await vpn_manager.get_or_create_link(user_id)
+        if link:
+            await message.answer(
+                f"🔗 Ваша VPN-ссылка:\n`{link}`\n\n"
+                "Скопируйте её и вставьте в приложение (например, V2RayNG, Shadowrocket, Hiddify).",
+                parse_mode="Markdown"
+            )
         else:
-            vpn_status = "❌ не активна"
-
-        bypass_status = "✅ активна" if bypass_active else "❌ не активна"
-
-        logger.info(f"User {user_id} requested info (VPN: {vpn_status}, Bypass: {bypass_status})")
-
-        await message.answer(
-            "📌 Информация о подписках:\n\n"
-            f"🚀 VPN: {vpn_status}\n"
-            f"🛡️ Обход DPI: {bypass_status}\n\n"
-            "ℹ️ О сервисе:\n"
-            "— Высокоскоростные серверы в 5 странах\n"
-            "— Протоколы: VLESS, Shadowsocks, WireGuard\n"
-            "— Защита от утечек DNS и IPv6\n"
-            "— Круглосуточная поддержка\n\n"
-            f"📞 По вопросам: @{settings.SUPPORT_USERNAME}"
-        )
-    except ValidationError as e:
-        logger.warning(f"Validation error in info: {e}")
-        log_error(f"Validation error in info for user {user_id}: {e}", notify_admin=False)  # <-- добавлен log_error
-        await message.answer("❌ Ошибка при получении информации.")
+            # Ошибка при создании – панель недоступна или таймаут
+            await message.answer(
+                "⚠️ Сервер временно перегружен, мы уже работаем над этим.\n"
+                "Пожалуйста, попробуйте через 5–10 минут или нажмите кнопку «🚀 Подключить VPN» позже.\n"
+                "Администратор уведомлён о проблеме."
+            )
+            # Лог для админа (можно использовать send_admin_alert)
+            logger.error(f"Failed to create/get key for user {user_id}: link is None")
+            # Здесь можно вызвать функцию отправки уведомления админу
     except Exception as e:
-        logger.exception(f"Exception in info: {e}")
-        log_error(f"Exception in info for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
-        await message.answer("❌ Произошла ошибка при получении информации.")
+        logger.exception(f"Unexpected error in cmd_get_key for user {user_id}: {e}")
+        await message.answer(
+            "⚠️ Произошла непредвиденная ошибка. Мы уже знаем и исправляем.\n"
+            "Попробуйте позже."
+        )

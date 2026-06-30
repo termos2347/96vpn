@@ -34,9 +34,9 @@ class Settings(BaseSettings):
 
     # ---------- Webhook ----------
     WEBHOOK_URL: str = Field(..., min_length=1)
-    WEBHOOK_SECRET: str = ""
+    WEBHOOK_SECRET: str = Field(..., min_length=16, description="Secret token for main bot webhook")
     ADMIN_WEBHOOK_URL: str = Field(..., min_length=1)
-    ADMIN_WEBHOOK_SECRET: str = ""
+    ADMIN_WEBHOOK_SECRET: str = Field(..., min_length=16, description="Secret token for admin bot webhook")
 
     # ---------- Безопасность ----------
     ENCRYPTION_KEY: str = Field(..., min_length=1)
@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     YOOKASSA_TRUSTED_IPS: List[str] = Field(..., min_length=1)
+
+    # ---------- 3x-UI панель (единственная) ----------
+    XUI_BASE_URL: str = Field(..., min_length=1)          # например, https://panel.example.com:443
+    XUI_USERNAME: str = Field(..., min_length=1)
+    XUI_PASSWORD: str = Field(..., min_length=1)
+    XUI_INBOUND_ID: int = Field(..., ge=1)
+    XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
 
     # ---------- Остальное ----------
     SUPPORT_USERNAME: str = "support_username"
@@ -142,26 +149,25 @@ class Settings(BaseSettings):
             raise ValueError("YOOKASSA_API_KEY too short")
         return v
 
-    # ---------- НОВЫЙ ВАЛИДАТОР ДЛЯ ВЕБХУК-URL ----------
     @field_validator('WEBHOOK_URL', 'ADMIN_WEBHOOK_URL')
     @classmethod
     def validate_webhook_url(cls, v: str, info) -> str:
         debug = info.data.get('DEBUG', False)
         if not debug:
-            # Продакшен – только HTTPS
             if not v.startswith('https://'):
-                raise ValueError(
-                    f"{info.field_name} must use HTTPS in production (got {v})"
-                )
+                raise ValueError(f"{info.field_name} must use HTTPS in production")
         else:
-            # Режим DEBUG – разрешаем HTTP только для локальных адресов
             if v.startswith('http://'):
                 allowed_local = ('http://localhost', 'http://127.0.0.1')
                 if not any(v.startswith(prefix) for prefix in allowed_local):
-                    raise ValueError(
-                        f"In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1 (got {v})"
-                    )
-            # Если HTTPS – всегда разрешён
+                    raise ValueError(f"In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1")
+        return v
+
+    @field_validator('XUI_BASE_URL')
+    @classmethod
+    def validate_xui_url(cls, v):
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError("XUI_BASE_URL must start with http:// or https://")
         return v
 
     # ---------- Свойства ----------
@@ -212,12 +218,10 @@ INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 INTERNAL_API_URL = settings.INTERNAL_API_URL
 
-
-# ---------- НОВЫЙ БЛОК: работа с yookassa_ip.json ----------
+# ---------- Работа с yookassa_ip.json ----------
 IPS_FILE = Path("yookassa_ip.json")
 
 def load_trusted_ips() -> Optional[List[str]]:
-    """Загружает список доверенных IP из файла. Возвращает None при ошибке или отсутствии."""
     if not IPS_FILE.exists():
         return None
     try:
@@ -233,7 +237,6 @@ def load_trusted_ips() -> Optional[List[str]]:
         return None
 
 def save_trusted_ips(ips: List[str]) -> bool:
-    """Сохраняет список IP в файл. Возвращает True при успехе."""
     try:
         with open(IPS_FILE, "w", encoding="utf-8") as f:
             json.dump(ips, f, indent=2, ensure_ascii=False)
@@ -242,7 +245,6 @@ def save_trusted_ips(ips: List[str]) -> bool:
         logging.error(f"Failed to save yookassa_ip.json: {e}")
         return False
 
-# Если файл не существует, создаём его с текущим списком из .env
 if not IPS_FILE.exists():
     initial_ips = settings.YOOKASSA_TRUSTED_IPS
     if save_trusted_ips(initial_ips):
@@ -250,7 +252,6 @@ if not IPS_FILE.exists():
     else:
         logging.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
 
-# Загружаем из файла (если он существует, даже только что создан)
 _loaded_ips = load_trusted_ips()
 if _loaded_ips is not None:
     if _loaded_ips:

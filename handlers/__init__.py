@@ -1,36 +1,41 @@
+import logging
+from aiogram import Router, types
+from aiogram.filters import Command
+from config import settings
+from services.vpn_provider import XUIVPNProvider
 from services.vpn_manager import VPNManager
-from services.server_pool import ServerPool
 
-# Глобальный экземпляр VPNManager (устанавливается в run_all.py)
+logger = logging.getLogger(__name__)
+
+# Глобальные переменные
 _vpn_manager: VPNManager = None
-# Глобальный пул серверов
-_server_pool: ServerPool = None
 
-def set_vpn_manager(manager: VPNManager) -> None:
+def get_vpn_manager() -> VPNManager:
+    return _vpn_manager
+
+def set_vpn_manager(manager: VPNManager):
     global _vpn_manager
     _vpn_manager = manager
 
-def get_vpn_manager() -> VPNManager:
-    if _vpn_manager is None:
-        raise RuntimeError("VPNManager not initialized. Call set_vpn_manager() first.")
-    return _vpn_manager
+# Инициализация при старте (вызывается из run_all.py)
+def init_vpn_components():
+    global _vpn_manager
+    if _vpn_manager is not None:
+        return
+    provider = XUIVPNProvider(
+        base_url=settings.XUI_BASE_URL,
+        username=settings.XUI_USERNAME,
+        password=settings.XUI_PASSWORD,
+        inbound_id=settings.XUI_INBOUND_ID,
+        sub_port=settings.XUI_SUB_PORT
+    )
+    _vpn_manager = VPNManager(provider)
+    logger.info("VPN components initialized with single 3x-UI panel")
 
-def set_server_pool(pool: ServerPool) -> None:
-    global _server_pool
-    _server_pool = pool
-
-def get_server_pool() -> ServerPool:
-    if _server_pool is None:
-        raise RuntimeError("ServerPool not initialized. Call set_server_pool() first.")
-    return _server_pool
-
-# Импорты роутеров
+# Роутер для основных команд – импортируем из других модулей
 from .common import router as common_router
-from .subscription import router as subscription_router
 from .payment import router as payment_router
-from .proxy import router as proxy_router
 
-router = common_router
-router.include_router(subscription_router)
+router = Router()
+router.include_router(common_router)
 router.include_router(payment_router)
-router.include_router(proxy_router)

@@ -78,7 +78,6 @@ class YookassaService:
 
     @retry_db_operation(max_retries=3)
     async def process_webhook(self, webhook_data: dict, session: AsyncSession, bot) -> bool:
-        """Безопасная обработка входящего вебхука с Double-Check валидацией через API ЮKassa."""
         try:
             event = webhook_data.get("event")
             obj = webhook_data.get("object", {})
@@ -88,7 +87,7 @@ class YookassaService:
                 logger.info(f"Webhook ignored: event={event}, payment_id={payment_id}")
                 return False
 
-            # ШАГ 1: Проверка, не обработан ли уже этот платёж (без блокировки)
+            # Проверка дубликата
             stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
             result = await session.execute(stmt)
             db_payment = result.scalar_one_or_none()
@@ -101,7 +100,7 @@ class YookassaService:
                 logger.info(f"Payment {payment_id} was already processed earlier.")
                 return True
 
-            # ШАГ 2: Double-Check через API ЮKassa с таймаутом (исправление)
+            # Double-Check через API ЮKassa
             loop = asyncio.get_running_loop()
             try:
                 verified_payment = await asyncio.wait_for(
@@ -131,7 +130,7 @@ class YookassaService:
                 )
                 return False
 
-            # ШАГ 3: ОДНА ТРАНЗАКЦИЯ – обновление статуса + активация с блокировкой пользователя
+            # Транзакция обновления
             async with session.begin():
                 stmt_lock = select(BotPayment).where(BotPayment.payment_id == payment_id).with_for_update(skip_locked=True)
                 result_lock = await session.execute(stmt_lock)
@@ -172,7 +171,7 @@ class YookassaService:
 
                 logger.info(f"Successfully activated subscription for user {telegram_id} via secure webhook.")
 
-            # ШАГ 4: Создание VPN-ключа (после фиксации транзакции)
+            # Вне транзакции – создание ключа VPN
             if product_type == "vpn":
                 try:
                     vpn_manager = get_vpn_manager()
@@ -212,6 +211,7 @@ class YookassaService:
                         except Exception as e:
                             logger.exception(f"Unexpected error sending link to {telegram_id}")
                     else:
+                        # Не удалось создать ключ или bot отсутствует
                         if bot:
                             try:
                                 await bot.send_message(
