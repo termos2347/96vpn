@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     BYPASS_PRICE_USDT_1M: float = 2.0
     BYPASS_PRICE_USDT_3M: float = 4.5
 
-    INTERNAL_API_HOST: str = "0.0.0.0"
+    INTERNAL_API_HOST: str = "127.0.0.1"
     INTERNAL_API_PORT: int = 5001
     INTERNAL_API_URL: str = "http://localhost:5001"
 

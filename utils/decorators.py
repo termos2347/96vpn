@@ -1,6 +1,6 @@
 from functools import wraps
 from aiogram.types import Message, CallbackQuery
-from datetime import datetime, timezone,timedelta
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 import logging
 
@@ -25,17 +25,21 @@ def rate_limit(max_per_minute: int = 5):
                 user_info = f"@{message_or_callback.from_user.username or 'unknown'}"
             else:
                 return await func(message_or_callback, *args, **kwargs)
-            
+
             now = datetime.now(timezone.utc)
             cutoff_time = now - timedelta(seconds=60)
-            
-            # Чистим старые записи
-            _user_actions[user_id] = [
-                ts for ts in _user_actions[user_id] if ts > cutoff_time
-            ]
-            
-            # Проверяем лимит
-            if len(_user_actions[user_id]) >= max_per_minute:
+
+            # Чистим старые записи, удаляя пустые ключи, чтобы не засорять память
+            filtered = [ts for ts in _user_actions[user_id] if ts > cutoff_time]
+            if filtered:
+                _user_actions[user_id] = filtered
+            else:
+                # Если список пуст — удаляем ключ, чтобы не занимал память
+                _user_actions.pop(user_id, None)
+
+            # Проверяем лимит (учитываем только актуальные записи)
+            current_count = len(filtered) if filtered else 0
+            if current_count >= max_per_minute:
                 logger.info(f"Rate limit exceeded for user {user_id} {user_info}")
                 if isinstance(message_or_callback, Message):
                     await message_or_callback.answer(
@@ -47,12 +51,12 @@ def rate_limit(max_per_minute: int = 5):
                         show_alert=False
                     )
                 return
-            
-            # Добавляем новую запись
+
+            # Добавляем новую запись (теперь список точно существует)
             _user_actions[user_id].append(now)
-            
+
             # Вызываем функцию
             return await func(message_or_callback, *args, **kwargs)
-        
+
         return wrapper
     return decorator

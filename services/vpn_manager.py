@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -11,16 +12,44 @@ from services.vpn_provider import XUIVPNProvider
 logger = logging.getLogger(__name__)
 
 
+class LockManager:
+    """
+    Управление замками с автоматической очисткой по TTL и максимальному размеру.
+    Предотвращает бесконечный рост памяти от хранения замков для всех пользователей.
+    """
+    def __init__(self, max_size: int = 10000, ttl_seconds: int = 600):
+        self._locks = {}
+        self._last_access = {}
+        self.max_size = max_size
+        self.ttl = ttl_seconds
+
+    def get_lock(self, user_id: int) -> asyncio.Lock:
+        now = time.time()
+
+        # 1. Удаляем все замки, к которым не обращались дольше TTL
+        expired = [uid for uid, last in self._last_access.items() if now - last > self.ttl]
+        for uid in expired:
+            self._locks.pop(uid, None)
+            self._last_access.pop(uid, None)
+
+        # 2. Если размер превышен, удаляем самый старый (по last_access)
+        if len(self._locks) >= self.max_size:
+            oldest = min(self._last_access, key=self._last_access.get)
+            self._locks.pop(oldest, None)
+            self._last_access.pop(oldest, None)
+
+        # 3. Создаём или возвращаем существующий замок
+        if user_id not in self._locks:
+            self._locks[user_id] = asyncio.Lock()
+        self._last_access[user_id] = now
+        return self._locks[user_id]
+
+
 class VPNManager:
     def __init__(self, provider: XUIVPNProvider):
         self.provider = provider
-        # Для блокировок пользователей (чтобы не создавать два ключа одновременно)
-        self._user_locks = {}
-
-    def _get_user_lock(self, user_id: int) -> asyncio.Lock:
-        if user_id not in self._user_locks:
-            self._user_locks[user_id] = asyncio.Lock()
-        return self._user_locks[user_id]
+        # Используем LockManager вместо простого словаря
+        self._lock_manager = LockManager(max_size=5000, ttl_seconds=300)
 
     @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
@@ -29,7 +58,7 @@ class VPNManager:
         Если у пользователя уже есть активный клиент, возвращает его ссылку.
         Иначе создаёт нового клиента.
         """
-        lock = self._get_user_lock(user_id)
+        lock = self._lock_manager.get_lock(user_id)
         async with lock:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
@@ -59,7 +88,6 @@ class VPNManager:
             )
         except asyncio.TimeoutError:
             logger.error(f"Timeout creating client for user {user_id}")
-            # Уведомление админа будет выше
             return None
         except Exception as e:
             logger.exception(f"Error creating client for user {user_id}: {e}")
@@ -83,7 +111,7 @@ class VPNManager:
     @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
         """Аналог create_key, но без указания дней (используется для получения ссылки после оплаты)."""
-        lock = self._get_user_lock(user_id)
+        lock = self._lock_manager.get_lock(user_id)
         async with lock:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
@@ -98,7 +126,7 @@ class VPNManager:
 
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:
-        lock = self._get_user_lock(user_id)
+        lock = self._lock_manager.get_lock(user_id)
         async with lock:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
