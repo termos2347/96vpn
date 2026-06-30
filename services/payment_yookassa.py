@@ -14,7 +14,6 @@ from db.models import BotPayment, BotUser
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Добавляем импорты исключений aiogram
 from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
@@ -102,13 +101,16 @@ class YookassaService:
                 logger.info(f"Payment {payment_id} was already processed earlier.")
                 return True
 
-            # ШАГ 2: Double-Check через API ЮKassa (вне транзакции)
+            # ШАГ 2: Double-Check через API ЮKassa с таймаутом (исправление)
             loop = asyncio.get_running_loop()
             try:
-                verified_payment = await loop.run_in_executor(
-                    None,
-                    lambda: Payment.find_one(payment_id)
+                verified_payment = await asyncio.wait_for(
+                    loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
+                    timeout=10.0
                 )
+            except asyncio.TimeoutError:
+                logger.error(f"Double-Check timed out for payment {payment_id}")
+                return False
             except Exception as api_err:
                 logger.error(f"Double-Check failed. Can't find payment {payment_id} via API: {api_err}")
                 return False
@@ -181,7 +183,6 @@ class YookassaService:
                     link = await vpn_manager.get_or_create_link(int(telegram_id))
 
                     if link and bot:
-                        # --- ОТПРАВКА ССЫЛКИ с полной обработкой ошибок ---
                         try:
                             await bot.send_message(
                                 telegram_id,
@@ -211,7 +212,6 @@ class YookassaService:
                         except Exception as e:
                             logger.exception(f"Unexpected error sending link to {telegram_id}")
                     else:
-                        # Не удалось получить ключ
                         if bot:
                             try:
                                 await bot.send_message(

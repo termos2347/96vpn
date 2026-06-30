@@ -2,6 +2,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional, Dict
+from collections import OrderedDict
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import get_or_create_bot_user
@@ -10,18 +12,38 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+
 class VPNManager:
-    _user_locks: Dict[int, asyncio.Lock] = {}
-    _lock_cleanup_lock = asyncio.Lock()
+    # Встроенный менеджер блокировок с LRU-очисткой
+    class _LockManager:
+        def __init__(self, max_size: int = 10000):
+            self._locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
+            self._max_size = max_size
+            self._lock = asyncio.Lock()   # защищает словарь
+
+        async def get_lock(self, user_id: int) -> asyncio.Lock:
+            async with self._lock:
+                if user_id in self._locks:
+                    # LRU: перемещаем в конец
+                    self._locks.move_to_end(user_id)
+                    return self._locks[user_id]
+
+                lock = asyncio.Lock()
+                self._locks[user_id] = lock
+
+                if len(self._locks) > self._max_size:
+                    # Удаляем самый старый элемент
+                    oldest = next(iter(self._locks))
+                    del self._locks[oldest]
+
+                return lock
 
     def __init__(self, server_pool: ServerPool):
         self.pool = server_pool
+        self._lock_manager = self._LockManager(max_size=10000)
 
     async def _get_user_lock(self, user_id: int) -> asyncio.Lock:
-        async with self._lock_cleanup_lock:
-            if user_id not in self._user_locks:
-                self._user_locks[user_id] = asyncio.Lock()
-            return self._user_locks[user_id]
+        return await self._lock_manager.get_lock(user_id)
 
     @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
@@ -29,7 +51,10 @@ class VPNManager:
         async with lock:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
-                    return await self._create_key_unsafe(user_id, days, session)
+                    return await asyncio.wait_for(
+                        self._create_key_unsafe(user_id, days, session),
+                        timeout=30.0
+                    )
 
     async def _create_key_unsafe(
         self,
@@ -50,9 +75,7 @@ class VPNManager:
                         if client and client.get("subId"):
                             link = provider.get_subscription_link(client["subId"])
                             logger.info(f"Existing key for user {user_id}: {link}")
-                            # Синхронизация: обновляем vpn_client_id на случай, если он изменился
                             user.vpn_client_id = client["uuid"]
-                            # server_id оставляем прежним (он уже верный)
                             await session.commit()
                             return link
                         else:
@@ -70,7 +93,19 @@ class VPNManager:
                     logger.error(f"Provider for server {server.id} not found")
                     return None
 
-                client_data = await provider.create_client(email)
+                # ---------- ТАЙМАУТ НА СОЗДАНИЕ КЛИЕНТА ----------
+                try:
+                    client_data = await asyncio.wait_for(
+                        provider.create_client(email),
+                        timeout=15.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout creating client for user {user_id} on server {server.id}")
+                    return None
+                except Exception as e:
+                    logger.exception(f"Error creating client for user {user_id} on server {server.id}: {e}")
+                    return None
+
                 if not client_data:
                     logger.error(f"Failed to create client on server {server.id} for user {user_id}")
                     return None
@@ -107,7 +142,10 @@ class VPNManager:
                     if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
                         logger.info(f"User {user_id} has no active subscription (end={user.vpn_subscription_end})")
                         return None
-                    return await self._create_key_unsafe(user_id, 30, session)
+                    return await asyncio.wait_for(
+                        self._create_key_unsafe(user_id, 30, session),
+                        timeout=30.0
+                    )
 
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:

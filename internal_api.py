@@ -19,6 +19,18 @@ from aiohttp import ClientError
 
 logger = logging.getLogger(__name__)
 
+
+def get_client_ip(request: web.Request) -> str:
+    """
+    Безопасно получает реальный IP клиента.
+    Доверяет только заголовку X-Real-IP (устанавливается прокси, например nginx).
+    Если прокси нет, использует request.remote.
+    """
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    return request.remote
+
 def ip_in_network(ip: str) -> bool:
     """Проверяет, входит ли IP-адрес в одну из доверенных сетей ЮKassa (из настроек)."""
     import ipaddress
@@ -35,7 +47,6 @@ def ip_in_network(ip: str) -> bool:
     except Exception as e:
         logger.error(f"IP validation error: {e}")
     return False
-
 
 def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
     """
@@ -89,7 +100,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                         days = settings.PERIOD_DAYS[period]
                         link = await vpn_manager.create_key(telegram_id, days)
                         if link and main_bot:
-                            # --- ОТПРАВКА ССЫЛКИ с полной обработкой ошибок ---
                             try:
                                 await main_bot.send_message(
                                     telegram_id,
@@ -119,8 +129,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
 
     # ---------- Обработчик вебхука ЮKassa ----------
     async def yookassa_webhook(request):
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.remote
+        client_ip = get_client_ip(request)
 
         if not client_ip or not ip_in_network(client_ip):
             logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
