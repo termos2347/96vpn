@@ -118,7 +118,7 @@ async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
     logger.info("=" * 50)
-    logger.info("🚀 Starting VPN bot with webhooks...")
+    logger.info("Starting VPN bot with webhooks...")
     logger.info("=" * 50)
 
     try:

@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from io import BytesIO
 
 from aiogram import Bot, Dispatcher, F
@@ -10,14 +10,14 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile, Message,  CallbackQuery
+from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile, Message, CallbackQuery
 from sqlalchemy import engine, func, select, text
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
 from db.base import AsyncSessionLocal, retry_db_operation
-from db.crud import get_user_by_telegram_id, get_user_full_data, update_vpn_subscription
+from db.crud import get_user_full_data
 from db.models import BotPayment, BotUser
-from handlers import get_server_pool, get_vpn_manager
+from handlers import get_vpn_manager
 from utils.validators import validate_user_id
 
 logger = logging.getLogger(__name__)
@@ -82,10 +82,6 @@ async def startup():
         BotCommand(command="grant", description="Выдать подписку (/grant id days)"),
         BotCommand(command="revoke", description="Отозвать подписку (/revoke id)"),
         BotCommand(command="stats", description="Статистика по подпискам"),
-        BotCommand(command="addserver", description="Добавить VPN-сервер"),
-        BotCommand(command="listservers", description="Список серверов"),
-        BotCommand(command="removeserver", description="Удалить сервер (ID)"),
-        BotCommand(command="serversetactive", description="Вкл/выкл сервер (ID 0/1)"),
         BotCommand(command="yookassa_ips", description="Показать доверенные IP ЮKassa"),
         BotCommand(command="set_yookassa_ips", description="Установить доверенные IP (JSON)"),
     ])
@@ -114,7 +110,7 @@ async def cmd_start(message: types.Message):
 async def cmd_menu(message: types.Message):
     text = (
         "📋 Доступные команды:\n\n"
-        "/start – 🚀 Запустить бота\n"
+        "/start – Запустить бота\n"
         "/health – состояние системы\n"
         "/errors – последние ошибки\n"
         "/broadcast – рассылка (reply на сообщение)\n"
@@ -122,10 +118,6 @@ async def cmd_menu(message: types.Message):
         "/grant <telegram_id> <days> – выдать/продлить VPN\n"
         "/revoke <telegram_id> – отозвать VPN\n"
         "/stats – статистика по подпискам\n"
-        "/addserver – добавить VPN-сервер в пул\n"
-        "/listservers – список всех серверов\n"
-        "/removeserver <id> – удалить сервер по ID\n"
-        "/serversetactive <id> <0|1> – включить/отключить сервер\n"
         "/yookassa_ips – показать доверенные IP ЮKassa\n"
         "/set_yookassa_ips <JSON> – установить доверенные IP (пример: [\"185.71.76.0/24\", ...])\n"
     )
@@ -142,23 +134,19 @@ async def cmd_health(message: types.Message):
         status += f"• БД: ошибка ({e})\n"
         log_error(f"Health check DB error: {e}", notify_admin=False)
 
-    pool = get_server_pool()
-    if pool.servers:
-        first_server = pool.servers[0]
-        provider = await pool.get_provider(first_server.id)
-        if provider:
-            try:
-                if await provider.login():
-                    status += "• VPN-панель: авторизована (на одном из серверов)\n"
-                else:
-                    status += "• VPN-панель: не удалось авторизоваться\n"
-            except Exception as e:
-                status += f"• VPN-панель: ошибка при авторизации ({e})\n"
-                log_error(f"Health check VPN error: {e}", notify_admin=False)
-        else:
-            status += "• VPN-панель: провайдер не найден\n"
+    # Проверка VPN-менеджера и провайдера
+    vpn_manager = get_vpn_manager()
+    if vpn_manager and hasattr(vpn_manager, 'provider'):
+        try:
+            if await vpn_manager.provider.login():
+                status += "• VPN-панель: авторизована\n"
+            else:
+                status += "• VPN-панель: не удалось авторизоваться\n"
+        except Exception as e:
+            status += f"• VPN-панель: ошибка при авторизации ({e})\n"
+            log_error(f"Health check VPN error: {e}", notify_admin=False)
     else:
-        status += "• VPN-панель: нет активных серверов в пуле\n"
+        status += "• VPN-менеджер не инициализирован или провайдер отсутствует\n"
 
     await message.answer(status)
 
@@ -307,7 +295,7 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in broadcast_confirm_callback: {e}", exc_info=True)
         await callback.message.edit_text("❌ Ошибка при выполнении рассылки.")
-        
+
 @dp.callback_query(StateFilter(BroadcastStates.confirm), F.data.startswith("broadcast_"))
 async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     if str(callback.from_user.id) != ADMIN_CHAT_ID:
@@ -584,8 +572,6 @@ async def cmd_grant(message: Message):
         link = await vpn_manager.create_key(telegram_id, days)
 
         if link:
-            # Дополнительно можно обновить дату окончания подписки в БД,
-            # но create_key уже делает это через активацию.
             await message.answer(
                 f"✅ VPN-подписка выдана пользователю `{telegram_id}` на **{days}** дней.\n"
                 f"🔗 Ссылка: `{link}`",
