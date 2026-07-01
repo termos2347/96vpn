@@ -12,7 +12,6 @@ class XUIVPNProvider:
     MAX_RETRIES = 3
     RETRY_DELAY = 1
     REQUEST_TIMEOUT = 30
-    HEARTBEAT_INTERVAL = 300  # 5 минут – можно убрать, если не нужен keep-alive
 
     def __init__(self, base_url: str, username: str, password: str,
                  inbound_id: int, sub_port: int):
@@ -48,7 +47,7 @@ class XUIVPNProvider:
             if self._session is None or self._session.closed or self._session_invalid:
                 if self._session and not self._session.closed:
                     await self._session.close()
-                connector = aiohttp.TCPConnector(ssl=True, limit=100, force_close=True)
+                connector = aiohttp.TCPConnector(ssl=self._ssl_context(), limit=100, force_close=True)
                 timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
                 self._session = aiohttp.ClientSession(
                     connector=connector,
@@ -58,6 +57,17 @@ class XUIVPNProvider:
                 self._session_invalid = False
                 logger.debug(f"Created new session for {self.base_url}")
             return self._session
+
+    def _ssl_context(self):
+        # Если VERIFY_SSL=false, отключаем проверку
+        from config import settings
+        if not settings.VERIFY_SSL:
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            return ssl_context
+        return True  # aiohttp по умолчанию использует проверку
 
     async def close(self):
         self._closed = True
@@ -105,26 +115,56 @@ class XUIVPNProvider:
     async def login(self) -> bool:
         if self._is_authenticated:
             return True
-        url = f"{self.base_url}/login"
-        payload = {"username": self.username, "password": self.password}
+
+        login_url = f"{self.base_url}/login"
+        logger.info(f"Attempting login to {login_url}")
+
+        # Пробуем отправить JSON
         try:
             session = await self._get_session()
-            async with session.post(url, data=payload) as resp:
+            async with session.post(login_url, json={"username": self.username, "password": self.password}) as resp:
                 if resp.status == 200:
-                    result = await resp.json()
-                    if result and result.get("success"):
-                        self._is_authenticated = True
-                        logger.info(f"Authenticated with {self.base_url}")
-                        return True
-                    else:
-                        logger.error(f"Auth failed: {result.get('msg')}")
-                        return False
+                    try:
+                        result = await resp.json()
+                        if result and result.get("success"):
+                            self._is_authenticated = True
+                            logger.info(f"Authenticated with {self.base_url} (JSON)")
+                            return True
+                        else:
+                            logger.error(f"Auth failed (JSON): {result.get('msg')}")
+                    except Exception as e:
+                        logger.error(f"Failed to parse JSON response from {login_url}: {e}")
+                        text = await resp.text()
+                        logger.error(f"Response text: {text[:500]}")
                 else:
-                    logger.error(f"Login HTTP {resp.status}")
-                    return False
+                    logger.error(f"Login HTTP {resp.status} on {login_url} (JSON)")
         except Exception as e:
-            logger.exception(f"Login exception for {self.base_url}")
-            return False
+            logger.exception(f"Login exception (JSON) for {login_url}")
+
+        # Пробуем form-data
+        try:
+            session = await self._get_session()
+            async with session.post(login_url, data={"username": self.username, "password": self.password}) as resp:
+                if resp.status == 200:
+                    try:
+                        result = await resp.json()
+                        if result and result.get("success"):
+                            self._is_authenticated = True
+                            logger.info(f"Authenticated with {self.base_url} (form-data)")
+                            return True
+                        else:
+                            logger.error(f"Auth failed (form-data): {result.get('msg')}")
+                    except Exception as e:
+                        logger.error(f"Failed to parse JSON response from {login_url} with form-data: {e}")
+                        text = await resp.text()
+                        logger.error(f"Response text: {text[:500]}")
+                else:
+                    logger.error(f"Login HTTP {resp.status} on {login_url} (form-data)")
+        except Exception as e:
+            logger.exception(f"Login exception (form-data) for {login_url}")
+
+        logger.error(f"All login attempts failed for {self.base_url}")
+        return False
 
     async def create_client(self, email: str) -> Optional[Dict[str, str]]:
         if not await self.login():
@@ -227,7 +267,6 @@ class XUIVPNProvider:
         if not await self.login():
             logger.error("Cannot revoke client: not authenticated")
             return False
-        # Пробуем разные варианты URL
         endpoints = [
             f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
             f"{self.base_url}/panel/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",

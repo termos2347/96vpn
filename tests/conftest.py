@@ -7,7 +7,6 @@ from aiogram import Bot
 from db.base import Base
 from db.models import BotUser, VPNServer, BotPayment
 from services.vpn_manager import VPNManager
-from services.server_pool import ServerPool
 from services.vpn_provider import XUIVPNProvider
 
 @pytest.fixture(scope="session")
@@ -65,11 +64,3 @@ def mock_vpn_provider():
     provider.get_subscription_link = MagicMock(return_value="https://test.com/sub/test-sub")
     provider._is_authenticated = True
     return provider
-
-@pytest.fixture
-def mock_server_pool(mock_vpn_provider):
-    pool = AsyncMock(spec=ServerPool)
-    pool.get_server = AsyncMock(return_value=MagicMock(id=1, name="Test Server"))
-    pool.get_provider = AsyncMock(return_value=mock_vpn_provider)
-    pool.servers = [MagicMock(id=1, name="Test Server", weight=1)]
-    return pool

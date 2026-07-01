@@ -50,9 +50,9 @@ class Settings(BaseSettings):
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     YOOKASSA_TRUSTED_IPS: List[str] = Field(..., min_length=1)
 
-    # ---------- 3x-UI панель (единственная) ----------
-    XUI_BASE_URL: str = Field(..., min_length=1)          # например, https://panel.example.com:443
-    XUI_USERNAME: str = Field(..., min_length=1)
+    # ---------- 3x-UI Master Panel (единственная) ----------
+    XUI_MASTER_URL: str = Field(..., min_length=1)          # например, https://panel.example.com:443
+    XUI_LOGIN: str = Field(..., min_length=1)
     XUI_PASSWORD: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
@@ -163,11 +163,11 @@ class Settings(BaseSettings):
                     raise ValueError(f"In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1")
         return v
 
-    @field_validator('XUI_BASE_URL')
+    @field_validator('XUI_MASTER_URL')
     @classmethod
     def validate_xui_url(cls, v):
         if not v.startswith(('http://', 'https://')):
-            raise ValueError("XUI_BASE_URL must start with http:// or https://")
+            raise ValueError("XUI_MASTER_URL must start with http:// or https://")
         return v
 
     # ---------- Свойства ----------

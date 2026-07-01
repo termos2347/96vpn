@@ -48,13 +48,12 @@ class LockManager:
 class VPNManager:
     def __init__(self, provider: XUIVPNProvider):
         self.provider = provider
-        # Используем LockManager вместо простого словаря
         self._lock_manager = LockManager(max_size=5000, ttl_seconds=300)
 
     @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
         """
-        Создаёт или обновляет ключ для пользователя на единственной панели.
+        Создаёт или обновляет ключ для пользователя на Master-панели.
         Если у пользователя уже есть активный клиент, возвращает его ссылку.
         Иначе создаёт нового клиента.
         """
@@ -101,8 +100,8 @@ class VPNManager:
         sub_id = client_data['subId']
 
         user.vpn_client_id = client_uuid
-        # server_id больше не храним
-        # user.server_id = None  # если поле осталось, можно занулить
+        # server_id больше не используется
+        # user.server_id = None
 
         link = self.provider.get_subscription_link(sub_id)
         logger.info(f"Key created for user {user_id}: {link}")
@@ -121,7 +120,6 @@ class VPNManager:
                         logger.info(f"User {user_id} has no active subscription")
                         return None
                     # Дни берём из разницы, но можно передать произвольные, так как мы не продлеваем здесь
-                    # Для простоты возьмём 30 дней (но это не влияет на создание клиента, т.к. expiryTime=0)
                     return await self._create_key_unsafe(user_id, 30, session)
 
     @retry_db_operation(max_retries=3)
