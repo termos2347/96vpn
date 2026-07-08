@@ -236,7 +236,7 @@ async def on_shutdown():
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
-    # --- Закрываем VPN-провайдер (освобождаем HTTP-сессии) ---
+    # Закрываем VPN-провайдер
     vpn_manager = get_vpn_manager()
     if vpn_manager and hasattr(vpn_manager, 'provider'):
         try:
@@ -273,11 +273,12 @@ async def on_shutdown():
         except Exception:
             pass
 
-    if engine:
-        try:
-            await engine.dispose()
-        except Exception:
-            pass
+    # Закрываем SQLAlchemy engine
+    try:
+        await engine.dispose()
+        logger.info("Database engine disposed")
+    except Exception as e:
+        logger.warning(f"Error disposing SQLAlchemy engine: {e}")
 
     logger.info("Shutdown complete.")
 

@@ -9,9 +9,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, ValidationError
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
+from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
 
 load_dotenv()
 
+def clean_db_url(url: str) -> str:
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query)
+    query_params.pop('channel_binding', None)
+    new_query = urlencode(query_params, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -34,9 +41,9 @@ class Settings(BaseSettings):
 
     # ---------- Webhook ----------
     WEBHOOK_URL: str = Field(..., min_length=1)
-    WEBHOOK_SECRET: str = Field(..., min_length=16, description="Secret token for main bot webhook")
+    WEBHOOK_SECRET: str = Field(..., min_length=16)
     ADMIN_WEBHOOK_URL: str = Field(..., min_length=1)
-    ADMIN_WEBHOOK_SECRET: str = Field(..., min_length=16, description="Secret token for admin bot webhook")
+    ADMIN_WEBHOOK_SECRET: str = Field(..., min_length=16)
 
     # ---------- Безопасность ----------
     ENCRYPTION_KEY: str = Field(..., min_length=1)
@@ -50,7 +57,7 @@ class Settings(BaseSettings):
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     YOOKASSA_TRUSTED_IPS: List[str] = Field(..., min_length=1)
 
-    # ---------- 3x-UI Master Panel (единственная) ----------
+    # ---------- 3x-UI Master Panel ----------
     XUI_MASTER_URL: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
@@ -207,7 +214,6 @@ except ValidationError as e:
 
 # ---------- Экспорт для обратной совместимости ----------
 TOKEN = settings.BOT_TOKEN
-DATABASE_URL = settings.DATABASE_URL
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
 ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID
 VPN_PRICES = settings.VPN_PRICES
@@ -216,6 +222,9 @@ INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 INTERNAL_API_URL = settings.INTERNAL_API_URL
+
+# ---------- Очищенный DATABASE_URL ----------
+DATABASE_URL = clean_db_url(settings.DATABASE_URL)
 
 # ---------- Работа с yookassa_ip.json ----------
 IPS_FILE = Path("yookassa_ip.json")
@@ -260,3 +269,4 @@ if _loaded_ips is not None:
         logging.warning("⚠️ yookassa_ip.json contains an empty list. Keeping value from .env.")
 else:
     logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
+        

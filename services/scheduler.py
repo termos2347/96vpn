@@ -18,7 +18,6 @@ from admin import send_admin_alert
 
 logger = logging.getLogger(__name__)
 
-
 async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
     while True:
         try:
@@ -34,9 +33,9 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
             logger.warning(f"Task {task_name} finished unexpectedly, restarting in {restart_delay}s")
             await asyncio.sleep(restart_delay)
 
-
 @retry_db_operation(max_retries=3)
 async def check_expired_subscriptions(bot):
+    """Отзывает ключи у пользователей с истекшей подпиской."""
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         stmt = select(BotUser).where(
@@ -61,12 +60,10 @@ async def check_expired_subscriptions(bot):
         telegram_id = user.telegram_id
         client_uuid = user.vpn_client_id
 
-        # Отзываем ключ через менеджер
         try:
             revoked = await vpn_manager.revoke_key(telegram_id)
             if revoked:
                 logger.info(f"Key {client_uuid} revoked for user {telegram_id}")
-                # Уведомление
                 try:
                     await bot.send_message(
                         telegram_id,
@@ -80,9 +77,9 @@ async def check_expired_subscriptions(bot):
         except Exception as e:
             logger.exception(f"Error revoking key for user {telegram_id}: {e}")
 
-
 @retry_db_operation(max_retries=3)
 async def send_expiry_reminders(bot):
+    """Отправляет напоминания об истечении подписки."""
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         result = await session.execute(
@@ -137,6 +134,7 @@ async def send_expiry_reminders(bot):
                 break
 
         if message_sent:
+            # Обновляем last_reminder_sent внутри транзакции с блокировкой
             async with AsyncSessionLocal() as session_upd:
                 async with session_upd.begin():
                     stmt_lock = select(BotUser).where(BotUser.id == user.id).with_for_update(skip_locked=True)
@@ -146,13 +144,14 @@ async def send_expiry_reminders(bot):
                     if db_user.last_reminder_sent and db_user.last_reminder_sent.date() == today:
                         continue
                     db_user.last_reminder_sent = now
+                    # commit автоматически при выходе из begin()
             logger.info(f"Отправлено напоминание за {days_left} дн. пользователю {user.telegram_id}")
         else:
             logger.error(f"Не удалось отправить напоминание пользователю {user.telegram_id} после 3 попыток")
 
-
 @retry_db_operation(max_retries=3)
 async def retry_missing_keys(bot):
+    """Создаёт ключи для пользователей с активной подпиской, но без vpn_client_id."""
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         stmt = select(BotUser).where(
@@ -201,7 +200,6 @@ async def retry_missing_keys(bot):
                         logger.warning(f"Не удалось создать ключ для {db_user.telegram_id} в фоновой задаче")
                 except Exception as e:
                     logger.exception(f"Ошибка создания ключа для {db_user.telegram_id} в фоновой задаче: {e}")
-
 
 async def start_scheduler(bot):
     INTERVAL_CHECK_EXPIRED = 3600   # 1 час
