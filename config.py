@@ -51,11 +51,10 @@ class Settings(BaseSettings):
     YOOKASSA_TRUSTED_IPS: List[str] = Field(..., min_length=1)
 
     # ---------- 3x-UI Master Panel (единственная) ----------
-    XUI_MASTER_URL: str = Field(..., min_length=1)          # например, https://panel.example.com:443
-    XUI_LOGIN: str = Field(..., min_length=1)
-    XUI_PASSWORD: str = Field(..., min_length=1)
+    XUI_MASTER_URL: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
+    XUI_API_TOKEN: Optional[str] = Field(None)
 
     # ---------- Остальное ----------
     SUPPORT_USERNAME: str = "support_username"

@@ -1,9 +1,11 @@
 import uuid
-import json
 import logging
 import asyncio
 import aiohttp
+import ssl
 from typing import Optional, Dict, Any
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -13,22 +15,27 @@ class XUIVPNProvider:
     RETRY_DELAY = 1
     REQUEST_TIMEOUT = 30
 
-    def __init__(self, base_url: str, username: str, password: str,
-                 inbound_id: int, sub_port: int):
+    def __init__(self, base_url: str, api_token: str, inbound_id: int, sub_port: int):
         self.base_url = base_url.rstrip('/')
-        self.username = username
-        self.password = password
+        self.api_token = api_token
         self.inbound_id = inbound_id
         self.sub_port = sub_port
 
-        self.headers = {"Referer": f"{self.base_url}/panel/inbounds"}
+        if not self.api_token:
+            raise ValueError("API token is required for XUIVPNProvider")
+
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_token}"
+        }
+
         self._session: Optional[aiohttp.ClientSession] = None
         self._session_lock = asyncio.Lock()
         self._session_invalid = False
-        self._is_authenticated = False
         self._closed = False
 
-        # Извлекаем хост для подписки (без порта)
         self._server_host = self._extract_host(self.base_url)
 
     @staticmethod
@@ -39,6 +46,14 @@ class XUIVPNProvider:
         except (IndexError, AttributeError):
             logger.error(f"Failed to extract host from URL: {url}")
             return ""
+
+    def _ssl_context(self):
+        if not settings.VERIFY_SSL:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            return ctx
+        return None
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._closed:
@@ -52,22 +67,12 @@ class XUIVPNProvider:
                 self._session = aiohttp.ClientSession(
                     connector=connector,
                     cookie_jar=aiohttp.CookieJar(unsafe=True),
-                    timeout=timeout
+                    timeout=timeout,
+                    headers=self.headers
                 )
                 self._session_invalid = False
                 logger.debug(f"Created new session for {self.base_url}")
             return self._session
-
-    def _ssl_context(self):
-        # Если VERIFY_SSL=false, отключаем проверку
-        from config import settings
-        if not settings.VERIFY_SSL:
-            import ssl
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            return ssl_context
-        return True  # aiohttp по умолчанию использует проверку
 
     async def close(self):
         self._closed = True
@@ -83,6 +88,7 @@ class XUIVPNProvider:
         while attempt < self.MAX_RETRIES:
             try:
                 session = await self._get_session()
+                kwargs.setdefault("headers", {})["Authorization"] = f"Bearer {self.api_token}"
                 method_func = getattr(session, method.lower())
                 async with method_func(url, **kwargs) as resp:
                     if resp.status == 200:
@@ -91,11 +97,8 @@ class XUIVPNProvider:
                         except Exception:
                             return None
                     elif resp.status == 401:
-                        self._is_authenticated = False
-                        if await self.login():
-                            continue
-                        else:
-                            return None
+                        logger.error("API token invalid or expired")
+                        return None
                     else:
                         logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}")
             except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
@@ -112,150 +115,82 @@ class XUIVPNProvider:
         logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
         return None
 
-    async def login(self) -> bool:
-        if self._is_authenticated:
-            return True
-
-        login_url = f"{self.base_url}/login"
-        logger.info(f"Attempting login to {login_url}")
-
-        # Пробуем отправить JSON
-        try:
-            session = await self._get_session()
-            async with session.post(login_url, json={"username": self.username, "password": self.password}) as resp:
-                if resp.status == 200:
-                    try:
-                        result = await resp.json()
-                        if result and result.get("success"):
-                            self._is_authenticated = True
-                            logger.info(f"Authenticated with {self.base_url} (JSON)")
-                            return True
-                        else:
-                            logger.error(f"Auth failed (JSON): {result.get('msg')}")
-                    except Exception as e:
-                        logger.error(f"Failed to parse JSON response from {login_url}: {e}")
-                        text = await resp.text()
-                        logger.error(f"Response text: {text[:500]}")
-                else:
-                    logger.error(f"Login HTTP {resp.status} on {login_url} (JSON)")
-        except Exception as e:
-            logger.exception(f"Login exception (JSON) for {login_url}")
-
-        # Пробуем form-data
-        try:
-            session = await self._get_session()
-            async with session.post(login_url, data={"username": self.username, "password": self.password}) as resp:
-                if resp.status == 200:
-                    try:
-                        result = await resp.json()
-                        if result and result.get("success"):
-                            self._is_authenticated = True
-                            logger.info(f"Authenticated with {self.base_url} (form-data)")
-                            return True
-                        else:
-                            logger.error(f"Auth failed (form-data): {result.get('msg')}")
-                    except Exception as e:
-                        logger.error(f"Failed to parse JSON response from {login_url} with form-data: {e}")
-                        text = await resp.text()
-                        logger.error(f"Response text: {text[:500]}")
-                else:
-                    logger.error(f"Login HTTP {resp.status} on {login_url} (form-data)")
-        except Exception as e:
-            logger.exception(f"Login exception (form-data) for {login_url}")
-
-        logger.error(f"All login attempts failed for {self.base_url}")
-        return False
-
     async def create_client(self, email: str) -> Optional[Dict[str, str]]:
-        if not await self.login():
-            logger.error("Cannot create client: not authenticated")
+        """
+        Создаёт клиента через /panel/api/clients/add.
+        Возвращает словарь с uuid и subId.
+        Ожидает email формата "user_{id}@96vpn.bot".
+        """
+        if not email:
+            logger.error("Email is required")
             return None
 
         client_uuid = str(uuid.uuid4())
-        sub_id = str(uuid.uuid4()).replace('-', '')[:16]
+        # Извлекаем user_id из email "user_{id}@..."
+        user_id = 0
+        if email.startswith("user_"):
+            try:
+                user_id = int(email.split("_")[1].split("@")[0])
+            except Exception:
+                logger.warning(f"Could not parse user_id from email {email}")
+        else:
+            # fallback: генерируем хэш
+            user_id = hash(email) % 1000000
 
-        settings_data = {
-            "clients": [{
-                "id": client_uuid,
-                "email": email,
-                "alterId": 0,
-                "limitIp": 1,
-                "totalGb": 0,
-                "expiryTime": 0,
-                "enable": True,
-                "tgId": "",
-                "subId": sub_id,
-                "flow": "xtls-rprx-vision"
-            }]
-        }
+        client_email = f"tg_{user_id}_{client_uuid[:8]}"
+        sub_id = client_uuid[:16]
 
         payload = {
-            "id": self.inbound_id,
-            "settings": json.dumps(settings_data)
+            "inboundIds": [self.inbound_id],
+            "client": {
+                "id": client_uuid,
+                "email": client_email,
+                "flow": "",
+                "limitIp": 2,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+                "tgId": user_id,          # важно: число, не строка
+                "subId": sub_id
+            }
         }
-        url = f"{self.base_url}/panel/api/inbounds/addClient"
+
+        url = f"{self.base_url}/panel/api/clients/add"
+        logger.info(f"Creating client with email {client_email} via {url}")
 
         try:
-            result = await self._retry_request("POST", url, data=payload, headers=self.headers)
-            if result and result.get("success"):
-                logger.info(f"Client {email} created with UUID {client_uuid}")
+            result = await self._retry_request("POST", url, json=payload)
+            if result and result.get("success") is True:
+                logger.info(f"Client {client_email} created successfully, sub_id={sub_id}")
                 return {"uuid": client_uuid, "subId": sub_id}
-            elif result and "Duplicate" in result.get("msg", ""):
-                logger.warning(f"Email {email} already exists on panel")
-                return None
             else:
-                logger.error(f"Failed to create client: {result.get('msg') if result else 'No response'}")
+                logger.error(f"Failed to create client: {result}")
                 return None
-        except Exception:
-            logger.exception("Exception creating client")
+        except Exception as e:
+            logger.exception(f"Exception creating client: {e}")
             return None
 
     async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
-        if not await self.login():
-            return None
-        url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
+        url = f"{self.base_url}/panel/api/clients/get/{email}"
         try:
-            result = await self._retry_request("GET", url, headers=self.headers)
-            if not result:
-                return None
-            inbound = result.get("obj")
-            if not inbound:
-                return None
-            settings_data = json.loads(inbound.get("settings", "{}"))
-            for client in settings_data.get("clients", []):
-                if client.get("email") == email:
+            result = await self._retry_request("GET", url)
+            if result and result.get("success"):
+                data = result.get("obj")
+                if data:
                     return {
-                        "uuid": client.get("id"),
-                        "subId": client.get("subId", client.get("id")[:16])
+                        "uuid": data.get("id"),
+                        "subId": data.get("subId"),
+                        "email": data.get("email"),
+                        "enable": data.get("enable"),
                     }
             return None
-        except Exception:
-            logger.exception("Exception searching client by email")
+        except Exception as e:
+            logger.exception(f"Error getting client by email {email}: {e}")
             return None
 
     async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
-        if not await self.login():
-            return None
-        url = f"{self.base_url}/panel/api/inbounds/get/{self.inbound_id}"
-        try:
-            result = await self._retry_request("GET", url, headers=self.headers)
-            if not result:
-                return None
-            inbound = result.get("obj")
-            if not inbound:
-                return None
-            settings_data = json.loads(inbound.get("settings", "{}"))
-            for client in settings_data.get("clients", []):
-                if client.get("id") == client_uuid:
-                    return {
-                        "uuid": client.get("id"),
-                        "subId": client.get("subId", client.get("id")[:16]),
-                        "email": client.get("email")
-                    }
-            return None
-        except Exception:
-            logger.exception("Exception searching client by uuid")
-            return None
+        logger.warning("get_client_by_uuid is not implemented")
+        return None
 
     def get_subscription_link(self, sub_id: str) -> str:
         if not self._server_host or not sub_id:
@@ -264,21 +199,15 @@ class XUIVPNProvider:
         return f"https://{self._server_host}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, client_uuid: str) -> bool:
-        if not await self.login():
-            logger.error("Cannot revoke client: not authenticated")
+        url = f"{self.base_url}/panel/api/clients/del/{client_uuid}"
+        try:
+            result = await self._retry_request("POST", url)
+            if result and result.get("success") is True:
+                logger.info(f"Client {client_uuid} revoked")
+                return True
+            else:
+                logger.error(f"Failed to revoke client {client_uuid}: {result}")
+                return False
+        except Exception as e:
+            logger.exception(f"Error revoking client {client_uuid}: {e}")
             return False
-        endpoints = [
-            f"{self.base_url}/panel/api/inbounds/{self.inbound_id}/delClient/{client_uuid}",
-            f"{self.base_url}/panel/api/inbounds/delClient/{self.inbound_id}/Client/{client_uuid}",
-        ]
-        for url in endpoints:
-            try:
-                result = await self._retry_request("POST", url, headers=self.headers)
-                if result and result.get("success"):
-                    logger.info(f"Client {client_uuid} revoked successfully")
-                    return True
-            except Exception as e:
-                logger.debug(f"Failed endpoint {url}: {e}")
-                continue
-        logger.error(f"Failed to revoke client {client_uuid}")
-        return False

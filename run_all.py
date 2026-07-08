@@ -131,8 +131,7 @@ async def on_startup():
         logger.info("Step 2/7: Initializing VPN components (single Master 3x-UI panel)...")
         provider = XUIVPNProvider(
             base_url=settings.XUI_MASTER_URL,
-            username=settings.XUI_LOGIN,
-            password=settings.XUI_PASSWORD,
+            api_token=settings.XUI_API_TOKEN,
             inbound_id=settings.XUI_INBOUND_ID,
             sub_port=settings.XUI_SUB_PORT
         )

@@ -14,7 +14,7 @@ from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import engine, func, select, text
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
-from db.base import AsyncSessionLocal, retry_db_operation
+from db.base import AsyncSessionLocal, retry_db_operation, engine
 from db.crud import get_user_full_data
 from db.models import BotPayment, BotUser
 from handlers import get_vpn_manager
@@ -134,17 +134,12 @@ async def cmd_health(message: types.Message):
         status += f"• БД: ошибка ({e})\n"
         log_error(f"Health check DB error: {e}", notify_admin=False)
 
-    # Проверка VPN-менеджера и провайдера
     vpn_manager = get_vpn_manager()
     if vpn_manager and hasattr(vpn_manager, 'provider'):
-        try:
-            if await vpn_manager.provider.login():
-                status += "• VPN-панель: авторизована\n"
-            else:
-                status += "• VPN-панель: не удалось авторизоваться\n"
-        except Exception as e:
-            status += f"• VPN-панель: ошибка при авторизации ({e})\n"
-            log_error(f"Health check VPN error: {e}", notify_admin=False)
+        if hasattr(vpn_manager.provider, 'api_token') and vpn_manager.provider.api_token:
+            status += "• VPN-панель: токен установлен\n"
+        else:
+            status += "• VPN-панель: токен не найден\n"
     else:
         status += "• VPN-менеджер не инициализирован или провайдер отсутствует\n"
 

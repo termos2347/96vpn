@@ -1,85 +1,26 @@
 import asyncio
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from db.base import AsyncSessionLocal, retry_db_operation
-from db.crud import get_or_create_bot_user
+from db.models import BotUser
 from services.vpn_provider import XUIVPNProvider
 
 logger = logging.getLogger(__name__)
 
 
-class LockManager:
-    """
-    Управление замками с автоматической очисткой по TTL и максимальному размеру.
-    Предотвращает бесконечный рост памяти от хранения замков для всех пользователей.
-    """
-    def __init__(self, max_size: int = 10000, ttl_seconds: int = 600):
-        self._locks = {}
-        self._last_access = {}
-        self.max_size = max_size
-        self.ttl = ttl_seconds
-
-    def get_lock(self, user_id: int) -> asyncio.Lock:
-        now = time.time()
-
-        # 1. Удаляем все замки, к которым не обращались дольше TTL
-        expired = [uid for uid, last in self._last_access.items() if now - last > self.ttl]
-        for uid in expired:
-            self._locks.pop(uid, None)
-            self._last_access.pop(uid, None)
-
-        # 2. Если размер превышен, удаляем самый старый (по last_access)
-        if len(self._locks) >= self.max_size:
-            oldest = min(self._last_access, key=self._last_access.get)
-            self._locks.pop(oldest, None)
-            self._last_access.pop(oldest, None)
-
-        # 3. Создаём или возвращаем существующий замок
-        if user_id not in self._locks:
-            self._locks[user_id] = asyncio.Lock()
-        self._last_access[user_id] = now
-        return self._locks[user_id]
-
-
 class VPNManager:
     def __init__(self, provider: XUIVPNProvider):
         self.provider = provider
-        self._lock_manager = LockManager(max_size=5000, ttl_seconds=300)
 
     @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int) -> Optional[str]:
-        """
-        Создаёт или обновляет ключ для пользователя на Master-панели.
-        Если у пользователя уже есть активный клиент, возвращает его ссылку.
-        Иначе создаёт нового клиента.
-        """
-        lock = self._lock_manager.get_lock(user_id)
-        async with lock:
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    return await self._create_key_unsafe(user_id, days, session)
-
-    async def _create_key_unsafe(self, user_id: int, days: int, session: AsyncSession) -> Optional[str]:
-        user = await get_or_create_bot_user(session, user_id)
         email = f"user_{user_id}@96vpn.bot"
 
-        # Если у пользователя уже есть client_id, пробуем получить ссылку
-        if user.vpn_client_id:
-            # Проверяем, существует ли клиент на панели
-            client = await self.provider.get_client_by_uuid(user.vpn_client_id)
-            if client and client.get("subId"):
-                link = self.provider.get_subscription_link(client["subId"])
-                logger.info(f"Existing key for user {user_id}: {link}")
-                return link
-            else:
-                logger.warning(f"Stored client_id {user.vpn_client_id} not found on panel, will recreate")
-                user.vpn_client_id = None  # очистим, чтобы создать нового
-
-        # Создаём нового клиента с таймаутом
         try:
             client_data = await asyncio.wait_for(
                 self.provider.create_client(email),
@@ -98,55 +39,121 @@ class VPNManager:
 
         client_uuid = client_data['uuid']
         sub_id = client_data['subId']
-
-        user.vpn_client_id = client_uuid
-        # server_id больше не используется
-        # user.server_id = None
-
         link = self.provider.get_subscription_link(sub_id)
-        logger.info(f"Key created for user {user_id}: {link}")
-        return link
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                # Увеличиваем таймаут до 300 секунд
+                await session.execute(text("SET LOCAL statement_timeout = '300s'"))
+
+                now = datetime.now(timezone.utc)
+                new_end = now + timedelta(days=days)
+
+                result = await session.execute(
+                    text("""
+                        UPDATE bot_users
+                        SET vpn_client_id = :client_id,
+                            vpn_subscription_end = :end_date,
+                            updated_at = :updated_at
+                        WHERE telegram_id = :tg_id
+                    """),
+                    {
+                        "client_id": client_uuid,
+                        "end_date": new_end,
+                        "updated_at": now,
+                        "tg_id": user_id
+                    }
+                )
+
+                if result.rowcount == 0:
+                    await session.execute(
+                        text("""
+                            INSERT INTO bot_users (telegram_id, vpn_client_id, vpn_subscription_end, updated_at, created_at)
+                            VALUES (:tg_id, :client_id, :end_date, :updated_at, :updated_at)
+                            ON CONFLICT (telegram_id) DO UPDATE
+                            SET vpn_client_id = EXCLUDED.vpn_client_id,
+                                vpn_subscription_end = EXCLUDED.vpn_subscription_end,
+                                updated_at = EXCLUDED.updated_at
+                        """),
+                        {
+                            "tg_id": user_id,
+                            "client_id": client_uuid,
+                            "end_date": new_end,
+                            "updated_at": now
+                        }
+                    )
+
+                await session.commit()
+                logger.info(f"Key created and DB updated for user {user_id}: {link}")
+                return link
 
     @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
-        """Аналог create_key, но без указания дней (используется для получения ссылки после оплаты)."""
-        lock = self._lock_manager.get_lock(user_id)
-        async with lock:
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    user = await get_or_create_bot_user(session, user_id)
-                    now = datetime.now(timezone.utc)
-                    if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
-                        logger.info(f"User {user_id} has no active subscription")
-                        return None
-                    # Дни берём из разницы, но можно передать произвольные, так как мы не продлеваем здесь
-                    return await self._create_key_unsafe(user_id, 30, session)
+        async with AsyncSessionLocal() as session:
+            row = await session.execute(
+                text("""
+                    SELECT vpn_subscription_end, vpn_client_id
+                    FROM bot_users
+                    WHERE telegram_id = :tg_id
+                """),
+                {"tg_id": user_id}
+            )
+            result = row.first()
+            now = datetime.now(timezone.utc)
+
+            if result:
+                vpn_end, client_uuid = result
+                if vpn_end and vpn_end > now:
+                    if client_uuid:
+                        client = await self.provider.get_client_by_uuid(client_uuid)
+                        if client and client.get("subId"):
+                            link = self.provider.get_subscription_link(client["subId"])
+                            logger.info(f"Existing key for user {user_id}: {link}")
+                            return link
+                        else:
+                            await session.execute(
+                                text("UPDATE bot_users SET vpn_client_id = NULL WHERE telegram_id = :tg_id"),
+                                {"tg_id": user_id}
+                            )
+                            await session.commit()
+                    days_left = (vpn_end - now).days
+                    if days_left < 1:
+                        days_left = 30
+                    return await self.create_key(user_id, days_left)
+                else:
+                    logger.info(f"User {user_id} has no active subscription")
+                    return None
+            else:
+                logger.info(f"User {user_id} not found, creating...")
+                await session.execute(
+                    text("""
+                        INSERT INTO bot_users (telegram_id, created_at, updated_at)
+                        VALUES (:tg_id, :now, :now)
+                        ON CONFLICT (telegram_id) DO NOTHING
+                    """),
+                    {"tg_id": user_id, "now": now}
+                )
+                await session.commit()
+                return None
 
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:
-        lock = self._lock_manager.get_lock(user_id)
-        async with lock:
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    return await self._revoke_key_unsafe(user_id, session)
+        async with AsyncSessionLocal() as session:
+            row = await session.execute(
+                text("SELECT vpn_client_id FROM bot_users WHERE telegram_id = :tg_id"),
+                {"tg_id": user_id}
+            )
+            client_uuid = row.scalar()
+            if not client_uuid:
+                logger.info(f"User {user_id} has no active key to revoke")
+                return True
 
-    async def _revoke_key_unsafe(self, user_id: int, session: AsyncSession) -> bool:
-        user = await get_or_create_bot_user(session, user_id)
-        if not user.vpn_client_id:
-            logger.info(f"User {user_id} has no active key to revoke")
-            return True
-
-        client_uuid = user.vpn_client_id
-        # Пытаемся отозвать клиент на панели
         try:
             success = await asyncio.wait_for(
                 self.provider.revoke_client(client_uuid),
                 timeout=15.0
             )
-            if success:
-                logger.info(f"Key revoked on panel for user {user_id}")
-            else:
-                # Проверяем, существует ли клиент
+            if not success:
                 client = await self.provider.get_client_by_uuid(client_uuid)
                 if client is None:
                     logger.info(f"Client {client_uuid} not found on panel, assuming already revoked")
@@ -160,7 +167,22 @@ class VPNManager:
             logger.exception(f"Error revoking client {client_uuid} for user {user_id}: {e}")
             return False
 
-        # Обновляем БД
-        user.vpn_client_id = None
-        user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
-        return True
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    text("""
+                        UPDATE bot_users
+                        SET vpn_client_id = NULL,
+                            vpn_subscription_end = :end_date,
+                            updated_at = :now
+                        WHERE telegram_id = :tg_id
+                    """),
+                    {
+                        "end_date": datetime.now(timezone.utc) - timedelta(days=1),
+                        "now": datetime.now(timezone.utc),
+                        "tg_id": user_id
+                    }
+                )
+                await session.commit()
+                logger.info(f"Key revoked for user {user_id}")
+                return True
