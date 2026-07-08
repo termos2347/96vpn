@@ -119,26 +119,37 @@ class XUIVPNProvider:
         """
         Создаёт клиента через /panel/api/clients/add.
         Возвращает словарь с uuid и subId.
-        Ожидает email формата "user_{id}@96vpn.bot".
+        Ожидает email формата "tg_{user_id}_{uuid[:8]}".
         """
         if not email:
             logger.error("Email is required")
             return None
 
         client_uuid = str(uuid.uuid4())
-        # Извлекаем user_id из email "user_{id}@..."
+        # Извлекаем user_id из email "tg_{user_id}_{uuid[:8]}"
         user_id = 0
-        if email.startswith("user_"):
+        if email.startswith("tg_"):
             try:
-                user_id = int(email.split("_")[1].split("@")[0])
+                parts = email.split("_")
+                user_id = int(parts[1])
             except Exception:
                 logger.warning(f"Could not parse user_id from email {email}")
         else:
-            # fallback: генерируем хэш
+            # fallback для обратной совместимости
             user_id = hash(email) % 1000000
 
-        client_email = f"tg_{user_id}_{client_uuid[:8]}"
-        sub_id = client_uuid[:16]
+        # Если email уже содержит UUID, используем его
+        if "_" in email and len(email.split("_")[-1]) >= 8:
+            client_uuid = email.split("_")[-1]
+            # Дополним до полного UUID, если он короткий (это не обязательно, но для единообразия)
+            if len(client_uuid) < 36:
+                # если это просто 8 символов, то создадим новый полный UUID
+                client_uuid = str(uuid.uuid4())
+                # перегенерируем email с новым uuid
+                email = f"tg_{user_id}_{client_uuid[:8]}"
+
+        client_email = email
+        sub_id = client_uuid[:16]  # берём первые 16 символов
 
         payload = {
             "inboundIds": [self.inbound_id],
@@ -150,7 +161,7 @@ class XUIVPNProvider:
                 "totalGB": 0,
                 "expiryTime": 0,
                 "enable": True,
-                "tgId": user_id,          # важно: число, не строка
+                "tgId": user_id,
                 "subId": sub_id
             }
         }
@@ -171,6 +182,9 @@ class XUIVPNProvider:
             return None
 
     async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
+        """
+        Получает данные клиента по email.
+        """
         url = f"{self.base_url}/panel/api/clients/get/{email}"
         try:
             result = await self._retry_request("GET", url)
@@ -187,10 +201,6 @@ class XUIVPNProvider:
         except Exception as e:
             logger.exception(f"Error getting client by email {email}: {e}")
             return None
-
-    async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
-        logger.warning("get_client_by_uuid is not implemented")
-        return None
 
     def get_subscription_link(self, sub_id: str) -> str:
         if not self._server_host or not sub_id:

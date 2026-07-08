@@ -8,10 +8,10 @@ from aiogram import Bot, Dispatcher
 from sqlalchemy import text
 
 from config import TOKEN, settings
-from handlers import router as main_router, init_vpn_components, set_vpn_manager, get_vpn_manager
+from handlers import router as main_router, init_vpn_components
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
-from services.vpn_manager import VPNManager
+from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
 from services.vpn_provider import XUIVPNProvider
 from db.base import engine
 from internal_api import create_internal_app
@@ -137,7 +137,7 @@ async def on_startup():
         )
         vpn_manager = VPNManager(provider)
         set_vpn_manager(vpn_manager)
-        init_vpn_components()
+        init_vpn_components()  # эта функция теперь просто дублирует создание, но оставим для совместимости
         logger.info("✅ VPN components initialized")
 
         logger.info("Step 3/7: Starting admin bot...")

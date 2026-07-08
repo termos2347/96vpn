@@ -1,41 +1,45 @@
 import logging
-from aiogram import Router, types
-from aiogram.filters import Command
+from aiogram import Router
+
 from config import settings
 from services.vpn_provider import XUIVPNProvider
-from services.vpn_manager import VPNManager
+from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
-# Глобальные переменные
-_vpn_manager: VPNManager = None
 
-def get_vpn_manager() -> VPNManager:
-    return _vpn_manager
-
-def set_vpn_manager(manager: VPNManager):
-    global _vpn_manager
-    _vpn_manager = manager
-
-# Инициализация при старте (вызывается из run_all.py)
 def init_vpn_components():
-    global _vpn_manager
-    if _vpn_manager is not None:
+    """
+    Инициализирует VPN-компоненты при старте бота.
+    Вызывается из run_all.py.
+    """
+    if get_vpn_manager() is not None:
+        logger.info("VPN components already initialized, skipping.")
         return
+
     provider = XUIVPNProvider(
-        base_url=settings.XUI_BASE_URL,
-        username=settings.XUI_USERNAME,
-        password=settings.XUI_PASSWORD,
+        base_url=settings.XUI_MASTER_URL,
+        api_token=settings.XUI_API_TOKEN,
         inbound_id=settings.XUI_INBOUND_ID,
         sub_port=settings.XUI_SUB_PORT
     )
-    _vpn_manager = VPNManager(provider)
-    logger.info("VPN components initialized with single 3x-UI panel")
+    manager = VPNManager(provider)
+    set_vpn_manager(manager)
+    logger.info("VPN components initialized with single 3x-UI panel (Master)")
 
-# Роутер для основных команд – импортируем из других модулей
+
+# ---------- Импорт и сборка роутеров ----------
 from .common import router as common_router
 from .payment import router as payment_router
 
 router = Router()
 router.include_router(common_router)
 router.include_router(payment_router)
+
+
+__all__ = [
+    "router",
+    "init_vpn_components",
+    "set_vpn_manager",
+    "get_vpn_manager",
+]
