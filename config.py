@@ -59,9 +59,9 @@ class Settings(BaseSettings):
 
     # ---------- 3x-UI Master Panel ----------
     XUI_MASTER_URL: str = Field(..., min_length=1)
+    XUI_API_TOKEN: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
-    XUI_API_TOKEN: Optional[str] = Field(None)
 
     # ---------- Остальное ----------
     SUPPORT_USERNAME: str = "support_username"

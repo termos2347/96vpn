@@ -1,3 +1,4 @@
+# services/payment_yookassa.py
 import hashlib
 import asyncio
 import logging
@@ -100,7 +101,7 @@ class YookassaService:
                 logger.info(f"Payment {payment_id} was already processed earlier.")
                 return True
 
-            # Double-Check через API ЮKassa
+            # Double-Check через API ЮKassa с таймаутом 10 секунд
             loop = asyncio.get_running_loop()
             try:
                 verified_payment = await asyncio.wait_for(
@@ -109,9 +110,11 @@ class YookassaService:
                 )
             except asyncio.TimeoutError:
                 logger.error(f"Double-Check timed out for payment {payment_id}")
+                await send_admin_alert(f"⏱️ Таймаут при проверке платежа {payment_id} через API ЮKassa")
                 return False
             except Exception as api_err:
                 logger.error(f"Double-Check failed. Can't find payment {payment_id} via API: {api_err}")
+                await send_admin_alert(f"❌ Ошибка проверки платежа {payment_id} через API: {api_err}")
                 return False
 
             if verified_payment.status != "succeeded":
@@ -149,20 +152,29 @@ class YookassaService:
                 db_payment.updated_at = datetime.now(timezone.utc)
                 session.add(db_payment)
 
+                # Используем telegram_id из записи БД, а не из metadata (защита от подмены)
+                telegram_id = db_payment.telegram_id
                 metadata = verified_payment.metadata or {}
-                telegram_id = metadata.get("telegram_id") or db_payment.telegram_id
                 product_type = metadata.get("product_type")
                 period = metadata.get("period")
 
-                if not (telegram_id and product_type and period):
+                # Проверяем, что метаданные соответствуют тому, что мы ожидаем
+                if not (product_type and period):
                     logger.warning(f"Incomplete metadata in payment {payment_id}")
                     return False
 
-                stmt_user = select(BotUser).where(BotUser.telegram_id == int(telegram_id)).with_for_update()
+                # Дополнительно проверяем, что telegram_id в metadata совпадает с сохранённым
+                meta_tg = metadata.get("telegram_id")
+                if meta_tg is not None and int(meta_tg) != telegram_id:
+                    logger.error(f"Telegram ID mismatch in payment {payment_id}: db={telegram_id}, meta={meta_tg}")
+                    await send_admin_alert(f"⚠️ Подозрительный платёж: ID в метаданных ({meta_tg}) не совпадает с БД ({telegram_id})")
+                    return False
+
+                stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
                 user = (await session.execute(stmt_user)).scalar_one_or_none()
 
                 success = await activate_subscription(
-                    session, int(telegram_id), product_type, period, payment_id, user=user
+                    session, telegram_id, product_type, period, payment_id, user=user
                 )
 
                 if not success:
@@ -179,7 +191,7 @@ class YookassaService:
                         logger.error("VPNManager not initialized, cannot create key")
                         raise RuntimeError("VPNManager is None")
 
-                    link = await vpn_manager.get_or_create_link(int(telegram_id))
+                    link = await vpn_manager.get_or_create_link(telegram_id)
 
                     if link and bot:
                         try:
@@ -228,6 +240,19 @@ class YookassaService:
                             f"Запланирована автоматическая повторная попытка в фоновой задаче."
                         )
                         logger.warning(f"Не удалось создать ключ для {telegram_id} сразу после оплаты")
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout while creating key for user {telegram_id}")
+                    await send_admin_alert(f"⏱️ Таймаут при создании ключа для пользователя {telegram_id} после оплаты")
+                    if bot:
+                        try:
+                            await bot.send_message(
+                                telegram_id,
+                                "✅ Ваша VPN-подписка активирована, но произошла задержка при создании ключа.\n"
+                                "Мы автоматически повторим попытку в течение нескольких минут. "
+                                "Если ключ не придёт, нажмите «🚀 Подключить VPN»."
+                            )
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.exception(f"Ошибка при создании ключа для {telegram_id} после оплаты: {e}")
                     await send_admin_alert(
