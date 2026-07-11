@@ -21,18 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request: web.Request) -> str:
-    """
-    Безопасно получает реальный IP клиента.
-    Доверяет только заголовку X-Real-IP (устанавливается прокси, например nginx).
-    Если прокси нет, использует request.remote.
-    """
     real_ip = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip
     return request.remote
 
 def ip_in_network(ip: str) -> bool:
-    """Проверяет, входит ли IP-адрес в одну из доверенных сетей ЮKassa (из настроек)."""
     import ipaddress
     trusted = settings.YOOKASSA_TRUSTED_IPS
     try:
@@ -49,12 +43,8 @@ def ip_in_network(ip: str) -> bool:
     return False
 
 def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
-    """
-    Создаёт aiohttp приложение с эндпоинтами, используя переданные объекты ботов и диспетчеров.
-    """
     app = web.Application()
 
-    # ---------- Обработчик /activate ----------
     @retry_db_operation(max_retries=3)
     async def handle_activation(request):
         auth = request.headers.get("Authorization")
@@ -127,7 +117,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Activation error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
-    # ---------- Обработчик вебхука ЮKassa ----------
     async def yookassa_webhook(request):
         client_ip = get_client_ip(request)
 
@@ -151,7 +140,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Yookassa webhook error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
-    # ---------- Обработчик вебхука основного бота ----------
     async def telegram_webhook(request):
         if main_bot is None or main_dp is None:
             logger.warning("Main bot or dispatcher is None, returning 503")
@@ -172,7 +160,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Main bot webhook error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
-    # ---------- Обработчик вебхука админ-бота ----------
     async def admin_telegram_webhook(request):
         if admin_bot is None or admin_dp is None:
             logger.warning("Admin bot or dispatcher is None, returning 503")
@@ -193,7 +180,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Admin bot webhook error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
-    # ---------- Регистрация маршрутов ----------
     app.router.add_post('/activate', handle_activation)
     app.router.add_post('/yookassa_webhook', yookassa_webhook)
     app.router.add_post('/api/payment/webhook/yookassa', yookassa_webhook)

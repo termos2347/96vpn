@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from aiogram import Bot
-from db.base import Base
-from db.models import BotUser, VPNServer, BotPayment
+from db.models import Base
+from db.models import BotUser, BotPayment
 from services.vpn_manager import VPNManager
 from services.vpn_provider import XUIVPNProvider
 

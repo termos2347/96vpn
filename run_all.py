@@ -137,7 +137,7 @@ async def on_startup():
         )
         vpn_manager = VPNManager(provider)
         set_vpn_manager(vpn_manager)
-        init_vpn_components()  # эта функция теперь просто дублирует создание, но оставим для совместимости
+        init_vpn_components()
         logger.info("✅ VPN components initialized")
 
         logger.info("Step 3/7: Starting admin bot...")
@@ -236,7 +236,6 @@ async def on_shutdown():
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
-    # Закрываем VPN-провайдер
     vpn_manager = get_vpn_manager()
     if vpn_manager and hasattr(vpn_manager, 'provider'):
         try:
@@ -273,7 +272,6 @@ async def on_shutdown():
         except Exception:
             pass
 
-    # Закрываем SQLAlchemy engine
     try:
         await engine.dispose()
         logger.info("Database engine disposed")

@@ -54,7 +54,7 @@ python migrate.py
 
 ## Команды бота
 - Основной бот: кнопки в меню.
-- Админ-бот: `/health`, `/grant`, `/revoke`, `/stats`, `/broadcast`, `/addserver`, `/listservers` и т.д.
+- Админ-бот: `/health`, `/grant`, `/revoke`, `/stats`, `/broadcast` и т.д.
 
 ## Внутреннее API
 - `/activate` – активация подписки (защищено токеном).

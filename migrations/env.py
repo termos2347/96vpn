@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 load_dotenv()
 
 # Импортируем метаданные модели
-from db.base import Base
+from db.models import Base
 from config import settings
 
 # --- Конфигурация Alembic ---

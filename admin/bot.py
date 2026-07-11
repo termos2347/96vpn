@@ -511,7 +511,6 @@ async def cmd_userinfo(message: types.Message):
     created_str = data["created_at"].strftime('%d.%m.%Y %H:%M') if data["created_at"] else "—"
 
     vpn_key = data["vpn_client_id"] or "не создан"
-    server_id = data["server_id"] or "—"
 
     text = (
         f"👤 **Пользователь**: {tid}\n"
@@ -521,8 +520,7 @@ async def cmd_userinfo(message: types.Message):
         f"🚀 **VPN-подписка**: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
         f"   Окончание: {vpn_end_str}\n"
         f"   Осталось: {vpn_left} дн.\n"
-        f"   Ключ: `{vpn_key}`\n"
-        f"   Сервер ID: {server_id}\n\n"
+        f"   Ключ: `{vpn_key}`\n\n"
         f"🛡️ **Обход DPI**: {'✅ активен' if bypass_active else '❌ не активен'}\n"
         f"   Окончание: {bypass_end_str}\n"
         f"   Осталось: {bypass_left} дн."

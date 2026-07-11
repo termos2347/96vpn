@@ -53,15 +53,19 @@ class YookassaService:
             idempotency_key = str(uuid.uuid4())
             
             loop = asyncio.get_running_loop()
-            payment = await loop.run_in_executor(
-                None,
-                lambda: Payment.create({
-                    "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-                    "confirmation": {"type": "redirect", "return_url": return_url},
-                    "capture": True,
-                    "description": description,
-                    "metadata": metadata
-                }, idempotency_key)
+            # Таймаут 10 секунд на создание платежа
+            payment = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: Payment.create({
+                        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+                        "confirmation": {"type": "redirect", "return_url": return_url},
+                        "capture": True,
+                        "description": description,
+                        "metadata": metadata
+                    }, idempotency_key)
+                ),
+                timeout=10.0
             )
             
             logger.debug(f"Yookassa payment response: {payment}")
@@ -73,6 +77,9 @@ class YookassaService:
                 "amount": payment.amount.value
             }
 
+        except asyncio.TimeoutError:
+            logger.error("Yookassa create_payment timeout after 10s")
+            return None
         except Exception as e:
             logger.error(f"Error creating Yookassa payment: {e}", exc_info=True)
             return None
@@ -111,6 +118,14 @@ class YookassaService:
             except asyncio.TimeoutError:
                 logger.error(f"Double-Check timed out for payment {payment_id}")
                 await send_admin_alert(f"⏱️ Таймаут при проверке платежа {payment_id} через API ЮKassa")
+                if bot and db_payment:
+                    try:
+                        await bot.send_message(
+                            db_payment.telegram_id,
+                            "✅ Платёж получен, но идёт проверка. Если в течение 10 минут не придёт ключ, обратитесь в поддержку."
+                        )
+                    except Exception:
+                        pass
                 return False
             except Exception as api_err:
                 logger.error(f"Double-Check failed. Can't find payment {payment_id} via API: {api_err}")
@@ -158,12 +173,10 @@ class YookassaService:
                 product_type = metadata.get("product_type")
                 period = metadata.get("period")
 
-                # Проверяем, что метаданные соответствуют тому, что мы ожидаем
                 if not (product_type and period):
                     logger.warning(f"Incomplete metadata in payment {payment_id}")
                     return False
 
-                # Дополнительно проверяем, что telegram_id в metadata совпадает с сохранённым
                 meta_tg = metadata.get("telegram_id")
                 if meta_tg is not None and int(meta_tg) != telegram_id:
                     logger.error(f"Telegram ID mismatch in payment {payment_id}: db={telegram_id}, meta={meta_tg}")
@@ -223,7 +236,6 @@ class YookassaService:
                         except Exception as e:
                             logger.exception(f"Unexpected error sending link to {telegram_id}")
                     else:
-                        # Не удалось создать ключ или bot отсутствует
                         if bot:
                             try:
                                 await bot.send_message(

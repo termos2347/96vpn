@@ -176,7 +176,6 @@ class Settings(BaseSettings):
             raise ValueError("XUI_MASTER_URL must start with http:// or https://")
         return v
 
-    # ---------- Свойства ----------
     @property
     def VPN_PRICES(self) -> dict:
         return {
@@ -202,7 +201,6 @@ class Settings(BaseSettings):
         }
 
 
-# ---------- Создание экземпляра с обработкой ошибок ----------
 try:
     settings = Settings()
 except ValidationError as e:
@@ -212,7 +210,6 @@ except ValidationError as e:
         logging.error(f"  - {error.get('loc')[0]}: {error.get('msg')}")
     sys.exit(1)
 
-# ---------- Экспорт для обратной совместимости ----------
 TOKEN = settings.BOT_TOKEN
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
 ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID
@@ -223,10 +220,8 @@ INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
 INTERNAL_API_URL = settings.INTERNAL_API_URL
 
-# ---------- Очищенный DATABASE_URL ----------
 DATABASE_URL = clean_db_url(settings.DATABASE_URL)
 
-# ---------- Работа с yookassa_ip.json ----------
 IPS_FILE = Path("yookassa_ip.json")
 
 def load_trusted_ips() -> Optional[List[str]]:
@@ -269,4 +264,3 @@ if _loaded_ips is not None:
         logging.warning("⚠️ yookassa_ip.json contains an empty list. Keeping value from .env.")
 else:
     logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
-        

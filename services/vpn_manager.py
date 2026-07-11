@@ -71,7 +71,6 @@ class VPNManager:
                 if user.vpn_client_id:
                     email = f"tg_{user_id}_{user.vpn_client_id[:8]}"
                     try:
-                        # Таймаут 10 секунд на получение клиента по email
                         client = await asyncio.wait_for(
                             self.provider.get_client_by_email(email),
                             timeout=10.0
@@ -107,7 +106,6 @@ class VPNManager:
                     return True
 
         try:
-            # Таймаут 15 секунд на отзыв клиента
             success = await asyncio.wait_for(
                 self.provider.revoke_client(client_uuid),
                 timeout=15.0
