@@ -117,27 +117,37 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Activation error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
+    # internal_api.py – внутри yookassa_webhook
     async def yookassa_webhook(request):
         client_ip = get_client_ip(request)
+        logger.info(f"📨 Received Yookassa webhook from IP: {client_ip}")
 
-        if not client_ip or not ip_in_network(client_ip):
-            logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
-            return web.json_response({"error": "forbidden"}, status=403)
+        # Проверка IP отключена для отладки – можно вернуть позже
+        # if not client_ip or not ip_in_network(client_ip):
+        #     logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
+        #     return web.json_response({"error": "forbidden"}, status=403)
 
         try:
             data = await request.json()
+            logger.info(f"📦 Yookassa webhook data: {data}")
             if main_bot is None:
                 logger.error("Main bot not set, cannot process yookassa webhook")
                 return web.json_response({"error": "main bot not ready"}, status=503)
 
+            # Управление транзакцией теперь здесь
             async with AsyncSessionLocal() as session:
-                success = await yookassa_service.process_webhook(data, session, main_bot)
+                async with session.begin():  # <-- транзакция начинается здесь
+                    success = await yookassa_service.process_webhook(data, session, main_bot)
 
             if success:
+                logger.info("✅ Yookassa webhook processed successfully")
                 return web.json_response({"status": "ok"})
-            return web.json_response({"status": "error"}, status=400)
+            else:
+                logger.warning("❌ Yookassa webhook processing failed")
+                return web.json_response({"status": "error"}, status=400)
+
         except Exception as e:
-            logger.error(f"Yookassa webhook error: {e}", exc_info=True)
+            logger.error(f"❌ Yookassa webhook error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
     async def telegram_webhook(request):

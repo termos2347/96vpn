@@ -1,66 +1,68 @@
+# handlers/payment.py
 import logging
 import uuid
-from datetime import datetime, timezone
 from aiogram import Router, F, types
-from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
+from handlers.ui import Texts, Keyboards
 from db.base import AsyncSessionLocal
-from db.models import BotPayment
-from db.crud import activate_subscription, update_bypass_subscription, update_vpn_subscription 
+from db.models import BotPayment, BotUser
+from db.crud import activate_subscription
 from config import settings
 from services.payment_yookassa import yookassa_service
-from handlers.keyboards import vpn_currency_keyboard, vpn_period_keyboard
-from utils.decorators import rate_limit
-from utils.validators import validate_user_id, validate_currency, ValidationError
-from handlers import get_vpn_manager
+from services.vpn_manager import get_vpn_manager
 from admin import send_admin_alert
 from admin.bot import log_error
+from utils.decorators import rate_limit
+from utils.validators import validate_user_id, validate_currency, ValidationError
 
 logger = logging.getLogger(__name__)
-router = Router()
+router = Router(name="payment")
 
-@router.message(F.text == "💳 Оплатить VPN")
-@rate_limit(max_per_minute=10)
-async def pay_vpn(message: types.Message):
-    try:
-        validate_user_id(message.from_user.id)
-        await message.answer("💎 Выберите валюту для оплаты VPN:", reply_markup=vpn_currency_keyboard())
-    except ValidationError as e:
-        logger.warning(f"Validation error in pay_vpn: {e}")
-        log_error(f"Validation error in pay_vpn for user {message.from_user.id}: {e}", notify_admin=False)  # <-- добавлен log_error
-        await message.answer("❌ Ошибка валидации. Попробуйте позже.")
 
-@router.callback_query(F.data.startswith("vpn_currency_"))
-@rate_limit(max_per_minute=10)
-async def vpn_choose_period(callback: types.CallbackQuery):
+# ---------- Обработчик выбора тарифа ----------
+@router.callback_query(F.data.startswith("tariff_"))
+@rate_limit(max_per_minute=5)
+async def tariff_chosen(callback: CallbackQuery):
     try:
         validate_user_id(callback.from_user.id)
-        currency = callback.data.split("_")[-1]
-        validate_currency(currency)
+        period = callback.data.split("_")[1]  # tariff_1m -> 1m
+        if period not in settings.PERIOD_DAYS:
+            raise ValidationError(f"Invalid period: {period}")
         await callback.message.edit_text(
-            "📅 Выберите период подписки:",
-            reply_markup=vpn_period_keyboard(currency)
+            Texts.payment_methods(),
+            reply_markup=Keyboards.payment_methods(period)
         )
         await callback.answer()
     except ValidationError as e:
-        logger.warning(f"Validation error: {e}")
-        log_error(f"Validation error in vpn_choose_period for user {callback.from_user.id}: {e}", notify_admin=False)  # <-- добавлен log_error
-        await callback.answer("❌ Ошибка", show_alert=True)
+        logger.warning(f"Validation error in tariff_chosen: {e}")
+        await callback.answer("❌ Ошибка выбора тарифа", show_alert=True)
 
-@router.callback_query(F.data.regexp(r"^vpn_(1m|3m|6m)_(rub|usdt)$"))
-@rate_limit(max_per_minute=5)
-async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
-    _, period, currency = callback.data.split("_")
+
+# ---------- Обработчик выбора способа оплаты (Рубли/Stars/USDT) ----------
+@router.callback_query(F.data.startswith("pay_"))
+@rate_limit(max_per_minute=3)
+async def process_payment(callback: CallbackQuery):
+    _, period, currency = callback.data.split("_")  # pay_1m_rub
     user_id = callback.from_user.id
-    price = settings.VPN_PRICES[currency][period]
-    description = f"VPN подписка {period} ({currency})"
+    try:
+        validate_user_id(user_id)
+        validate_currency(currency)
+        if period not in settings.PERIOD_DAYS:
+            raise ValidationError(f"Invalid period: {period}")
+        price = settings.VPN_PRICES[currency][period]
+    except ValidationError as e:
+        logger.warning(f"Validation error in process_payment: {e}")
+        await callback.answer("❌ Некорректные параметры", show_alert=True)
+        return
 
+    description = f"VPN подписка {period} ({currency})"
     db_currency = currency.upper()
     local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
 
     try:
+        # Создаём запись о платеже в БД (pending)
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 new_payment = BotPayment(
@@ -72,7 +74,8 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
                     is_paid=False
                 )
                 session.add(new_payment)
-        
+
+        # Создаём платёж через Yookassa
         metadata = {
             "source": "bot",
             "telegram_id": user_id,
@@ -88,11 +91,11 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
 
         yookassa_id = payment.get("payment_id")
         url = payment.get("confirmation_url")
-
         if not url or not yookassa_id:
             await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
             return
 
+        # Обновляем запись в БД: заменяем временный ID на реальный
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 stmt = select(BotPayment).where(BotPayment.payment_id == local_tx_id)
@@ -105,42 +108,52 @@ async def vpn_payment_rub_usdt(callback: types.CallbackQuery):
                     await callback.answer("❌ Системная ошибка. Попробуйте заново.", show_alert=True)
                     return
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Оплатить", url=url)]
-        ])
+        # Показываем пользователю ссылку на оплату
         await callback.message.delete()
         await callback.message.answer(
-            f"💳 Ссылка для оплаты VPN ({period}, {price} {currency.upper()}):\n\n"
-            f"После оплаты подписка активируется автоматически.\n"
-            f"Если вы уже оплачивали ранее, новая подписка добавится к текущей.",
-            reply_markup=kb
+            Texts.payment_link(price, currency, period),
+            reply_markup=Keyboards.payment_url_button(url)
         )
         await callback.answer()
 
     except Exception as e:
-        logger.error(f"Error in vpn_payment_rub_usdt chain: {e}", exc_info=True)
-        log_error(f"Error in vpn_payment_rub_usdt for user {user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
+        logger.error(f"Error in process_payment: {e}", exc_info=True)
+        log_error(f"Payment error for user {user_id}: {e}", notify_admin=True)
         await callback.answer("❌ Произошла внутренняя ошибка сервера", show_alert=True)
 
+
+# ---------- Обработчик оплаты через Telegram Stars ----------
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
+
 @router.message(F.successful_payment)
-async def successful_payment(message: types.Message):
+async def successful_payment(message: Message):
     payment = message.successful_payment
     payload = payment.invoice_payload
     telegram_payment_id = payment.telegram_payment_charge_id
 
+    # Ожидаем формат: vpn_1m_123456789
     parts = payload.split("_")
     if len(parts) < 3:
-        await message.answer("❌ Ошибка формата платежа.")
+        await message.answer(Texts.payment_error())
         return
     product_type, period, user_id_str = parts[0], parts[1], parts[2]
     target_user_id = int(user_id_str)
+
     if message.from_user.id != target_user_id:
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
+
+    # ---------- ДОБАВЛЕННАЯ ПРОВЕРКА НА ДУБЛИКАТ ПЛАТЕЖА ----------
+    async with AsyncSessionLocal() as session:
+        stmt = select(BotPayment).where(BotPayment.payment_id == telegram_payment_id)
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+        if existing and existing.is_paid:
+            await message.answer(Texts.payment_already_processed())
+            return
+    # ----------------------------------------------------------------
 
     success = False
     try:
@@ -155,42 +168,45 @@ async def successful_payment(message: types.Message):
                 )
     except Exception as e:
         logger.exception(f"Activation error for payment {telegram_payment_id}")
-        log_error(f"Activation error for payment {telegram_payment_id}: {e}", notify_admin=True)  # <-- добавлен log_error
-        await message.answer("❌ Ошибка при активации подписки. Обратитесь в поддержку.")
+        log_error(f"Activation error for payment {telegram_payment_id}: {e}", notify_admin=True)
+        await message.answer(Texts.payment_error())
         return
 
     if not success:
-        await message.answer("✅ Платёж уже обработан.")
+        await message.answer(Texts.payment_already_processed())
         return
 
     days = settings.PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
         try:
+            # Получаем обновлённые данные пользователя из БД
+            async with AsyncSessionLocal() as session:
+                stmt = select(BotUser).where(BotUser.telegram_id == target_user_id)
+                user = (await session.execute(stmt)).scalar_one_or_none()
+                vpn_end = user.vpn_subscription_end if user else None
+
             vpn_manager = get_vpn_manager()
             if vpn_manager:
                 link = await vpn_manager.create_key(target_user_id, days)
-                if link:
-                    await message.answer(f"✅ VPN подписка на {days} дней активирована!\n🔗 {link}")
-                else:
-                    await message.answer(
-                        "✅ Ваша VPN-подписка активирована, но не удалось создать ключ автоматически.\n"
-                        "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту – ключ будет создан.\n"
-                        "Если проблема сохраняется, обратитесь в поддержку."
-                    )
-                    await send_admin_alert(
-                        f"⚠️ Не удалось создать VPN-ключ для пользователя {target_user_id} после оплаты Stars (payment {telegram_payment_id})"
-                    )
             else:
-                await message.answer(f"✅ VPN подписка на {days} дней активирована! (сервис ключей временно недоступен)")
+                link = None
+
+            msg = Texts.payment_success_with_date(vpn_end, days, link)
+            await message.answer(msg, parse_mode="Markdown")
+
+            if not link and vpn_manager:
+                # Если ключ не создался, уведомляем админа
+                await send_admin_alert(
+                    f"⚠️ Не удалось создать VPN-ключ для пользователя {target_user_id} после оплаты Stars (payment {telegram_payment_id})"
+                )
         except Exception as e:
             logger.exception(f"Key creation failed for user {target_user_id}")
-            log_error(f"Key creation failed for user {target_user_id}: {e}", notify_admin=True)  # <-- добавлен log_error
-            await message.answer(
-                "✅ Подписка активирована, но произошла ошибка при создании ключа.\n"
-                "Пожалуйста, нажмите «🚀 Подключить VPN» через минуту."
-            )
+            log_error(f"Key creation failed for user {target_user_id}: {e}", notify_admin=True)
+            await message.answer(Texts.key_creation_error())
             await send_admin_alert(
                 f"❌ Критическая ошибка при создании ключа для {target_user_id} после оплаты Stars: {e}"
             )
     else:
-        await message.answer(f"✅ Обход DPI на {days} дней активирован!")
+        # Для других продуктов (например, bypass) – можно расширить позже
+        await message.answer(f"✅ Подписка на {product_type} на {days} дней активирована!")
+        

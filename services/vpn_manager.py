@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import get_or_create_bot_user
+from db.models import BotUser
 from services.vpn_provider import XUIVPNProvider
 
 logger = logging.getLogger(__name__)
@@ -59,15 +60,31 @@ class VPNManager:
 
     @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
+        """
+        Возвращает существующую ссылку или создаёт новую, если ключ отсутствует.
+        Гарантирует атомарность через блокировку строки БД.
+        """
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                user = await get_or_create_bot_user(session, user_id)
-                now = datetime.now(timezone.utc)
+                # Блокируем строку пользователя на время операции
+                stmt = select(BotUser).where(BotUser.telegram_id == user_id).with_for_update()
+                user = (await session.execute(stmt)).scalar_one_or_none()
+                if not user:
+                    # Пользователь не найден – создаём (но блокировка уже есть)
+                    user = BotUser(telegram_id=user_id)
+                    session.add(user)
+                    await session.flush()
+                    # Повторно блокируем, чтобы получить блокировку на новой записи
+                    stmt = select(BotUser).where(BotUser.telegram_id == user_id).with_for_update()
+                    user = (await session.execute(stmt)).scalar_one()
 
+                now = datetime.now(timezone.utc)
+                # Проверяем активность подписки
                 if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
                     logger.info(f"User {user_id} has no active subscription")
                     return None
 
+                # Если уже есть client_id, пытаемся получить ссылку без создания нового
                 if user.vpn_client_id:
                     email = f"tg_{user_id}_{user.vpn_client_id[:8]}"
                     try:
@@ -75,25 +92,48 @@ class VPNManager:
                             self.provider.get_client_by_email(email),
                             timeout=10.0
                         )
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Timeout getting client by email for user {user_id}")
-                        client = None
-                    except Exception as e:
-                        logger.exception(f"Error getting client by email for user {user_id}: {e}")
-                        client = None
+                    except (asyncio.TimeoutError, Exception) as e:
+                        logger.warning(f"Error getting client for user {user_id}: {e}")
+                        # Не сбрасываем client_id, просто возвращаем None
+                        # чтобы дать пользователю повторить позже
+                        return None
 
                     if client and client.get("subId"):
                         link = self.provider.get_subscription_link(client["subId"])
                         logger.info(f"Existing key for user {user_id}: {link}")
                         return link
                     else:
+                        # Клиент на панели не найден – сбрасываем и будем создавать новый
                         logger.warning(f"Stored client_id {user.vpn_client_id} not found on panel, will recreate")
                         user.vpn_client_id = None
+                        # продолжаем создание нового ключа
 
-        days_left = (user.vpn_subscription_end - now).days
-        if days_left < 1:
-            days_left = 30
-        return await self.create_key(user_id, days_left)
+                # Создаём новый ключ (всё в той же транзакции)
+                client_uuid = str(uuid.uuid4())
+                email = f"tg_{user_id}_{client_uuid[:8]}"
+                try:
+                    client_data = await asyncio.wait_for(
+                        self.provider.create_client(email),
+                        timeout=15.0
+                    )
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.error(f"Error creating client for user {user_id}: {e}")
+                    return None
+
+                if not client_data:
+                    logger.error(f"Failed to create client for user {user_id}")
+                    return None
+
+                sub_id = client_data['subId']
+                link = self.provider.get_subscription_link(sub_id)
+
+                # Обновляем БД: устанавливаем client_id, дату окончания НЕ меняем (она уже активна)
+                user.vpn_client_id = client_uuid
+                # Если по какой-то причине дата окончания не установлена (хотя мы проверили),
+                # можно установить на основе оставшихся дней, но мы этого не делаем,
+                # чтобы не изменять подписку.
+                logger.info(f"Key created and DB updated for user {user_id}: {link}")
+                return link
 
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:

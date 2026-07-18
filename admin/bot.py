@@ -17,7 +17,7 @@ from config import ADMIN_CHAT_ID, save_trusted_ips, settings
 from db.base import AsyncSessionLocal, retry_db_operation, engine
 from db.crud import get_user_full_data
 from db.models import BotPayment, BotUser
-from handlers import get_vpn_manager
+from services.vpn_manager import get_vpn_manager
 from utils.validators import validate_user_id
 
 logger = logging.getLogger(__name__)
@@ -48,8 +48,8 @@ async def send_admin_alert(message: str):
         if admin_bot and settings.ADMIN_CHAT_ID:
             await admin_bot.send_message(
                 chat_id=settings.ADMIN_CHAT_ID,
-                text=f"⚠️ **Административное уведомление:**\n\n{message}",
-                parse_mode="Markdown"
+                text=f"⚠️ Административное уведомление:\n\n{message}",
+                parse_mode=None
             )
     except TelegramAPIError as e:
         logger.error(f"Не удалось отправить уведомление админу: {e}")
