@@ -146,25 +146,36 @@ async def successful_payment(message: Message):
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
-    # ---------- ДОБАВЛЕННАЯ ПРОВЕРКА НА ДУБЛИКАТ ПЛАТЕЖА ----------
+    # Проверка на дубликат платежа
     async with AsyncSessionLocal() as session:
         stmt = select(BotPayment).where(BotPayment.payment_id == telegram_payment_id)
         existing = (await session.execute(stmt)).scalar_one_or_none()
         if existing and existing.is_paid:
             await message.answer(Texts.payment_already_processed())
             return
-    # ----------------------------------------------------------------
 
     success = False
     try:
         async with AsyncSessionLocal() as session:
             async with session.begin():
+                # ✅ ЗАЩИТА ОТ RACE CONDITION: блокируем строку пользователя
+                stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
+                user = (await session.execute(stmt_user)).scalar_one_or_none()
+                if not user:
+                    user = BotUser(telegram_id=target_user_id)
+                    session.add(user)
+                    await session.flush()
+                    # повторно блокируем новую запись
+                    stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
+                    user = (await session.execute(stmt_user)).scalar_one()
+
                 success = await activate_subscription(
                     session,
                     target_user_id,
                     product_type,
                     period,
-                    telegram_payment_id
+                    telegram_payment_id,
+                    user=user  # передаём уже заблокированный объект
                 )
     except Exception as e:
         logger.exception(f"Activation error for payment {telegram_payment_id}")

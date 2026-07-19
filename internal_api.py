@@ -9,6 +9,7 @@ from db.crud import activate_subscription
 from db.base import AsyncSessionLocal, retry_db_operation
 from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
+from db.models import BotUser
 
 from aiogram.exceptions import (
     TelegramForbiddenError,
@@ -80,8 +81,19 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         try:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
+                    # ✅ ЗАЩИТА ОТ RACE CONDITION: блокируем строку пользователя
+                    stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
+                    user = (await session.execute(stmt_user)).scalar_one_or_none()
+                    if not user:
+                        user = BotUser(telegram_id=telegram_id)
+                        session.add(user)
+                        await session.flush()
+                        # повторно блокируем новую запись
+                        stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
+                        user = (await session.execute(stmt_user)).scalar_one()
+
                     success = await activate_subscription(
-                        session, telegram_id, product_type, period, payment_id
+                        session, telegram_id, product_type, period, payment_id, user=user
                     )
             if success:
                 if product_type == "vpn":

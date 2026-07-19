@@ -115,9 +115,13 @@ class XUIVPNProvider:
         logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
         return None
 
-    async def create_client(self, email: str) -> Optional[Dict[str, str]]:
-        if not email:
-            logger.error("Email is required")
+    async def create_client(self, email: str, sub_id: str) -> Optional[Dict[str, str]]:
+        """
+        Создаёт клиента на панели с заданным sub_id.
+        Возвращает словарь с ключами 'uuid' и 'subId' (subId тот же, что передан).
+        """
+        if not email or not sub_id:
+            logger.error("Email and sub_id are required")
             return None
 
         client_uuid = str(uuid.uuid4())
@@ -131,20 +135,11 @@ class XUIVPNProvider:
         else:
             user_id = hash(email) % 1000000
 
-        if "_" in email and len(email.split("_")[-1]) >= 8:
-            client_uuid = email.split("_")[-1]
-            if len(client_uuid) < 36:
-                client_uuid = str(uuid.uuid4())
-                email = f"tg_{user_id}_{client_uuid[:8]}"
-
-        client_email = email
-        sub_id = client_uuid[:16]
-
         payload = {
             "inboundIds": [self.inbound_id],
             "client": {
                 "id": client_uuid,
-                "email": client_email,
+                "email": email,
                 "flow": "",
                 "limitIp": 2,
                 "totalGB": 0,
@@ -156,12 +151,12 @@ class XUIVPNProvider:
         }
 
         url = f"{self.base_url}/panel/api/clients/add"
-        logger.info(f"Creating client with email {client_email} via {url}")
+        logger.info(f"Creating client with email {email}, subId={sub_id} via {url}")
 
         try:
             result = await self._retry_request("POST", url, json=payload)
             if result and result.get("success") is True:
-                logger.info(f"Client {client_email} created successfully, sub_id={sub_id}")
+                logger.info(f"Client {email} created successfully with subId={sub_id}")
                 return {"uuid": client_uuid, "subId": sub_id}
             else:
                 logger.error(f"Failed to create client: {result}")
@@ -171,6 +166,7 @@ class XUIVPNProvider:
             return None
 
     async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
+        """Получить клиента по email (используется редко, для администрирования)."""
         url = f"{self.base_url}/panel/api/clients/get/{email}"
         try:
             result = await self._retry_request("GET", url)
@@ -188,22 +184,45 @@ class XUIVPNProvider:
             logger.exception(f"Error getting client by email {email}: {e}")
             return None
 
+    async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
+        """Получить клиента по UUID (используется редко)."""
+        url = f"{self.base_url}/panel/api/clients/get/{client_uuid}"
+        try:
+            result = await self._retry_request("GET", url)
+            if result and result.get("success"):
+                data = result.get("obj")
+                if data:
+                    return {
+                        "uuid": data.get("id"),
+                        "subId": data.get("subId"),
+                        "email": data.get("email"),
+                        "enable": data.get("enable"),
+                    }
+            return None
+        except Exception as e:
+            logger.exception(f"Error getting client by uuid {client_uuid}: {e}")
+            return None
+
     def get_subscription_link(self, sub_id: str) -> str:
+        """Формирует ссылку для подписки на основе subId."""
         if not self._server_host or not sub_id:
             logger.error("Invalid server host or sub_id")
             return ""
         return f"https://{self._server_host}:{self.sub_port}/sub/{sub_id}"
 
-    async def revoke_client(self, client_uuid: str) -> bool:
-        url = f"{self.base_url}/panel/api/clients/del/{client_uuid}"
+    async def revoke_client(self, sub_id: str) -> bool:
+        """
+        Отзывает клиента по subId (используется эндпоинт /delSub/{subId}).
+        """
+        url = f"{self.base_url}/panel/api/clients/delSub/{sub_id}"
         try:
             result = await self._retry_request("POST", url)
             if result and result.get("success") is True:
-                logger.info(f"Client {client_uuid} revoked")
+                logger.info(f"Client with subId {sub_id} revoked")
                 return True
             else:
-                logger.error(f"Failed to revoke client {client_uuid}: {result}")
+                logger.warning(f"Failed to revoke by subId, result: {result}")
                 return False
         except Exception as e:
-            logger.exception(f"Error revoking client {client_uuid}: {e}")
+            logger.exception(f"Error revoking client by subId {sub_id}: {e}")
             return False
