@@ -207,25 +207,44 @@ class XUIVPNProvider:
     async def get_client_by_sub_id(self, sub_id: str) -> Optional[Dict[str, str]]:
         """
         Пытается найти клиента по subId через эндпоинт /getSub/{subId}.
-        Если эндпоинт недоступен – возвращает None.
+        Выполняет только одну попытку (без ретраев), так как эндпоинт часто недоступен.
         """
+        if not sub_id:
+            return None
+
+        # Обрезаем до 16 символов, если передан полный UUID
+        if len(sub_id) > 16:
+            original = sub_id
+            sub_id = sub_id[:16]
+            logger.debug(f"Trimmed subId from '{original}' to '{sub_id}'")
+
         url = f"{self.base_url}/panel/api/clients/getSub/{sub_id}"
         try:
-            result = await self._retry_request("GET", url)
-            if result and result.get("success"):
-                data = result.get("obj")
-                if data:
-                    sub_id_from_resp = data.get("subId") or data.get("subid") or data.get("sub_id")
-                    if sub_id_from_resp:
-                        return {
-                            "uuid": data.get("id") or data.get("uuid"),
-                            "subId": sub_id_from_resp,
-                            "email": data.get("email"),
-                            "enable": data.get("enable"),
-                        }
+            session = await self._get_session()
+            async with session.get(url, headers=self.headers) as resp:
+                if resp.status == 200:
+                    try:
+                        result = await resp.json()
+                        if result and result.get("success"):
+                            data = result.get("obj")
+                            if data:
+                                sub_id_from_resp = data.get("subId") or data.get("subid") or data.get("sub_id")
+                                if sub_id_from_resp:
+                                    return {
+                                        "uuid": data.get("id") or data.get("uuid"),
+                                        "subId": sub_id_from_resp,
+                                        "email": data.get("email"),
+                                        "enable": data.get("enable"),
+                                    }
+                    except Exception:
+                        pass
+                elif resp.status == 404:
+                    logger.debug(f"Client with subId {sub_id} not found (404)")
+                else:
+                    logger.warning(f"HTTP {resp.status} from {url}")
             return None
         except Exception as e:
-            logger.warning(f"getSub endpoint failed, fallback to email: {e}")
+            logger.warning(f"getSub endpoint failed: {e}")
             return None
 
     # --- МЕТОД ДЛЯ ПОЛУЧЕНИЯ ВСЕХ КЛИЕНТОВ (для fallback-поиска по части email) ---

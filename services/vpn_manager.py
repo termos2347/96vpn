@@ -10,8 +10,11 @@ from services.vpn_provider import XUIVPNProvider
 
 logger = logging.getLogger(__name__)
 
+# Максимальный срок подписки – 96 лет (защита от переполнения)
 MAX_SUBSCRIPTION_DAYS = 96 * 365
 
+# Время жизни кэша в секундах (можно увеличить до 120 для 2 минут)
+CACHE_TTL_SECONDS = 60
 
 class VPNManager:
     def __init__(self, provider: XUIVPNProvider):
@@ -20,6 +23,11 @@ class VPNManager:
 
     @retry_db_operation(max_retries=3)
     async def create_key(self, user_id: int, days: int, session=None) -> Optional[str]:
+        """
+        Создаёт клиента на панели 3x‑UI и обновляет запись в БД.
+        Если передана сессия – использует её, иначе создаёт новую.
+        """
+        # Ограничиваем количество дней
         if days > MAX_SUBSCRIPTION_DAYS:
             logger.warning(f"Requested {days} days for user {user_id}, capped to {MAX_SUBSCRIPTION_DAYS}")
             days = MAX_SUBSCRIPTION_DAYS
@@ -29,6 +37,7 @@ class VPNManager:
         sub_id = client_uuid[:16]
         logger.info(f"Creating key: user={user_id}, email={email}, sub_id={sub_id}")
 
+        # Создание клиента на панели
         try:
             client_data = await asyncio.wait_for(
                 self.provider.create_client(email, sub_id),
@@ -51,6 +60,7 @@ class VPNManager:
         sub_id = client_data.get('subId', sub_id)
         link = self.provider.get_subscription_link(sub_id)
 
+        # Обновляем пользователя
         if session is None:
             async with AsyncSessionLocal() as sess:
                 async with sess.begin():
@@ -63,6 +73,7 @@ class VPNManager:
         return link
 
     def _update_user_object(self, user, client_uuid: str, link: str, days: int):
+        """Обновляет объект пользователя (изменяет поля, не сохраняет)."""
         user.vpn_client_id = client_uuid
         now = datetime.now(timezone.utc)
         if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
@@ -76,42 +87,28 @@ class VPNManager:
         user.vpn_subscription_end = new_end
         logger.info(f"Updated user {user.telegram_id}: client_id={client_uuid}, end={new_end}")
 
-    async def _safe_get_client_by_email(self, email: str):
-        try:
-            return await asyncio.wait_for(
-                self.provider.get_client_by_email(email),
-                timeout=5.0
-            )
-        except asyncio.TimeoutError:
-            logger.debug(f"Timeout getting client by email: {email}")
-            return None
-        except Exception as e:
-            logger.debug(f"Error getting client by email: {e}")
-            return None
-
-    async def _safe_get_client_by_sub_id(self, sub_id: str):
-        try:
-            return await asyncio.wait_for(
-                self.provider.get_client_by_sub_id(sub_id),
-                timeout=5.0
-            )
-        except asyncio.TimeoutError:
-            logger.debug(f"Timeout getting client by subId: {sub_id}")
-            return None
-        except Exception as e:
-            logger.debug(f"Error getting client by subId: {e}")
-            return None
+    def _invalidate_cache(self, user_id: int):
+        """Удаляет запись пользователя из кэша."""
+        if user_id in self._cache:
+            del self._cache[user_id]
+            logger.debug(f"Cache invalidated for user {user_id}")
 
     @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> Optional[str]:
-        # Проверка кэша (1 минута)
+        """
+        Основной метод: возвращает ссылку для подключения.
+        - Сначала проверяет кэш (мгновенный ответ).
+        - Если кэш устарел или отсутствует – идёт на панель 3x‑UI.
+        - Если клиент не найден – создаёт новый, обновляет БД и кэш.
+        """
+        # 1. Проверка кэша
         if user_id in self._cache:
             link, timestamp = self._cache[user_id]
-            if (datetime.now(timezone.utc) - timestamp).seconds < 60:
+            if (datetime.now(timezone.utc) - timestamp).seconds < CACHE_TTL_SECONDS:
                 logger.info(f"Returning cached link for user {user_id}")
                 return link
             else:
-                del self._cache[user_id]
+                self._invalidate_cache(user_id)
 
         logger.info(f"get_or_create_link called for user {user_id}")
         async with AsyncSessionLocal() as session:
@@ -119,6 +116,7 @@ class VPNManager:
                 user = await get_or_create_bot_user(session, user_id)
                 now = datetime.now(timezone.utc)
 
+                # Если подписка не активна – выходим
                 if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
                     logger.info(f"User {user_id} has no active subscription")
                     return None
@@ -128,43 +126,49 @@ class VPNManager:
                     email = f"tg_{user_id}_{user.vpn_client_id[:8]}"
 
                 client = None
-                search_tasks = []
 
+                # 2. Поиск по email (основной способ)
                 if email:
-                    search_tasks.append(
-                        asyncio.create_task(
-                            self._safe_get_client_by_email(email)
+                    try:
+                        logger.debug(f"Checking client by email: {email}")
+                        client = await asyncio.wait_for(
+                            self.provider.get_client_by_email(email),
+                            timeout=5.0
                         )
-                    )
+                        if client:
+                            logger.debug(f"Client found by email: {client}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout getting client by email for user {user_id}")
+                    except Exception as e:
+                        logger.exception(f"Error getting client by email for user {user_id}: {e}")
 
-                if user.vpn_client_id:
+                # 3. Если по email не найден, пробуем по subId (обрезанный до 16 символов)
+                if not client and user.vpn_client_id:
                     sub_id_to_search = user.vpn_client_id[:16]
-                    search_tasks.append(
-                        asyncio.create_task(
-                            self._safe_get_client_by_sub_id(sub_id_to_search)
+                    try:
+                        logger.debug(f"Trying to find client by subId: {sub_id_to_search}")
+                        client = await asyncio.wait_for(
+                            self.provider.get_client_by_sub_id(sub_id_to_search),
+                            timeout=5.0
                         )
-                    )
+                        if client:
+                            logger.debug(f"Client found by subId: {client}")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Timeout getting client by subId for user {user_id}")
+                    except Exception as e:
+                        logger.warning(f"Error getting client by subId: {e}")
 
-                if search_tasks:
-                    done, pending = await asyncio.wait(search_tasks, timeout=5.0)
-                    for task in done:
-                        result = task.result()
-                        if result and result.get("subId"):
-                            client = result
-                            break
-                    for task in pending:
-                        task.cancel()
-
+                # Если клиент найден – возвращаем ссылку и сохраняем в кэш
                 if client and client.get("subId"):
                     link = self.provider.get_subscription_link(client["subId"])
                     logger.info(f"Existing key for user {user_id}: {link}")
-                    # Кэшируем
                     self._cache[user_id] = (link, datetime.now(timezone.utc))
                     return link
 
-                # Клиент не найден – создаём новый
+                # 4. Клиент не найден – инвалидируем кэш и создаём новый
                 if user.vpn_client_id:
                     logger.warning(f"Stored client_id {user.vpn_client_id} not found on panel, will recreate")
+                    self._invalidate_cache(user_id)
 
                 days_left = (user.vpn_subscription_end - now).days
                 if days_left < 1:
@@ -175,6 +179,7 @@ class VPNManager:
 
                 new_link = await self.create_key(user_id, days_left, session=session)
                 if new_link:
+                    # Сохраняем новый ключ в кэш
                     self._cache[user_id] = (new_link, datetime.now(timezone.utc))
                     return new_link
                 else:
@@ -183,6 +188,10 @@ class VPNManager:
 
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:
+        """Отзывает ключ у пользователя (административная команда)."""
+        # Инвалидируем кэш при отзыве
+        self._invalidate_cache(user_id)
+
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 user = await get_or_create_bot_user(session, user_id)
@@ -191,6 +200,7 @@ class VPNManager:
                     logger.info(f"User {user_id} has no active key to revoke")
                     return True
 
+        # Отзыв на панели (вне БД-транзакции)
         try:
             success = await asyncio.wait_for(
                 self.provider.revoke_client(client_uuid),
@@ -221,6 +231,7 @@ class VPNManager:
             await self._notify_admin_and_user(user_id, f"ошибка при отзыве ключа: {e}")
             return False
 
+        # Обновляем БД
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 user = await get_or_create_bot_user(session, user_id)
@@ -230,6 +241,7 @@ class VPNManager:
                 return True
 
     async def _notify_admin_and_user(self, user_id: int, error_msg: str):
+        """Отправляет уведомление администратору и пользователю об ошибке."""
         from admin import send_admin_alert
         await send_admin_alert(f"⚠️ Ошибка при работе с VPN для пользователя {user_id}: {error_msg}")
         try:
@@ -244,7 +256,7 @@ class VPNManager:
         except Exception:
             pass
 
-
+# Глобальный экземпляр менеджера
 _vpn_manager: Optional[VPNManager] = None
 
 def set_vpn_manager(manager: VPNManager) -> None:
