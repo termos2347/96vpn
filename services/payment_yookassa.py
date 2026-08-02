@@ -86,21 +86,25 @@ class YookassaService:
 
     @retry_db_operation(max_retries=3)
     async def process_webhook(self, webhook_data: dict, session: AsyncSession, bot) -> bool:
+        start_time = datetime.now(timezone.utc)
+        logger.info(f"🕒 [START] Webhook processing started at {start_time}")
+
         try:
             event = webhook_data.get("event")
             obj = webhook_data.get("object", {})
             payment_id = obj.get("id")
-
-            logger.info(f"Received webhook: event={event}, payment_id={payment_id}")
+            logger.info(f"📨 Received webhook: event={event}, payment_id={payment_id}")
 
             if not payment_id or event != "payment.succeeded":
-                logger.info(f"Webhook ignored: event={event}, payment_id={payment_id}")
+                logger.info(f"⏭️ Webhook ignored: event={event}, payment_id={payment_id}")
                 return False
 
-            # Проверка дубликата
+            # ---------- Шаг 1: Проверка дубликата в БД ----------
+            t0 = datetime.now(timezone.utc)
             stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
             result = await session.execute(stmt)
             db_payment = result.scalar_one_or_none()
+            logger.info(f"⏱️ [1] DB check for payment: {(datetime.now(timezone.utc) - t0).total_seconds():.2f}s")
 
             if not db_payment:
                 logger.error(f"Payment {payment_id} not found in local Database.")
@@ -111,13 +115,15 @@ class YookassaService:
                 logger.info(f"Payment {payment_id} was already processed earlier.")
                 return True
 
-            # Double-Check через API ЮKassa с таймаутом 10 секунд
+            # ---------- Шаг 2: Double-Check через API ЮKassa (таймаут 3 сек) ----------
+            t1 = datetime.now(timezone.utc)
             loop = asyncio.get_running_loop()
             try:
                 verified_payment = await asyncio.wait_for(
                     loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
-                    timeout=10.0
+                    timeout=3.0  # сократили с 5 до 3 секунд
                 )
+                logger.info(f"⏱️ [2] Double-Check API took: {(datetime.now(timezone.utc) - t1).total_seconds():.2f}s")
             except asyncio.TimeoutError:
                 logger.error(f"Double-Check timed out for payment {payment_id}")
                 await send_admin_alert(f"⏱️ Таймаут при проверке платежа {payment_id} через API ЮKassa")
@@ -136,30 +142,25 @@ class YookassaService:
                 return False
 
             if verified_payment.status != "succeeded":
-                logger.warning(
-                    f"Fraud attempt alert! Webhook said 'succeeded', but API status is "
-                    f"'{verified_payment.status}' for payment {payment_id}"
-                )
+                logger.warning(f"Fraud attempt alert! Webhook said 'succeeded', but API status is '{verified_payment.status}'")
                 return False
 
             expected_amount = float(db_payment.amount)
             actual_amount = float(verified_payment.amount.value)
             if abs(expected_amount - actual_amount) > 0.01 or verified_payment.amount.currency != "RUB":
-                logger.critical(
-                    f"Fraud Alert! Amount mismatch for payment {payment_id}. "
-                    f"Expected: {expected_amount}, Got: {actual_amount}"
-                )
+                logger.critical(f"Fraud Alert! Amount mismatch for payment {payment_id}.")
                 await send_admin_alert(f"🚨 Попытка мошенничества: несовпадение суммы для платежа {payment_id}")
                 return False
 
-            # --- Транзакция уже управляется вызывающим кодом ---
-            # Обновляем запись платежа
+            # ---------- Шаг 3: Обновление статуса платежа ----------
+            t2 = datetime.now(timezone.utc)
             db_payment.status = "succeeded"
             db_payment.is_paid = True
             db_payment.updated_at = datetime.now(timezone.utc)
             session.add(db_payment)
+            logger.info(f"⏱️ [3] Payment status update took: {(datetime.now(timezone.utc) - t2).total_seconds():.2f}s")
 
-            # Используем telegram_id из записи БД, а не из metadata (защита от подмены)
+            # ---------- Шаг 4: Активация подписки ----------
             telegram_id = db_payment.telegram_id
             metadata = verified_payment.metadata or {}
             product_type = metadata.get("product_type")
@@ -176,59 +177,56 @@ class YookassaService:
                 await send_admin_alert(f"⚠️ Подозрительный платёж: ID в метаданных ({meta_tg}) не совпадает с БД ({telegram_id})")
                 return False
 
+            t3 = datetime.now(timezone.utc)
             stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update(skip_locked=True)
             user = (await session.execute(stmt_user)).scalar_one_or_none()
 
             success = await activate_subscription(
                 session, telegram_id, product_type, period, payment_id, user=user
             )
+            logger.info(f"⏱️ [4] activate_subscription took: {(datetime.now(timezone.utc) - t3).total_seconds():.2f}s")
 
             if not success:
                 logger.warning(f"activate_subscription returned False for user {telegram_id}, payment {payment_id}")
                 return False
 
-            # Обновляем объект пользователя, чтобы получить новую дату окончания
-            await session.refresh(user)
-            new_vpn_end = user.vpn_subscription_end if user else None
-
+            # user уже обновлён
             logger.info(f"Successfully activated subscription for user {telegram_id} via secure webhook.")
 
-            # Вне транзакции – отправка сообщения пользователю и создание ключа в фоне
-            # (но мы всё ещё внутри сессии, поэтому коммит произойдёт после выхода)
+            # ---------- Шаг 5: Отправка сообщения пользователю ----------
             if product_type == "vpn":
                 days = settings.PERIOD_DAYS.get(period, 0)
-                telegram_id = db_payment.telegram_id
+                new_vpn_end = user.vpn_subscription_end if user else None
+                msg_text = Texts.payment_success_with_date(new_vpn_end, days, None)
 
-                # 1. Сначала отправляем пользователю сообщение об успешной оплате (без ключа)
-                msg_text = Texts.payment_success_with_date(new_vpn_end, days, None)  # без ссылки
+                t4 = datetime.now(timezone.utc)
                 if bot:
                     try:
                         await bot.send_message(telegram_id, msg_text, parse_mode="Markdown")
+                        logger.info(f"⏱️ [5] send_message took: {(datetime.now(timezone.utc) - t4).total_seconds():.2f}s")
                         logger.info(f"✅ Payment confirmation message sent to user {telegram_id}")
                     except Exception as e:
                         logger.error(f"Failed to send payment confirmation to {telegram_id}: {e}")
 
-                # 2. Создаём ключ в фоновой задаче, чтобы не блокировать вебхук
+                # ---------- Шаг 6: Фоновое создание ключа (не блокирует) ----------
                 async def create_key_background():
                     try:
                         vpn_manager = get_vpn_manager()
                         if not vpn_manager:
-                            logger.error("VPNManager not initialized, cannot create key in background")
+                            logger.error("VPNManager not initialized")
                             await send_admin_alert(f"❌ VPNManager не инициализирован для пользователя {telegram_id}")
                             return
                         link = await vpn_manager.get_or_create_link(telegram_id)
-                        if link:
-                            # Если ключ создался – отправляем его пользователю дополнительно
-                            if bot:
-                                try:
-                                    await bot.send_message(
-                                        telegram_id,
-                                        f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте и вставьте в приложение.",
-                                        parse_mode="Markdown"
-                                    )
-                                    logger.info(f"✅ VPN key sent to user {telegram_id} in background")
-                                except Exception as e:
-                                    logger.error(f"Failed to send key to {telegram_id}: {e}")
+                        if link and bot:
+                            try:
+                                await bot.send_message(
+                                    telegram_id,
+                                    f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте и вставьте в приложение.",
+                                    parse_mode="Markdown"
+                                )
+                                logger.info(f"✅ VPN key sent to user {telegram_id} in background")
+                            except Exception as e:
+                                logger.error(f"Failed to send key to {telegram_id}: {e}")
                         else:
                             logger.warning(f"Could not create key for user {telegram_id} in background")
                             await send_admin_alert(f"⚠️ Не удалось создать ключ для {telegram_id} в фоне")
@@ -236,9 +234,10 @@ class YookassaService:
                         logger.exception(f"Background key creation failed for {telegram_id}: {e}")
                         await send_admin_alert(f"❌ Ошибка создания ключа в фоне для {telegram_id}: {e}")
 
-                # Запускаем фоновую задачу без ожидания
                 asyncio.create_task(create_key_background())
 
+            total_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+            logger.info(f"✅ Webhook completed in {total_time:.2f}s")
             return True
 
         except Exception as e:
