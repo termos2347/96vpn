@@ -204,7 +204,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
 
     app.router.add_post('/activate', handle_activation)
     app.router.add_post('/yookassa_webhook', yookassa_webhook)
-    app.router.add_post('/api/payment/webhook/yookassa', yookassa_webhook)
     app.router.add_post('/webhook', telegram_webhook)
     app.router.add_post('/webhook/admin', admin_telegram_webhook)
 

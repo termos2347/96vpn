@@ -3,7 +3,7 @@ import logging
 import asyncio
 import aiohttp
 import ssl
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from config import settings
 
@@ -116,10 +116,6 @@ class XUIVPNProvider:
         return None
 
     async def create_client(self, email: str, sub_id: str) -> Optional[Dict[str, str]]:
-        """
-        Создаёт клиента на панели с заданным sub_id.
-        Возвращает словарь с ключами 'uuid' и 'subId' (subId тот же, что передан).
-        """
         if not email or not sub_id:
             logger.error("Email and sub_id are required")
             return None
@@ -165,55 +161,93 @@ class XUIVPNProvider:
             logger.exception(f"Exception creating client: {e}")
             return None
 
+    # --- ИСПРАВЛЕННЫЙ МЕТОД get_client_by_email ---
     async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
-        """Получить клиента по email (используется редко, для администрирования)."""
+        """
+        Ищет клиента по email.
+        Пытается извлечь subId из разных полей ответа.
+        """
         url = f"{self.base_url}/panel/api/clients/get/{email}"
         try:
             result = await self._retry_request("GET", url)
+            logger.debug(f"get_client_by_email response for {email}: {result}")
             if result and result.get("success"):
                 data = result.get("obj")
                 if data:
-                    return {
-                        "uuid": data.get("id"),
-                        "subId": data.get("subId"),
-                        "email": data.get("email"),
-                        "enable": data.get("enable"),
-                    }
+                    # Пробуем найти subId в разных местах
+                    sub_id = data.get("subId") or data.get("subid") or data.get("sub_id")
+                    client_uuid = data.get("id") or data.get("uuid")
+                    client_email = data.get("email")
+                    enable = data.get("enable")
+
+                    # Если sub_id не найден, возможно, клиент вложен в "client"
+                    if sub_id is None and "client" in data:
+                        client_obj = data["client"]
+                        sub_id = client_obj.get("subId") or client_obj.get("subid") or client_obj.get("sub_id")
+                        client_uuid = client_obj.get("id") or client_obj.get("uuid")
+                        client_email = client_obj.get("email")
+                        enable = client_obj.get("enable")
+
+                    if sub_id:
+                        return {
+                            "uuid": client_uuid,
+                            "subId": sub_id,
+                            "email": client_email,
+                            "enable": enable,
+                        }
+                    else:
+                        logger.warning(f"Client found but no subId in response: {data}")
+                        return None
             return None
         except Exception as e:
             logger.exception(f"Error getting client by email {email}: {e}")
             return None
 
-    async def get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, str]]:
-        """Получить клиента по UUID (используется редко)."""
-        url = f"{self.base_url}/panel/api/clients/get/{client_uuid}"
+    # --- ДОПОЛНИТЕЛЬНЫЙ МЕТОД ПОИСКА ПО subId ---
+    async def get_client_by_sub_id(self, sub_id: str) -> Optional[Dict[str, str]]:
+        """
+        Пытается найти клиента по subId через эндпоинт /getSub/{subId}.
+        Если эндпоинт недоступен – возвращает None.
+        """
+        url = f"{self.base_url}/panel/api/clients/getSub/{sub_id}"
         try:
             result = await self._retry_request("GET", url)
             if result and result.get("success"):
                 data = result.get("obj")
                 if data:
-                    return {
-                        "uuid": data.get("id"),
-                        "subId": data.get("subId"),
-                        "email": data.get("email"),
-                        "enable": data.get("enable"),
-                    }
+                    sub_id_from_resp = data.get("subId") or data.get("subid") or data.get("sub_id")
+                    if sub_id_from_resp:
+                        return {
+                            "uuid": data.get("id") or data.get("uuid"),
+                            "subId": sub_id_from_resp,
+                            "email": data.get("email"),
+                            "enable": data.get("enable"),
+                        }
             return None
         except Exception as e:
-            logger.exception(f"Error getting client by uuid {client_uuid}: {e}")
+            logger.warning(f"getSub endpoint failed, fallback to email: {e}")
             return None
 
+    # --- МЕТОД ДЛЯ ПОЛУЧЕНИЯ ВСЕХ КЛИЕНТОВ (для fallback-поиска по части email) ---
+    async def get_all_clients(self) -> List[Dict]:
+        """Получает список всех клиентов (используется как fallback)."""
+        url = f"{self.base_url}/panel/api/clients"
+        try:
+            result = await self._retry_request("GET", url)
+            if result and result.get("success"):
+                return result.get("obj", [])
+            return []
+        except Exception as e:
+            logger.exception(f"Error getting all clients: {e}")
+            return []
+
     def get_subscription_link(self, sub_id: str) -> str:
-        """Формирует ссылку для подписки на основе subId."""
         if not self._server_host or not sub_id:
             logger.error("Invalid server host or sub_id")
             return ""
         return f"https://{self._server_host}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, sub_id: str) -> bool:
-        """
-        Отзывает клиента по subId (используется эндпоинт /delSub/{subId}).
-        """
         url = f"{self.base_url}/panel/api/clients/delSub/{sub_id}"
         try:
             result = await self._retry_request("POST", url)

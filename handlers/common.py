@@ -72,7 +72,6 @@ async def handle_my_keys(message: Message):
 async def handle_help(message: Message):
     await message.answer(
         Texts.help_info(),
-        parse_mode="Markdown",
         reply_markup=Keyboards.back_to_main_inline()
     )
 
