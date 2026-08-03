@@ -23,11 +23,11 @@ router = Router(name="payment")
 
 # ---------- Обработчик выбора тарифа ----------
 @router.callback_query(F.data.startswith("tariff_"))
-@rate_limit(max_per_minute=5)
+@rate_limit(max_per_minute=settings.RATE_LIMIT_TARIFF)
 async def tariff_chosen(callback: CallbackQuery):
     try:
         validate_user_id(callback.from_user.id)
-        period = callback.data.split("_")[1]  # tariff_1m -> 1m
+        period = callback.data.split("_")[1]
         if period not in settings.PERIOD_DAYS:
             raise ValidationError(f"Invalid period: {period}")
         await callback.message.edit_text(
@@ -42,9 +42,9 @@ async def tariff_chosen(callback: CallbackQuery):
 
 # ---------- Обработчик выбора способа оплаты (Рубли/Stars/USDT) ----------
 @router.callback_query(F.data.startswith("pay_"))
-@rate_limit(max_per_minute=3)
+@rate_limit(max_per_minute=settings.RATE_LIMIT_PAYMENT)
 async def process_payment(callback: CallbackQuery):
-    _, period, currency = callback.data.split("_")  # pay_1m_rub
+    _, period, currency = callback.data.split("_")
     user_id = callback.from_user.id
     try:
         validate_user_id(user_id)
@@ -62,7 +62,6 @@ async def process_payment(callback: CallbackQuery):
     local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
 
     try:
-        # Создаём запись о платеже в БД (pending)
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 new_payment = BotPayment(
@@ -75,7 +74,6 @@ async def process_payment(callback: CallbackQuery):
                 )
                 session.add(new_payment)
 
-        # Создаём платёж через Yookassa
         metadata = {
             "source": "bot",
             "telegram_id": user_id,
@@ -86,7 +84,7 @@ async def process_payment(callback: CallbackQuery):
 
         payment = await yookassa_service.create_payment(price, description, metadata)
         if not payment:
-            await callback.answer("❌ Ошибка создания платежа в платежной системе", show_alert=True)
+            await callback.answer("❌ Ошибка создания платежа", show_alert=True)
             return
 
         yookassa_id = payment.get("payment_id")
@@ -95,7 +93,6 @@ async def process_payment(callback: CallbackQuery):
             await callback.answer("❌ Не удалось получить ссылку на оплату", show_alert=True)
             return
 
-        # Обновляем запись в БД: заменяем временный ID на реальный
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 stmt = select(BotPayment).where(BotPayment.payment_id == local_tx_id)
@@ -104,11 +101,10 @@ async def process_payment(callback: CallbackQuery):
                 if db_payment:
                     db_payment.payment_id = yookassa_id
                 else:
-                    logger.error(f"Critical: Local payment log {local_tx_id} vanished during API request!")
-                    await callback.answer("❌ Системная ошибка. Попробуйте заново.", show_alert=True)
+                    logger.error(f"Local payment {local_tx_id} vanished!")
+                    await callback.answer("❌ Системная ошибка", show_alert=True)
                     return
 
-        # Показываем пользователю ссылку на оплату
         await callback.message.delete()
         await callback.message.answer(
             Texts.payment_link(price, currency, period),
@@ -119,22 +115,21 @@ async def process_payment(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"Error in process_payment: {e}", exc_info=True)
         log_error(f"Payment error for user {user_id}: {e}", notify_admin=True)
-        await callback.answer("❌ Произошла внутренняя ошибка сервера", show_alert=True)
+        await callback.answer("❌ Внутренняя ошибка сервера", show_alert=True)
 
 
-# ---------- Обработчик оплаты через Telegram Stars ----------
 @router.pre_checkout_query()
 async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
 
 @router.message(F.successful_payment)
+@rate_limit(max_per_minute=settings.RATE_LIMIT_STARS)
 async def successful_payment(message: Message):
     payment = message.successful_payment
     payload = payment.invoice_payload
     telegram_payment_id = payment.telegram_payment_charge_id
 
-    # Ожидаем формат: vpn_1m_123456789
     parts = payload.split("_")
     if len(parts) < 3:
         await message.answer(Texts.payment_error())
@@ -146,7 +141,6 @@ async def successful_payment(message: Message):
         await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
         return
 
-    # Проверка на дубликат платежа
     async with AsyncSessionLocal() as session:
         stmt = select(BotPayment).where(BotPayment.payment_id == telegram_payment_id)
         existing = (await session.execute(stmt)).scalar_one_or_none()
@@ -158,14 +152,12 @@ async def successful_payment(message: Message):
     try:
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                # ✅ ЗАЩИТА ОТ RACE CONDITION: блокируем строку пользователя
                 stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
                 user = (await session.execute(stmt_user)).scalar_one_or_none()
                 if not user:
                     user = BotUser(telegram_id=target_user_id)
                     session.add(user)
                     await session.flush()
-                    # повторно блокируем новую запись
                     stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
                     user = (await session.execute(stmt_user)).scalar_one()
 
@@ -175,11 +167,11 @@ async def successful_payment(message: Message):
                     product_type,
                     period,
                     telegram_payment_id,
-                    user=user  # передаём уже заблокированный объект
+                    user=user
                 )
     except Exception as e:
         logger.exception(f"Activation error for payment {telegram_payment_id}")
-        log_error(f"Activation error for payment {telegram_payment_id}: {e}", notify_admin=True)
+        log_error(f"Activation error: {e}", notify_admin=True)
         await message.answer(Texts.payment_error())
         return
 
@@ -190,7 +182,6 @@ async def successful_payment(message: Message):
     days = settings.PERIOD_DAYS.get(period, 0)
     if product_type == "vpn":
         try:
-            # Получаем обновлённые данные пользователя из БД
             async with AsyncSessionLocal() as session:
                 stmt = select(BotUser).where(BotUser.telegram_id == target_user_id)
                 user = (await session.execute(stmt)).scalar_one_or_none()
@@ -206,18 +197,11 @@ async def successful_payment(message: Message):
             await message.answer(msg, parse_mode="Markdown")
 
             if not link and vpn_manager:
-                # Если ключ не создался, уведомляем админа
-                await send_admin_alert(
-                    f"⚠️ Не удалось создать VPN-ключ для пользователя {target_user_id} после оплаты Stars (payment {telegram_payment_id})"
-                )
+                await send_admin_alert(f"⚠️ Не удалось создать ключ для {target_user_id}")
         except Exception as e:
             logger.exception(f"Key creation failed for user {target_user_id}")
-            log_error(f"Key creation failed for user {target_user_id}: {e}", notify_admin=True)
+            log_error(f"Key creation failed: {e}", notify_admin=True)
             await message.answer(Texts.key_creation_error())
-            await send_admin_alert(
-                f"❌ Критическая ошибка при создании ключа для {target_user_id} после оплаты Stars: {e}"
-            )
+            await send_admin_alert(f"❌ Ошибка создания ключа для {target_user_id}: {e}")
     else:
-        # Для других продуктов (например, bypass) – можно расширить позже
         await message.answer(f"✅ Подписка на {product_type} на {days} дней активирована!")
-        

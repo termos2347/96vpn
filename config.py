@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     XUI_API_TOKEN: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
+    
+    # ---------- Rate limiting (для каждой группы отдельно) ----------
+    RATE_LIMIT_START: int = 5
+    RATE_LIMIT_HELP: int = 3
+    RATE_LIMIT_MY_KEYS: int = 3
+    RATE_LIMIT_BUY_VPN: int = 3
+    RATE_LIMIT_TARIFF: int = 5
+    RATE_LIMIT_PAYMENT: int = 3
+    RATE_LIMIT_STARS: int = 3
+    RATE_LIMIT_ADMIN: int = 10
+    RATE_LIMIT_DEFAULT: int = 5  # на случай, если для какой-то команды не задано отдельно
 
     # ---------- Остальное ----------
     SUPPORT_USERNAME: str = "support_username"

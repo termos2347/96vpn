@@ -9,13 +9,15 @@ from handlers.ui import Texts, Keyboards
 from services.vpn_manager import get_vpn_manager
 from db.crud import get_or_create_bot_user
 from db.base import AsyncSessionLocal
+from utils.decorators import rate_limit
+from config import settings
 
 logger = logging.getLogger(__name__)
 router = Router(name="common")
 
-
 # ---------- Команда /start ----------
 @router.message(Command("start"))
+@rate_limit(max_per_minute=settings.RATE_LIMIT_START)
 async def cmd_start(message: Message):
     user_id = message.from_user.id
     async with AsyncSessionLocal() as session:
@@ -30,9 +32,9 @@ async def cmd_start(message: Message):
         reply_markup=Keyboards.main_menu()
     )
 
-
 # ---------- Команда /help (дополнительно) ----------
 @router.message(Command("help"))
+@rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)
 async def cmd_help(message: Message):
     await message.answer(
         Texts.help_info(),
@@ -40,18 +42,18 @@ async def cmd_help(message: Message):
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-
 # ---------- Обработчик кнопки "🚀 Купить / Продлить VPN" ----------
 @router.message(F.text == "🚀 Купить / Продлить VPN")
+@rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
     await message.answer(
         Texts.tariff_selection(),
         reply_markup=Keyboards.tariff_selection()
     )
 
-
 # ---------- Обработчик кнопки "🔑 Мои Ключи" ----------
 @router.message(F.text == "🔑 Мои Ключи")
+@rate_limit(max_per_minute=settings.RATE_LIMIT_MY_KEYS)
 async def handle_my_keys(message: Message):
     user_id = message.from_user.id
     vpn_manager = get_vpn_manager()
@@ -66,20 +68,19 @@ async def handle_my_keys(message: Message):
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-
 # ---------- Обработчик кнопки "ℹ️ Инструкция и Поддержка" ----------
 @router.message(F.text == "ℹ️ Инструкция и Поддержка")
+@rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)  # можно использовать тот же лимит, что и /help
 async def handle_help(message: Message):
     await message.answer(
         Texts.help_info(),
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-
-# ---------- Команда /vpn (перенесена из subscription) ----------
+# ---------- Команда /vpn ----------
 @router.message(Command("vpn"))
+@rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
 async def cmd_vpn(message: Message):
-    # Просто показываем статус и кнопки
     user_id = message.from_user.id
     async with AsyncSessionLocal() as session:
         user = await get_or_create_bot_user(session, user_id)
@@ -89,9 +90,9 @@ async def cmd_vpn(message: Message):
         reply_markup=Keyboards.main_menu()
     )
 
-
-# ---------- Команда /getlink (перенесена из subscription) ----------
+# ---------- Команда /getlink ----------
 @router.message(Command("getlink"))
+@rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
 async def cmd_getlink(message: Message):
     user_id = message.from_user.id
     vpn_manager = get_vpn_manager()
@@ -109,12 +110,10 @@ async def cmd_getlink(message: Message):
         parse_mode="Markdown"
     )
 
-
 # ---------- Обработчики инлайн-кнопок (возврат в главное меню) ----------
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery):
     await callback.message.delete()
-    # Отправляем новое сообщение с главным меню
     user_id = callback.from_user.id
     async with AsyncSessionLocal() as session:
         user = await get_or_create_bot_user(session, user_id)
@@ -125,7 +124,6 @@ async def back_to_main(callback: CallbackQuery):
     )
     await callback.answer()
 
-
 @router.callback_query(F.data == "back_to_tariffs")
 async def back_to_tariffs(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -134,10 +132,8 @@ async def back_to_tariffs(callback: CallbackQuery):
     )
     await callback.answer()
 
-
 # ---------- Установка команд бота ----------
 async def setup_bot_commands(bot):
-    """Устанавливает команды для основного бота."""
     commands = [
         types.BotCommand(command="start", description="Главное меню"),
         types.BotCommand(command="help", description="Помощь"),
