@@ -36,6 +36,7 @@ router.include_router(payment_router)
 # Fallback-обработчик для неизвестных callback-запросов
 @router.callback_query()
 async def unknown_callback(callback: CallbackQuery):
+    logger.warning(f"⚠️ Unknown callback data: {callback.data}")
     await callback.answer("❌ Неизвестная команда", show_alert=False)
     try:
         await callback.message.edit_text(
@@ -43,7 +44,6 @@ async def unknown_callback(callback: CallbackQuery):
             reply_markup=Keyboards.back_to_main_inline()
         )
     except Exception:
-        # Если сообщение уже удалено или не редактируется, просто игнорируем
         pass
 
 __all__ = [

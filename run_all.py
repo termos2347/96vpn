@@ -1,3 +1,4 @@
+# run_all.py
 import asyncio
 import logging
 import signal
@@ -13,6 +14,7 @@ from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
 from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
 from services.vpn_provider import XUIVPNProvider
+from services.redis_service import redis_service
 from db.base import engine
 from internal_api import create_internal_app
 import admin.bot
@@ -122,6 +124,17 @@ async def on_startup():
     logger.info("=" * 50)
 
     try:
+        # Redis сначала (не блокирует запуск)
+        logger.info("Step 0/7: Connecting to Redis...")
+        try:
+            await redis_service.connect()
+            if redis_service._client is not None:
+                logger.info("✅ Redis connected")
+            else:
+                logger.warning("⚠️ Redis not available, continuing without it")
+        except Exception as e:
+            logger.warning(f"⚠️ Redis connection failed: {e}. Continuing without Redis...")
+
         logger.info("Step 1/7: Checking database connection...")
         await check_db_with_retry()
         logger.info("✅ Database connection successful")
@@ -277,6 +290,13 @@ async def on_shutdown():
         logger.info("Database engine disposed")
     except Exception as e:
         logger.warning(f"Error disposing SQLAlchemy engine: {e}")
+
+    # Закрываем Redis
+    try:
+        await redis_service.close()
+        logger.info("Redis connection closed")
+    except Exception as e:
+        logger.warning(f"Error closing Redis: {e}")
 
     logger.info("Shutdown complete.")
 

@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_STARS: int = 3
     RATE_LIMIT_ADMIN: int = 10
     RATE_LIMIT_DEFAULT: int = 5  # на случай, если для какой-то команды не задано отдельно
+    
+    # ---------- Redis ----------
+    REDIS_URL: Optional[str] = None  # приоритетнее остальных
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""
+    REDIS_CACHE_TTL: int = 60
 
     # ---------- Остальное ----------
     SUPPORT_USERNAME: str = "support_username"
