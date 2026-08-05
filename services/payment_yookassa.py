@@ -236,7 +236,7 @@ class YookassaService:
                             try:
                                 await bot.send_message(
                                     telegram_id,
-                                    f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте и вставьте в приложение.",
+                                    f"🔗 Ваш ключ готов:\n`{link}`\n\nСкопируйте и вставьте в приложение.",
                                     parse_mode="Markdown"
                                 )
                                 logger.info(f"✅ VPN-ключ отправлен пользователю {telegram_id} в фоне")

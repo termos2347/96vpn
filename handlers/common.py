@@ -41,12 +41,13 @@ async def cmd_help(message: Message):
     )
 
 
-@router.message(F.text == "🚀 Купить / Продлить VPN")
+@router.message(F.text == "🚀 Оплатить подписку")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
+    # Теперь сразу показываем выбор валюты
     await message.answer(
-        Texts.tariff_selection(),
-        reply_markup=Keyboards.tariff_selection()
+        Texts.currency_selection(),
+        reply_markup=Keyboards.currency_selection()
     )
 
 
@@ -120,11 +121,11 @@ async def back_to_main(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "back_to_tariffs")
-async def back_to_tariffs(callback: CallbackQuery):
+@router.callback_query(F.data == "back_to_currencies")
+async def back_to_currencies(callback: CallbackQuery):
     await callback.message.edit_text(
-        Texts.tariff_selection(),
-        reply_markup=Keyboards.tariff_selection()
+        Texts.currency_selection(),
+        reply_markup=Keyboards.currency_selection()
     )
     await callback.answer()
 

@@ -67,7 +67,7 @@ async def check_expired_subscriptions(bot):
                 try:
                     await bot.send_message(
                         telegram_id,
-                        "❌ Ваша VPN-подписка истекла. Для продления перейдите в раздел оплаты."
+                        "❌ Ваша подписка истекла. Для продления перейдите в раздел оплаты."
                     )
                 except Exception as e:
                     logger.warning(f"Could not notify user {telegram_id}: {e}")
@@ -110,9 +110,9 @@ async def send_expiry_reminders(bot):
             try:
                 await bot.send_message(
                     user.telegram_id,
-                    f"⏰ Ваша VPN-подписка истекает через {day_word}.\n"
+                    f"⏰ Ваша подписка истекает через {day_word}.\n"
                     f"Дата окончания: {user.vpn_subscription_end.strftime('%d.%m.%Y')}\n"
-                    f"Продлите её в разделе 💳 Оплатить VPN, чтобы не остаться без доступа."
+                    f"Продлите её в разделе 💳 Оплатить , чтобы не остаться без доступа."
                 )
                 message_sent = True
                 break
@@ -190,7 +190,7 @@ async def retry_missing_keys(bot):
                         try:
                             await bot.send_message(
                                 db_user.telegram_id,
-                                f"🔗 Ваш VPN-ключ готов:\n`{link}`\n\nСкопируйте ссылку и вставьте в приложение.",
+                                f"🔗 Ваш ключ готов:\n`{link}`\n\nСкопируйте ссылку и вставьте в приложение.",
                                 parse_mode="Markdown"
                             )
                             logger.info(f"Ключ успешно создан для {db_user.telegram_id} через фоновую задачу")

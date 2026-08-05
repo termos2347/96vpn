@@ -105,7 +105,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                             try:
                                 await main_bot.send_message(
                                     telegram_id,
-                                    f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
+                                    f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней."
                                 )
                             except TelegramForbiddenError:
                                 logger.info(f"User {telegram_id} blocked bot, cannot send link from API")
@@ -115,7 +115,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                                 try:
                                     await main_bot.send_message(
                                         telegram_id,
-                                        f"🔗 Ваша VPN ссылка: {link}\n\nПодписка активирована на {days} дней."
+                                        f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней."
                                     )
                                 except Exception:
                                     pass
