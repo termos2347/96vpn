@@ -1,6 +1,5 @@
 # handlers/common.py
 import logging
-from datetime import datetime, timezone
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -15,7 +14,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 router = Router(name="common")
 
-# ---------- Команда /start ----------
+
 @router.message(Command("start"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_START)
 async def cmd_start(message: Message):
@@ -26,13 +25,12 @@ async def cmd_start(message: Message):
             user.username = message.from_user.username
             await session.commit()
         vpn_end = user.vpn_subscription_end
-
     await message.answer(
         Texts.main_menu(message.from_user.first_name, vpn_end),
         reply_markup=Keyboards.main_menu()
     )
 
-# ---------- Команда /help (дополнительно) ----------
+
 @router.message(Command("help"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)
 async def cmd_help(message: Message):
@@ -42,7 +40,7 @@ async def cmd_help(message: Message):
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-# ---------- Обработчик кнопки "🚀 Купить / Продлить VPN" ----------
+
 @router.message(F.text == "🚀 Купить / Продлить VPN")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
@@ -51,7 +49,7 @@ async def handle_buy_vpn(message: Message):
         reply_markup=Keyboards.tariff_selection()
     )
 
-# ---------- Обработчик кнопки "🔑 Мои Ключи" ----------
+
 @router.message(F.text == "🔑 Мои Ключи")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_MY_KEYS)
 async def handle_my_keys(message: Message):
@@ -60,7 +58,6 @@ async def handle_my_keys(message: Message):
     if not vpn_manager:
         await message.answer(Texts.vpn_not_available())
         return
-
     link = await vpn_manager.get_or_create_link(user_id)
     await message.answer(
         Texts.my_keys(link),
@@ -68,16 +65,16 @@ async def handle_my_keys(message: Message):
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-# ---------- Обработчик кнопки "ℹ️ Инструкция и Поддержка" ----------
+
 @router.message(F.text == "ℹ️ Инструкция и Поддержка")
-@rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)  # можно использовать тот же лимит, что и /help
+@rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)
 async def handle_help(message: Message):
     await message.answer(
         Texts.help_info(),
         reply_markup=Keyboards.back_to_main_inline()
     )
 
-# ---------- Команда /vpn ----------
+
 @router.message(Command("vpn"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
 async def cmd_vpn(message: Message):
@@ -90,7 +87,7 @@ async def cmd_vpn(message: Message):
         reply_markup=Keyboards.main_menu()
     )
 
-# ---------- Команда /getlink ----------
+
 @router.message(Command("getlink"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
 async def cmd_getlink(message: Message):
@@ -99,18 +96,16 @@ async def cmd_getlink(message: Message):
     if not vpn_manager:
         await message.answer(Texts.vpn_not_available())
         return
-
     link = await vpn_manager.get_or_create_link(user_id)
     if link is None:
         await message.answer(Texts.no_active_subscription())
         return
-
     await message.answer(
         f"🔗 Ваша ссылка для подключения:\n`{link}`",
         parse_mode="Markdown"
     )
 
-# ---------- Обработчики инлайн-кнопок (возврат в главное меню) ----------
+
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery):
     await callback.message.delete()
@@ -124,6 +119,7 @@ async def back_to_main(callback: CallbackQuery):
     )
     await callback.answer()
 
+
 @router.callback_query(F.data == "back_to_tariffs")
 async def back_to_tariffs(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -132,7 +128,7 @@ async def back_to_tariffs(callback: CallbackQuery):
     )
     await callback.answer()
 
-# ---------- Установка команд бота ----------
+
 async def setup_bot_commands(bot):
     commands = [
         types.BotCommand(command="start", description="Главное меню"),

@@ -3,6 +3,7 @@ import logging
 import uuid
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, Message
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
 
 from handlers.ui import Texts, Keyboards
@@ -18,29 +19,55 @@ from utils.decorators import rate_limit
 from utils.validators import validate_user_id, validate_currency, ValidationError
 
 logger = logging.getLogger(__name__)
+logger.info("📦 Модуль payment.py загружен")  # можно удалить после проверки
+
 router = Router(name="payment")
 
 
-# ---------- Обработчик выбора тарифа ----------
-@router.callback_query(F.data.startswith("tariff_"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_TARIFF)
+@router.callback_query(F.data.startswith("tariff_"))
 async def tariff_chosen(callback: CallbackQuery):
+    logger.info(f"🔥 tariff_chosen вызван! data={callback.data}, user={callback.from_user.id}")  # можно удалить после проверки
     try:
         validate_user_id(callback.from_user.id)
         period = callback.data.split("_")[1]
         if period not in settings.PERIOD_DAYS:
             raise ValidationError(f"Invalid period: {period}")
-        await callback.message.edit_text(
-            Texts.payment_methods(),
-            reply_markup=Keyboards.payment_methods(period)
-        )
-        await callback.answer()
+
+        logger.info(f"✅ Тариф выбран: {period}, показываем способы оплаты")
+
+        try:
+            await callback.message.edit_text(
+                Texts.payment_methods(),
+                reply_markup=Keyboards.payment_methods(period)
+            )
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                logger.debug("Сообщение уже содержит нужный текст и клавиатуру")
+            else:
+                raise
+
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            logger.debug("Callback уже устарел, пропускаем answer")
+
+        logger.info(f"✅ Успешно показаны способы оплаты для {period}")
+
     except ValidationError as e:
         logger.warning(f"Validation error in tariff_chosen: {e}")
-        await callback.answer("❌ Ошибка выбора тарифа", show_alert=True)
+        try:
+            await callback.answer("❌ Ошибка выбора тарифа", show_alert=True)
+        except TelegramBadRequest:
+            pass
+    except Exception as e:
+        logger.exception(f"Неожиданная ошибка в tariff_chosen: {e}")
+        try:
+            await callback.answer("❌ Внутренняя ошибка", show_alert=True)
+        except TelegramBadRequest:
+            pass
 
 
-# ---------- Обработчик выбора способа оплаты (Рубли/Stars/USDT) ----------
 @router.callback_query(F.data.startswith("pay_"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_PAYMENT)
 async def process_payment(callback: CallbackQuery):
@@ -105,17 +132,36 @@ async def process_payment(callback: CallbackQuery):
                     await callback.answer("❌ Системная ошибка", show_alert=True)
                     return
 
-        await callback.message.delete()
-        await callback.message.answer(
-            Texts.payment_link(price, currency, period),
-            reply_markup=Keyboards.payment_url_button(url)
-        )
-        await callback.answer()
+        # Вместо удаления сообщения – редактируем его, чтобы показать ссылку
+        try:
+            await callback.message.edit_text(
+                Texts.payment_link(price, currency, period),
+                reply_markup=Keyboards.payment_url_button(url),
+                disable_web_page_preview=True
+            )
+        except TelegramBadRequest as e:
+            if "message to delete not found" in str(e) or "message not found" in str(e):
+                # Если сообщение уже удалено – отправляем новое
+                await callback.message.answer(
+                    Texts.payment_link(price, currency, period),
+                    reply_markup=Keyboards.payment_url_button(url),
+                    disable_web_page_preview=True
+                )
+            else:
+                raise
+
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            logger.debug("Callback уже устарел, пропускаем answer")
 
     except Exception as e:
         logger.error(f"Error in process_payment: {e}", exc_info=True)
         log_error(f"Payment error for user {user_id}: {e}", notify_admin=True)
-        await callback.answer("❌ Внутренняя ошибка сервера", show_alert=True)
+        try:
+            await callback.answer("❌ Внутренняя ошибка сервера", show_alert=True)
+        except TelegramBadRequest:
+            await callback.message.answer("❌ Внутренняя ошибка сервера. Попробуйте позже.")
 
 
 @router.pre_checkout_query()

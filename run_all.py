@@ -345,4 +345,4 @@ if __name__ == "__main__":
         logger.info("Shutdown by user (KeyboardInterrupt)")
     except Exception as e:
         logger.exception("Fatal error")
-        sys.exit(1)
+        sys.exit(1) 
