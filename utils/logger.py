@@ -4,70 +4,93 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from config import settings
 
-class ConsoleFilter(logging.Filter):
-    """Фильтр, пропускающий только логи от наших модулей, если DEBUG=True."""
-    def __init__(self, debug: bool):
-        self.debug = debug
-        # Список имён наших модулей
-        self.allowed_prefixes = (
-            '__main__',
-            'handlers',
-            'services',
-            'db',
-            'admin',
-            'internal_api',
-            'utils',
-        )
+# Псевдонимы для понятных названий модулей (можно использовать полные имена)
+MODULE_ALIASES = {
+    '__main__': 'MAIN',
+    'asyncio': 'ASYNCIO',
+    'urllib3.connectionpool': 'CONNECTION',
+    'charset_normalizer': 'CHARSET',
+    'aiogram.event': 'AIOGRAM',
+    'aiohttp.access': 'AIOHTTP',
+    'aiohttp.internal': 'AIOHTTP',
+    'sqlalchemy.engine': 'SQLALCHEMY',
+    'alembic': 'ALEMBIC',
+    'handlers.common': 'HANDLERS',
+    'handlers.payment': 'PAYMENT',
+    'handlers.ui': 'UI',
+    'admin.bot': 'ADMIN',
+    'services.vpn_provider': 'VPN_PROV',
+    'services.vpn_manager': 'VPN_MGR',
+    'services.scheduler': 'SCHED',
+    'services.payment_yookassa': 'YOOKASSA',
+    'services.redis_service': 'REDIS',
+    'db.base': 'DATABASE',
+    'db.crud': 'CRUD',
+    'db.models': 'MODELS',
+    'internal_api': 'API',
+    'utils.logger': 'LOGGER',
+    'utils.decorators': 'DECOR',
+    'utils.validators': 'VALID',
+    'utils.encryption': 'CRYPTO',
+    'utils.cache': 'CACHE',
+}
 
-    def filter(self, record):
-        # Если DEBUG включён, пропускаем всё (уровень уже проверен обработчиком)
-        if self.debug:
-            return True
-        # Если DEBUG выключен, пропускаем только WARNING и выше от наших модулей
-        # Это даст ошибки и предупреждения в консоль
-        if record.levelno >= logging.WARNING:
-            # Проверяем, принадлежит ли логгер нашим модулям
-            return any(record.name.startswith(prefix) for prefix in self.allowed_prefixes)
-        return False
+def get_module_name(name: str) -> str:
+    """Возвращает понятное имя модуля (из словаря или последняя часть)."""
+    alias = MODULE_ALIASES.get(name)
+    if alias:
+        return alias
+    # Если нет в словаре – берём последнюю часть имени, без обрезания
+    parts = name.split('.')
+    return parts[-1] if parts else name
+
+
+class CompactFormatter(logging.Formatter):
+    LEVEL_MAP = {
+        'DEBUG': 'D',
+        'INFO': 'I',
+        'WARNING': 'W',
+        'ERROR': 'E',
+        'CRITICAL': 'C'
+    }
+
+    def format(self, record):
+        record.level_short = self.LEVEL_MAP.get(record.levelname, record.levelname[0])
+        record.module_name = get_module_name(record.name)
+        return super().format(record)
+
 
 def setup_logger():
-    """Настраивает логирование с ротацией и разделением на консоль и файл."""
-    log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
-    access_level = getattr(logging, settings.LOG_ACCESS_LEVEL.upper(), logging.WARNING)
-
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+    """Настраивает логирование с компактным форматом и осмысленными именами модулей."""
+    formatter = CompactFormatter(
+        '%(asctime)s | %(level_short)-1s | %(module_name)s: %(message)s',
+        datefmt='%Y.%m.%d %H:%M:%S'
     )
 
-    # --- Консольный обработчик ---
+    # Консоль
     console = logging.StreamHandler(sys.stdout)
-    # Если DEBUG=True, уровень DEBUG, иначе WARNING (чтобы видеть только ошибки и предупреждения)
     console.setLevel(logging.DEBUG if settings.DEBUG else logging.WARNING)
     console.setFormatter(formatter)
-    # Добавляем фильтр, который учитывает DEBUG
-    console.addFilter(ConsoleFilter(settings.DEBUG))
 
-    # --- Файловый обработчик с ротацией ---
+    # Файл
     log_file = Path("logs/bot.log")
     log_file.parent.mkdir(exist_ok=True)
-
     file_handler = RotatingFileHandler(
         log_file,
         maxBytes=settings.LOG_MAX_BYTES,
         backupCount=settings.LOG_BACKUP_COUNT,
         encoding='utf-8'
     )
-    file_handler.setLevel(logging.INFO)  # всегда пишем INFO и выше
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 
-    # --- Настройка корневого логгера ---
+    # Корневой логгер
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)  # чтобы все логи доходили до обработчиков
+    root.setLevel(logging.DEBUG)
     for h in root.handlers[:]:
         root.removeHandler(h)
     root.addHandler(console)
     root.addHandler(file_handler)
 
-    logging.info("Логирование настроено: консоль (%s), файл (%s)", 
-                 "DEBUG" if settings.DEBUG else "WARNING+", "INFO")
+    logging.info("Логирование настроено: консоль (%s), файл (INFO)",
+                 "DEBUG" if settings.DEBUG else "WARNING+")

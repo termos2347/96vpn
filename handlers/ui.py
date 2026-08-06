@@ -141,8 +141,7 @@ class Keyboards:
         buttons = [
             [InlineKeyboardButton(text="🇷🇺 Рубли (RUB)", callback_data="currency_rub")],
             [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="currency_stars")],
-            [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data="currency_usdt")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
+            [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data="currency_usdt")]
         ]
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 

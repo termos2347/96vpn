@@ -30,17 +30,6 @@ async def cmd_start(message: Message):
         reply_markup=Keyboards.main_menu()
     )
 
-
-@router.message(Command("help"))
-@rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)
-async def cmd_help(message: Message):
-    await message.answer(
-        Texts.help_info(),
-        parse_mode="Markdown",
-        reply_markup=Keyboards.back_to_main_inline()
-    )
-
-
 @router.message(F.text == "🚀 Оплатить подписку")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
@@ -62,49 +51,14 @@ async def handle_my_keys(message: Message):
     link = await vpn_manager.get_or_create_link(user_id)
     await message.answer(
         Texts.my_keys(link),
-        parse_mode="Markdown",
-        reply_markup=Keyboards.back_to_main_inline()
+        parse_mode="Markdown"
     )
 
 
 @router.message(F.text == "ℹ️ Инструкция и Поддержка")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_HELP)
 async def handle_help(message: Message):
-    await message.answer(
-        Texts.help_info(),
-        reply_markup=Keyboards.back_to_main_inline()
-    )
-
-
-@router.message(Command("vpn"))
-@rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
-async def cmd_vpn(message: Message):
-    user_id = message.from_user.id
-    async with AsyncSessionLocal() as session:
-        user = await get_or_create_bot_user(session, user_id)
-        vpn_end = user.vpn_subscription_end
-    await message.answer(
-        Texts.main_menu(message.from_user.first_name, vpn_end),
-        reply_markup=Keyboards.main_menu()
-    )
-
-
-@router.message(Command("getlink"))
-@rate_limit(max_per_minute=settings.RATE_LIMIT_DEFAULT)
-async def cmd_getlink(message: Message):
-    user_id = message.from_user.id
-    vpn_manager = get_vpn_manager()
-    if not vpn_manager:
-        await message.answer(Texts.vpn_not_available())
-        return
-    link = await vpn_manager.get_or_create_link(user_id)
-    if link is None:
-        await message.answer(Texts.no_active_subscription())
-        return
-    await message.answer(
-        f"🔗 Ваша ссылка для подключения:\n`{link}`",
-        parse_mode="Markdown"
-    )
+    await message.answer(Texts.help_info())
 
 
 @router.callback_query(F.data == "back_to_main")
@@ -133,9 +87,6 @@ async def back_to_currencies(callback: CallbackQuery):
 async def setup_bot_commands(bot):
     commands = [
         types.BotCommand(command="start", description="Главное меню"),
-        types.BotCommand(command="help", description="Помощь"),
-        types.BotCommand(command="vpn", description="Моя подписка"),
-        types.BotCommand(command="getlink", description="Получить ключ VPN"),
     ]
     await bot.set_my_commands(commands)
     logger.info("Основные команды бота установлены.")

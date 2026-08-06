@@ -134,21 +134,22 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         client_ip = get_client_ip(request)
         logger.info(f"📨 Received Yookassa webhook from IP: {client_ip}")
 
-        # Проверка IP отключена для отладки – можно вернуть позже
-        # if not client_ip or not ip_in_network(client_ip):
-        #     logger.warning(f"Blocked unauthorized webhook attempt from IP: {client_ip}")
-        #     return web.json_response({"error": "forbidden"}, status=403)
+        # ✅ Проверка доверенного IP (включаем обратно)
+        if not client_ip or not ip_in_network(client_ip):
+            logger.warning(f"⛔ Blocked unauthorized webhook attempt from IP: {client_ip}")
+            return web.json_response({"error": "forbidden"}, status=403)
 
         try:
             data = await request.json()
             logger.info(f"📦 Yookassa webhook data: {data}")
+
             if main_bot is None:
                 logger.error("Main bot not set, cannot process yookassa webhook")
                 return web.json_response({"error": "main bot not ready"}, status=503)
 
-            # Управление транзакцией теперь здесь
+            # Управление транзакцией (передаём сессию в process_webhook)
             async with AsyncSessionLocal() as session:
-                async with session.begin():  # <-- транзакция начинается здесь
+                async with session.begin():
                     success = await yookassa_service.process_webhook(data, session, main_bot)
 
             if success:
