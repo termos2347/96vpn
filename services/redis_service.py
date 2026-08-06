@@ -22,11 +22,9 @@ class RedisService:
         try:
             if settings.REDIS_URL:
                 url = settings.REDIS_URL
-                # Если случайно указано redis://, заменяем на rediss://
                 if url.startswith("redis://") and not url.startswith("rediss://"):
                     url = url.replace("redis://", "rediss://", 1)
-                    logger.info(f"Replaced redis:// with rediss:// for TLS")
-                    settings.REDIS_URL = url  # сохраняем исправленный URL
+                    settings.REDIS_URL = url
 
                 self._client = redis.Redis.from_url(
                     url,
@@ -34,6 +32,8 @@ class RedisService:
                     socket_connect_timeout=3,
                     socket_timeout=3
                 )
+                # Маскируем пароль для лога
+                display_url = url.split("@")[-1] if "@" in url else url
             else:
                 self._client = redis.Redis(
                     host=settings.REDIS_HOST,
@@ -44,9 +44,10 @@ class RedisService:
                     socket_connect_timeout=3,
                     socket_timeout=3,
                 )
+                display_url = f"{settings.REDIS_HOST}:{settings.REDIS_PORT}"
 
             await self._client.ping()
-            logger.info(f"✅ Connected to Redis at {settings.REDIS_URL or f'{settings.REDIS_HOST}:{settings.REDIS_PORT}'}")
+            logger.info(f"✅ Connected to Redis at {display_url}")
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e}")
             self._client = None
@@ -62,7 +63,6 @@ class RedisService:
             raise RuntimeError("Redis not connected")
         return self._client
 
-    # ---------- Кэш ----------
     async def set_cache(self, key: str, value: str, ttl: int = None) -> bool:
         if self._client is None:
             return False
@@ -94,10 +94,9 @@ class RedisService:
             logger.error(f"Redis delete_cache error: {e}")
             return False
 
-    # ---------- Rate limiting ----------
     async def rate_limit_check(self, key: str, max_per_minute: int, expire: int = 60):
         if self._client is None:
-            return True, 0  # fail‑open
+            return True, 0
         try:
             count = await self.client.incr(key)
             if count == 1:
@@ -118,5 +117,4 @@ class RedisService:
             logger.error(f"Redis clear_rate_limit error: {e}")
             return False
 
-# Глобальный экземпляр
 redis_service = RedisService()

@@ -30,10 +30,10 @@ async def cmd_start(message: Message):
         reply_markup=Keyboards.main_menu()
     )
 
+
 @router.message(F.text == "🚀 Оплатить подписку")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
-    # Теперь сразу показываем выбор валюты
     await message.answer(
         Texts.currency_selection(),
         reply_markup=Keyboards.currency_selection()
@@ -89,4 +89,5 @@ async def setup_bot_commands(bot):
         types.BotCommand(command="start", description="Главное меню"),
     ]
     await bot.set_my_commands(commands)
-    logger.info("Основные команды бота установлены.")
+    # Логируем только в DEBUG
+    logger.debug("Main bot commands set")

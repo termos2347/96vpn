@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher
 from sqlalchemy import text
 
 from config import TOKEN, settings
-from handlers import router as main_router, init_vpn_components
+from handlers import router as main_router
 from handlers.common import setup_bot_commands
 from services.scheduler import start_scheduler
 from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
@@ -57,10 +57,10 @@ async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
         try:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
-            logger.info("✅ Database connection successful")
+            logger.info(" ✅ Database ready")
             return True
         except Exception as e:
-            logger.warning(f"DB connection attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning(f" DB connection attempt {attempt}/{max_retries} failed: {e}")
             if attempt == max_retries:
                 raise
             await asyncio.sleep(delay)
@@ -91,27 +91,24 @@ async def check_migrations() -> None:
     if current_rev != head_rev:
         logger.error(f"❌ Database revision mismatch! Current: {current_rev}, Expected (head): {head_rev}.")
         raise RuntimeError("Migration mismatch")
-    else:
-        logger.info(f"✅ Database is up-to-date (revision {head_rev})")
+    logger.info(" ✅ Migrations up-to-date")
 
 
 async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
                                  max_retries: int = 5, base_delay: float = 1.0) -> bool:
     for attempt in range(1, max_retries + 1):
         try:
-            logger.info(f"Setting webhook to {url} (attempt {attempt}/{max_retries})...")
+            logger.info(f" Setting webhook {url} (attempt {attempt}/{max_retries})...")
             await bot.set_webhook(url=url, secret_token=secret_token)
             info = await bot.get_webhook_info()
             if info.url == url:
-                logger.info(f"✅ Webhook successfully set to {url}")
                 return True
             else:
-                logger.warning(f"Webhook URL mismatch: expected {url}, got {info.url}")
+                logger.warning(f" Webhook URL mismatch: expected {url}, got {info.url}")
         except Exception as e:
-            logger.error(f"Attempt {attempt} failed: {e}")
+            logger.error(f" Attempt {attempt} failed: {e}")
         if attempt < max_retries:
             delay = base_delay * (2 ** (attempt - 1))
-            logger.info(f"Retrying in {delay} seconds...")
             await asyncio.sleep(delay)
     logger.error(f"❌ Failed to set webhook after {max_retries} attempts")
     return False
@@ -119,29 +116,31 @@ async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
 
 async def on_startup():
     global main_bot, main_dp, internal_runner, _background_tasks
+
     logger.info("=" * 50)
-    logger.info("Starting VPN bot with webhooks...")
+    logger.info("🚀 Starting VPN bot...")
     logger.info("=" * 50)
 
+    # 1. Redis
     try:
-        # Redis сначала (не блокирует запуск)
-        logger.info("Step 0/7: Connecting to Redis...")
-        try:
-            await redis_service.connect()
-            if redis_service._client is not None:
-                logger.info("✅ Redis connected")
-            else:
-                logger.warning("⚠️ Redis not available, continuing without it")
-        except Exception as e:
-            logger.warning(f"⚠️ Redis connection failed: {e}. Continuing without Redis...")
+        await redis_service.connect()
+        if redis_service._client is not None:
+            logger.info(" ✅ Redis connected")
+        else:
+            logger.warning(" ⚠️ Redis not available")
+    except Exception as e:
+        logger.warning(f" ⚠️ Redis connection failed: {e}")
 
-        logger.info("Step 1/7: Checking database connection...")
+    # 2. Database
+    try:
         await check_db_with_retry()
-        logger.info("✅ Database connection successful")
-
         await check_migrations()
+    except Exception as e:
+        logger.error(f" ❌ Database error: {e}")
+        raise
 
-        logger.info("Step 2/7: Initializing VPN components (single Master 3x-UI panel)...")
+    # 3. VPN components
+    try:
         provider = XUIVPNProvider(
             base_url=settings.XUI_MASTER_URL,
             api_token=settings.XUI_API_TOKEN,
@@ -150,23 +149,33 @@ async def on_startup():
         )
         vpn_manager = VPNManager(provider)
         set_vpn_manager(vpn_manager)
-        init_vpn_components()
-        logger.info("✅ VPN components initialized")
+        logger.info(" ✅ VPN provider ready")
+    except Exception as e:
+        logger.error(f" ❌ VPN provider error: {e}")
+        raise
 
-        logger.info("Step 3/7: Starting admin bot...")
+    # 4. Admin bot
+    try:
         await admin.bot.startup()
-        logger.info("✅ Admin bot started")
+        logger.info(" ✅ Admin bot ready")
+    except Exception as e:
+        logger.error(f" ❌ Admin bot error: {e}")
+        raise
 
-        logger.info("Step 4/7: Initializing main bot...")
+    # 5. Main bot
+    try:
         main_bot = Bot(token=TOKEN)
         main_dp = Dispatcher()
         main_dp.include_router(main_router)
         await setup_bot_commands(main_bot)
-        logger.info("✅ Main bot initialized")
-
         admin.bot.main_bot = main_bot
+        logger.info(" ✅ Main bot ready")
+    except Exception as e:
+        logger.error(f" ❌ Main bot error: {e}")
+        raise
 
-        logger.info("Step 5/7: Starting internal API server...")
+    # 6. Internal API
+    try:
         internal_app = create_internal_app(
             main_bot=main_bot,
             main_dp=main_dp,
@@ -182,53 +191,49 @@ async def on_startup():
             reuse_address=True
         )
         await site.start()
-        logger.info(f"✅ Internal API started on http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT}")
+        logger.info(f" ✅ Internal API ready (http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT})")
+    except Exception as e:
+        logger.error(f" ❌ Internal API error: {e}")
+        raise
 
-        logger.info("Step 6/7: Setting up webhooks with retry...")
-        if not settings.WEBHOOK_URL or not settings.ADMIN_WEBHOOK_URL:
-            raise ValueError("WEBHOOK_URL and ADMIN_WEBHOOK_URL are required")
-
+    # 7. Webhooks
+    try:
         await main_bot.delete_webhook()
         await admin.bot.admin_bot.delete_webhook()
 
         if not await set_webhook_with_retry(main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET):
-            raise RuntimeError("Failed to set main bot webhook after retries")
+            raise RuntimeError("Main webhook setup failed")
         if not await set_webhook_with_retry(admin.bot.admin_bot, settings.ADMIN_WEBHOOK_URL, settings.ADMIN_WEBHOOK_SECRET):
-            raise RuntimeError("Failed to set admin bot webhook after retries")
-
-        logger.info("✅ Webhooks configured")
-
-        logger.info("Step 7/7: Starting background tasks...")
-        _background_tasks = await start_scheduler(main_bot)
-        logger.info("✅ Background tasks started")
-
-        print("\n" + "=" * 50)
-        print("🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
-        print("=" * 50)
-
-        if HAS_PYFIGLET:
-            try:
-                f = Figlet(font='slant')
-                ascii_art = f.renderText('96VPN BOT')
-                print("\n" + ascii_art)
-            except Exception:
-                pass
-        else:
-            print("""
-             ╔═══╗ ╔╗   ╔╗╔══╗   ╔╗╔══╗
-            ╚╗╔╗║ ║║   ║║╚╣╠╝   ║║╚╣╠╝
-             ║║║║ ║║ ╔╗║║ ║║    ║║ ║║
-             ║║║║ ║╚═╝║║ ║║    ║║ ║║
-             ╚╝╚╝ ╚═══╝╚╝ ╚╝    ╚╝ ╚╝
-            """)
-
-        print("✅ Bot is now running and waiting for updates via webhooks...")
-        print("Press Ctrl+C to stop.\n")
-
+            raise RuntimeError("Admin webhook setup failed")
+        logger.info(" ✅ Webhooks configured")
     except Exception as e:
-        logger.error("🔥 FATAL ERROR during startup:")
-        logger.error(traceback.format_exc())
+        logger.error(f" ❌ Webhook error: {e}")
         raise
+
+    # 8. Scheduler
+    try:
+        _background_tasks = await start_scheduler(main_bot)
+        logger.info(" ✅ Scheduler started")
+    except Exception as e:
+        logger.error(f" ❌ Scheduler error: {e}")
+        raise
+
+    # === ИТОГ ===
+    logger.info(" " + "=" * 49)
+    logger.info(" 🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
+    logger.info(" " + "=" * 49)
+
+    if HAS_PYFIGLET:
+        try:
+            f = Figlet(font='slant')
+            ascii_art = f.renderText('96VPN BOT')
+            print("\n" + ascii_art)
+        except Exception:
+            pass
+    else:
+        print("\n" + "=" * 50)
+        print("✅ Bot is running! Press Ctrl+C to stop.")
+        print("=" * 50 + "\n")
 
 
 async def on_shutdown():
@@ -239,7 +244,7 @@ async def on_shutdown():
     logger.info("Shutting down...")
 
     if _background_tasks:
-        logger.info(f"Cancelling {len(_background_tasks)} background tasks...")
+        logger.info("Cancelling background tasks...")
         for task in _background_tasks:
             if not task.done():
                 task.cancel()
@@ -253,7 +258,6 @@ async def on_shutdown():
     if vpn_manager and hasattr(vpn_manager, 'provider'):
         try:
             await vpn_manager.provider.close()
-            logger.info("VPN provider closed")
         except Exception as e:
             logger.warning(f"Error closing VPN provider: {e}")
 
@@ -287,14 +291,11 @@ async def on_shutdown():
 
     try:
         await engine.dispose()
-        logger.info("Database engine disposed")
     except Exception as e:
         logger.warning(f"Error disposing SQLAlchemy engine: {e}")
 
-    # Закрываем Redis
     try:
         await redis_service.close()
-        logger.info("Redis connection closed")
     except Exception as e:
         logger.warning(f"Error closing Redis: {e}")
 
@@ -305,7 +306,7 @@ async def shutdown_with_timeout():
     try:
         await asyncio.wait_for(on_shutdown(), timeout=10.0)
     except asyncio.TimeoutError:
-        logger.error("Shutdown timed out after 10 seconds, forcing exit")
+        logger.error("Shutdown timed out, forcing exit")
     except Exception as e:
         logger.exception(f"Unexpected error during shutdown: {e}")
 
@@ -345,4 +346,4 @@ if __name__ == "__main__":
         logger.info("Shutdown by user (KeyboardInterrupt)")
     except Exception as e:
         logger.exception("Fatal error")
-        sys.exit(1) 
+        sys.exit(1)

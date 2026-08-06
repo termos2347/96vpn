@@ -81,14 +81,12 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         try:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
-                    # ✅ ЗАЩИТА ОТ RACE CONDITION: блокируем строку пользователя
                     stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
                     user = (await session.execute(stmt_user)).scalar_one_or_none()
                     if not user:
                         user = BotUser(telegram_id=telegram_id)
                         session.add(user)
                         await session.flush()
-                        # повторно блокируем новую запись
                         stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update()
                         user = (await session.execute(stmt_user)).scalar_one()
 
@@ -129,25 +127,23 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             logger.error(f"Activation error: {e}", exc_info=True)
             return web.json_response({"status": "error"}, status=500)
 
-    # internal_api.py – внутри yookassa_webhook
     async def yookassa_webhook(request):
         client_ip = get_client_ip(request)
-        logger.info(f"📨 Received Yookassa webhook from IP: {client_ip}")
-
-        # ✅ Проверка доверенного IP (включаем обратно)
+        # Проверка IP (без лишнего лога, только при ошибке)
         if not client_ip or not ip_in_network(client_ip):
             logger.warning(f"⛔ Blocked unauthorized webhook attempt from IP: {client_ip}")
             return web.json_response({"error": "forbidden"}, status=403)
 
         try:
             data = await request.json()
-            logger.info(f"📦 Yookassa webhook data: {data}")
-
+            payment_id = data.get("object", {}).get("id")
+            event = data.get("event")
+            logger.info(f"🔔 Yookassa webhook {payment_id}: event={event}")
+            
             if main_bot is None:
                 logger.error("Main bot not set, cannot process yookassa webhook")
                 return web.json_response({"error": "main bot not ready"}, status=503)
 
-            # Управление транзакцией (передаём сессию в process_webhook)
             async with AsyncSessionLocal() as session:
                 async with session.begin():
                     success = await yookassa_service.process_webhook(data, session, main_bot)

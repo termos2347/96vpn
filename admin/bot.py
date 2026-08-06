@@ -1,3 +1,4 @@
+# admin/bot.py
 import asyncio
 import json
 import logging
@@ -11,7 +12,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, BufferedInputFile, Message, CallbackQuery
-from sqlalchemy import engine, func, select, text
+from sqlalchemy import func, select, text
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
 from db.base import AsyncSessionLocal, retry_db_operation, engine
@@ -29,12 +30,10 @@ main_bot: Bot = None
 
 error_log = []
 _broadcast_cancel_flags = {}
-
 _router_attached = False
 
 # ========== Вспомогательные функции ==========
 def log_error(message: str, notify_admin: bool = False):
-    """Логирует ошибку и сохраняет в список для команды /errors."""
     logger.error(message)
     error_log.append(message)
     if len(error_log) > 100:
@@ -43,7 +42,6 @@ def log_error(message: str, notify_admin: bool = False):
         asyncio.create_task(send_admin_alert(message))
 
 async def send_admin_alert(message: str):
-    """Отправляет уведомление администратору."""
     try:
         if admin_bot and settings.ADMIN_CHAT_ID:
             await admin_bot.send_message(
@@ -54,52 +52,59 @@ async def send_admin_alert(message: str):
     except TelegramAPIError as e:
         logger.error(f"Не удалось отправить уведомление админу: {e}")
 
-
 # ========== FSM для рассылки ==========
 class BroadcastStates(StatesGroup):
     confirm = State()
 
 # ========== Запуск и остановка ==========
 async def startup():
-    """Инициализация админ-бота."""
     global admin_bot, dp, _router_attached
 
-    if admin_bot is None:
-        admin_bot = Bot(token=settings.ADMIN_BOT_TOKEN)
-        logger.info("Admin bot instance created")
+    try:
+        if admin_bot is None:
+            admin_bot = Bot(token=settings.ADMIN_BOT_TOKEN)
+            if admin_bot is None:
+                raise RuntimeError("Failed to create admin bot instance")
 
-    if not _router_attached:
-        _router_attached = True
-        logger.info("Admin bot ready (no external routers)")
+        if not _router_attached:
+            _router_attached = True
 
-    await admin_bot.set_my_commands([
-        BotCommand(command="start", description="Запуск бота"),
-        BotCommand(command="menu", description="Показать все команды"),
-        BotCommand(command="health", description="Проверка состояния системы"),
-        BotCommand(command="errors", description="Последние ошибки"),
-        BotCommand(command="broadcast", description="Рассылка (ответьте на сообщение)"),
-        BotCommand(command="userinfo", description="Информация о пользователе (/userinfo id)"),
-        BotCommand(command="grant", description="Выдать подписку (/grant id days)"),
-        BotCommand(command="revoke", description="Отозвать подписку (/revoke id)"),
-        BotCommand(command="stats", description="Статистика по подпискам"),
-        BotCommand(command="yookassa_ips", description="Показать доверенные IP ЮKassa"),
-        BotCommand(command="set_yookassa_ips", description="Установить доверенные IP (JSON)"),
-    ])
+        # Устанавливаем команды
+        await admin_bot.set_my_commands([
+            BotCommand(command="start", description="Запуск бота"),
+            BotCommand(command="menu", description="Показать все команды"),
+            BotCommand(command="health", description="Проверка состояния системы"),
+            BotCommand(command="errors", description="Последние ошибки"),
+            BotCommand(command="broadcast", description="Рассылка (ответьте на сообщение)"),
+            BotCommand(command="userinfo", description="Информация о пользователе (/userinfo id)"),
+            BotCommand(command="grant", description="Выдать подписку (/grant id days)"),
+            BotCommand(command="revoke", description="Отозвать подписку (/revoke id)"),
+            BotCommand(command="stats", description="Статистика по подпискам"),
+            BotCommand(command="yookassa_ips", description="Показать доверенные IP ЮKassa"),
+            BotCommand(command="set_yookassa_ips", description="Установить доверенные IP (JSON)"),
+        ])
 
-    logger.info("Admin bot startup complete")
+        # Проверяем, что команды установились
+        commands = await admin_bot.get_my_commands()
+        if not commands:
+            raise RuntimeError("Failed to set admin bot commands (empty list returned)")
+
+        # Логируем только успех (без лишних деталей)
+        logger.info("✅ Admin bot initialized")
+
+    except Exception as e:
+        logger.error(f"❌ Admin bot startup failed: {e}")
+        raise
 
 async def shutdown():
-    """Завершение работы админ-бота."""
     global admin_bot, dp, _router_attached
     if admin_bot:
         try:
             await admin_bot.delete_webhook()
             await admin_bot.session.close()
-            logger.info("Admin bot session closed")
         except Exception as e:
             logger.error(f"Ошибка при завершении админ-бота: {e}")
     _router_attached = False
-    logger.info("Admin bot shutdown complete")
 
 # ========== Базовые команды ==========
 @dp.message(Command("start"))

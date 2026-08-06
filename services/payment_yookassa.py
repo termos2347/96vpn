@@ -90,175 +90,122 @@ class YookassaService:
     @retry_db_operation(max_retries=3)
     async def process_webhook(self, webhook_data: dict, session: AsyncSession, bot) -> bool:
         start_time = datetime.now(timezone.utc)
-        logger.info(f"🕒 [START] Начало обработки вебхука в {start_time}")
-        logger.info(f"📨 Получены данные вебхука: {webhook_data}")
+        
+        # === Извлекаем только критичные поля ===
+        obj = webhook_data.get("object", {})
+        payment_id = obj.get("id")
+        event = webhook_data.get("event")
+        amount_value = obj.get("amount", {}).get("value")
+        metadata = obj.get("metadata", {})
 
-        try:
-            event = webhook_data.get("event")
-            obj = webhook_data.get("object", {})
-            payment_id = obj.get("id")
-            logger.info(f"🔔 Событие: {event}, payment_id: {payment_id}")
+        logger.info(f"🔔 Webhook {payment_id}: event={event}, amount={amount_value} RUB")
 
-            if not payment_id or event != "payment.succeeded":
-                logger.info(f"⏭️ Вебхук проигнорирован: event={event}, payment_id={payment_id}")
-                return False
+        if event != "payment.succeeded" or not payment_id:
+            logger.info(f"⏭️ Webhook {payment_id}: ignored")
+            return False
 
-            # ---------- Шаг 1: Проверка дубликата в БД ----------
-            t0 = datetime.now(timezone.utc)
-            logger.info(f"🔍 Шаг 1: Проверка платежа {payment_id} в БД...")
-            stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
-            result = await session.execute(stmt)
-            db_payment = result.scalar_one_or_none()
-            logger.info(f"⏱️ [1] Проверка БД заняла {(datetime.now(timezone.utc) - t0).total_seconds():.2f}s, найдено: {db_payment is not None}")
+        # === 1. Проверка в БД ===
+        stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
+        db_payment = (await session.execute(stmt)).scalar_one_or_none()
+        if not db_payment:
+            logger.error(f"❌ Webhook {payment_id}: not found in DB")
+            await send_admin_alert(f"⚠️ Платёж {payment_id} не найден в БД")
+            return False
 
-            if not db_payment:
-                logger.error(f"❌ Платёж {payment_id} не найден в локальной БД.")
-                await send_admin_alert(f"⚠️ Платёж {payment_id} не найден в БД при вебхуке")
-                return False
-
-            if db_payment.status == "succeeded" or db_payment.is_paid:
-                logger.info(f"ℹ️ Платёж {payment_id} уже был обработан ранее.")
-                return True
-
-            # ---------- Шаг 2: Double-Check через API ЮKassa ----------
-            t1 = datetime.now(timezone.utc)
-            logger.info(f"🔍 Шаг 2: Double-check через API ЮKassa для платежа {payment_id}...")
-            loop = asyncio.get_running_loop()
-            try:
-                verified_payment = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
-                    timeout=3.0
-                )
-                logger.info(f"⏱️ [2] Double-check API занял {(datetime.now(timezone.utc) - t1).total_seconds():.2f}s")
-                logger.info(f"📊 Статус платежа из API: {verified_payment.status}")
-            except asyncio.TimeoutError:
-                logger.error(f"❌ Таймаут double-check для платежа {payment_id}")
-                await send_admin_alert(f"⏱️ Таймаут при проверке платежа {payment_id} через API ЮKassa")
-                if bot and db_payment:
-                    try:
-                        await bot.send_message(
-                            db_payment.telegram_id,
-                            "✅ Платёж получен, но идёт проверка. Если в течение 10 минут не придёт ключ, обратитесь в поддержку."
-                        )
-                    except Exception as e:
-                        logger.error(f"Не удалось отправить сообщение пользователю: {e}")
-                return False
-            except Exception as api_err:
-                logger.error(f"❌ Ошибка double-check: {api_err}", exc_info=True)
-                await send_admin_alert(f"❌ Ошибка проверки платежа {payment_id} через API: {api_err}")
-                return False
-
-            if verified_payment.status != "succeeded":
-                logger.warning(f"⚠️ Подозрение на мошенничество! Webhook сказал 'succeeded', а API вернул '{verified_payment.status}'")
-                return False
-
-            expected_amount = float(db_payment.amount)
-            actual_amount = float(verified_payment.amount.value)
-            logger.info(f"💰 Сравнение сумм: ожидалось {expected_amount}, получено {actual_amount}")
-            if abs(expected_amount - actual_amount) > 0.01 or verified_payment.amount.currency != "RUB":
-                logger.critical(f"🚨 ОБНАРУЖЕНО НЕСОВПАДЕНИЕ СУММЫ для платежа {payment_id}!")
-                await send_admin_alert(f"🚨 Попытка мошенничества: несовпадение суммы для платежа {payment_id}")
-                return False
-
-            # ---------- Шаг 3: Обновление статуса платежа ----------
-            t2 = datetime.now(timezone.utc)
-            logger.info(f"🔍 Шаг 3: Обновление статуса платежа {payment_id} в БД...")
-            db_payment.status = "succeeded"
-            db_payment.is_paid = True
-            db_payment.updated_at = datetime.now(timezone.utc)
-            session.add(db_payment)
-            logger.info(f"⏱️ [3] Обновление статуса заняло {(datetime.now(timezone.utc) - t2).total_seconds():.2f}s")
-
-            # ---------- Шаг 4: Активация подписки ----------
-            telegram_id = db_payment.telegram_id
-            metadata = verified_payment.metadata or {}
-            product_type = metadata.get("product_type")
-            period = metadata.get("period")
-            logger.info(f"🔍 Шаг 4: Активация подписки для пользователя {telegram_id}, продукт: {product_type}, период: {period}")
-
-            if not (product_type and period):
-                logger.warning(f"⚠️ Неполные метаданные в платеже {payment_id}: {metadata}")
-                await send_admin_alert(f"⚠️ Неполные метаданные в платеже {payment_id}: {metadata}")
-                return False
-
-            meta_tg = metadata.get("telegram_id")
-            if meta_tg is not None and int(meta_tg) != telegram_id:
-                logger.error(f"❌ Несовпадение Telegram ID: в БД {telegram_id}, в метаданных {meta_tg}")
-                await send_admin_alert(f"⚠️ Подозрительный платёж: ID в метаданных ({meta_tg}) не совпадает с БД ({telegram_id})")
-                return False
-
-            t3 = datetime.now(timezone.utc)
-            stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update(skip_locked=True)
-            user = (await session.execute(stmt_user)).scalar_one_or_none()
-            logger.info(f"👤 Пользователь {telegram_id} найден: {user is not None}")
-
-            success = await activate_subscription(
-                session, telegram_id, product_type, period, payment_id, user=user
-            )
-            logger.info(f"⏱️ [4] activate_subscription заняла {(datetime.now(timezone.utc) - t3).total_seconds():.2f}s, результат: {success}")
-
-            if not success:
-                logger.warning(f"⚠️ activate_subscription вернула False для пользователя {telegram_id}, платеж {payment_id}")
-                return False
-
-            logger.info(f"✅ Подписка успешно активирована для пользователя {telegram_id} через вебхук.")
-
-            # ---------- Шаг 5: Отправка сообщения пользователю ----------
-            if product_type == "vpn":
-                days = settings.PERIOD_DAYS.get(period, 0)
-                new_vpn_end = user.vpn_subscription_end if user else None
-                msg_text = Texts.payment_success_with_date(new_vpn_end, days, None)
-                logger.info(f"📤 Шаг 5: Отправка сообщения об успехе пользователю {telegram_id}")
-
-                t4 = datetime.now(timezone.utc)
-                if bot:
-                    try:
-                        await bot.send_message(telegram_id, msg_text, parse_mode="Markdown")
-                        logger.info(f"⏱️ [5] send_message заняла {(datetime.now(timezone.utc) - t4).total_seconds():.2f}s")
-                        logger.info(f"✅ Сообщение об успешной оплате отправлено пользователю {telegram_id}")
-                    except Exception as e:
-                        logger.error(f"❌ Не удалось отправить сообщение пользователю {telegram_id}: {e}", exc_info=True)
-                else:
-                    logger.error("❌ bot не передан в process_webhook, сообщение не отправлено")
-
-                # ---------- Шаг 6: Фоновое создание ключа ----------
-                logger.info(f"🔑 Шаг 6: Запуск фонового создания ключа для пользователя {telegram_id}")
-                async def create_key_background():
-                    try:
-                        logger.info(f"🔑 Фоновая задача: создание ключа для {telegram_id}...")
-                        vpn_manager = get_vpn_manager()
-                        if not vpn_manager:
-                            logger.error(f"❌ VPNManager не инициализирован для пользователя {telegram_id}")
-                            await send_admin_alert(f"❌ VPNManager не инициализирован для пользователя {telegram_id}")
-                            return
-                        link = await vpn_manager.get_or_create_link(telegram_id)
-                        if link and bot:
-                            try:
-                                await bot.send_message(
-                                    telegram_id,
-                                    f"🔗 Ваш ключ готов:\n`{link}`\n\nСкопируйте и вставьте в приложение.",
-                                    parse_mode="Markdown"
-                                )
-                                logger.info(f"✅ VPN-ключ отправлен пользователю {telegram_id} в фоне")
-                            except Exception as e:
-                                logger.error(f"❌ Не удалось отправить ключ пользователю {telegram_id}: {e}", exc_info=True)
-                        else:
-                            logger.warning(f"⚠️ Не удалось создать ключ для {telegram_id} в фоновой задаче (link={link})")
-                            await send_admin_alert(f"⚠️ Не удалось создать ключ для {telegram_id} в фоне")
-                    except Exception as e:
-                        logger.exception(f"❌ Ошибка в фоновом создании ключа для {telegram_id}: {e}")
-                        await send_admin_alert(f"❌ Ошибка создания ключа в фоне для {telegram_id}: {e}")
-
-                asyncio.create_task(create_key_background())
-
-            total_time = (datetime.now(timezone.utc) - start_time).total_seconds()
-            logger.info(f"✅ Вебхук полностью обработан за {total_time:.2f}s")
+        if db_payment.is_paid:
+            logger.info(f"ℹ️ Webhook {payment_id}: already processed")
             return True
 
+        # === 2. Double-check через API ЮKassa (только статус и сумма) ===
+        loop = asyncio.get_running_loop()
+        try:
+            verified = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
+                timeout=3.0
+            )
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка в process_webhook: {e}", exc_info=True)
-            await send_admin_alert(f"❌ Критическая ошибка в process_webhook: {e}")
+            logger.error(f"❌ Webhook {payment_id}: double-check failed: {e}")
+            if bot and db_payment:
+                await bot.send_message(
+                    db_payment.telegram_id,
+                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ не придёт – напишите в поддержку."
+                )
             return False
+
+        if verified.status != "succeeded":
+            logger.warning(f"⚠️ Webhook {payment_id}: status mismatch (API={verified.status})")
+            return False
+
+        # Сверяем сумму (обязательно)
+        if abs(float(db_payment.amount) - float(verified.amount.value)) > 0.01:
+            logger.critical(f"🚨 Webhook {payment_id}: amount mismatch!")
+            await send_admin_alert(f"🚨 Несовпадение суммы для платежа {payment_id}")
+            return False
+
+        # === 3. Извлекаем метаданные (только то, что нужно) ===
+        telegram_id = db_payment.telegram_id
+        product_type = metadata.get("product_type")
+        period = metadata.get("period")
+
+        if not product_type or not period:
+            logger.warning(f"⚠️ Webhook {payment_id}: missing metadata")
+            await send_admin_alert(f"⚠️ Неполные метаданные в платеже {payment_id}")
+            return False
+
+        # Проверяем, что telegram_id в метаданных совпадает с БД (защита от подмены)
+        if str(telegram_id) != metadata.get("telegram_id"):
+            logger.error(f"❌ Webhook {payment_id}: telegram_id mismatch")
+            await send_admin_alert(f"⚠️ Подозрительный платёж: ID не совпадает")
+            return False
+
+        # === 4. Обновляем статус платежа ===
+        db_payment.status = "succeeded"
+        db_payment.is_paid = True
+        db_payment.updated_at = datetime.now(timezone.utc)
+        session.add(db_payment)
+
+        # === 5. Активируем подписку ===
+        stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update(skip_locked=True)
+        user = (await session.execute(stmt_user)).scalar_one_or_none()
+
+        success = await activate_subscription(
+            session, telegram_id, product_type, period, payment_id, user=user
+        )
+        if not success:
+            logger.warning(f"⚠️ Webhook {payment_id}: activation failed")
+            return False
+
+        logger.info(f"✅ Webhook {payment_id}: subscription activated for {telegram_id}")
+
+        # === 6. Отправка сообщения и фоновое создание ключа (только для VPN) ===
+        if product_type == "vpn" and bot:
+            days = settings.PERIOD_DAYS.get(period, 0)
+            msg = Texts.payment_success_with_date(user.vpn_subscription_end, days, None)
+            await bot.send_message(telegram_id, msg, parse_mode="Markdown")
+
+            # Фоновая задача
+            async def create_key():
+                try:
+                    vpn_manager = get_vpn_manager()
+                    if vpn_manager:
+                        link = await vpn_manager.get_or_create_link(telegram_id)
+                        if link:
+                            await bot.send_message(
+                                telegram_id,
+                                f"🔗 Ваш ключ:\n`{link}`",
+                                parse_mode="Markdown"
+                            )
+                            logger.info(f"✅ Webhook {payment_id}: key sent")
+                except Exception as e:
+                    logger.error(f"❌ Webhook {payment_id}: key creation error: {e}")
+                    await send_admin_alert(f"❌ Ошибка создания ключа для {telegram_id}: {e}")
+
+            asyncio.create_task(create_key())
+
+        # === 7. Итог ===
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+        logger.info(f"✅ Webhook {payment_id}: done in {elapsed:.2f}s")
+        return True
 
 
 yookassa_service = YookassaService()

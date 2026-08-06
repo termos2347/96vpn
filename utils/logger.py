@@ -4,7 +4,7 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from config import settings
 
-# Псевдонимы для понятных названий модулей (можно использовать полные имена)
+# Псевдонимы для понятных названий модулей
 MODULE_ALIASES = {
     '__main__': 'MAIN',
     'asyncio': 'ASYNCIO',
@@ -15,7 +15,7 @@ MODULE_ALIASES = {
     'aiohttp.internal': 'AIOHTTP',
     'sqlalchemy.engine': 'SQLALCHEMY',
     'alembic': 'ALEMBIC',
-    'handlers.common': 'HANDLERS',
+    'handlers.common': 'COMMON',
     'handlers.payment': 'PAYMENT',
     'handlers.ui': 'UI',
     'admin.bot': 'ADMIN',
@@ -40,7 +40,6 @@ def get_module_name(name: str) -> str:
     alias = MODULE_ALIASES.get(name)
     if alias:
         return alias
-    # Если нет в словаре – берём последнюю часть имени, без обрезания
     parts = name.split('.')
     return parts[-1] if parts else name
 
