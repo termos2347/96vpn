@@ -1,12 +1,11 @@
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import BotUser, BotPayment
 from config import settings
+from db.models import BotPayment, BotUser
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +13,8 @@ logger = logging.getLogger(__name__)
 async def get_or_create_bot_user(
     session: AsyncSession,
     telegram_id: int,
-    username: Optional[str] = None,
-    email: Optional[str] = None,
+    username: str | None = None,
+    email: str | None = None,
 ) -> BotUser:
     stmt = select(BotUser).where(BotUser.telegram_id == telegram_id)
     result = await session.execute(stmt)
@@ -44,8 +43,8 @@ async def activate_subscription(
     telegram_id: int,
     product_type: str,
     period: str,
-    payment_id: Optional[str] = None,
-    user: Optional[BotUser] = None,
+    payment_id: str | None = None,
+    user: BotUser | None = None,
 ) -> bool:
     if product_type not in ("vpn", "bypass"):
         logger.error(f"Invalid product_type: {product_type}")
@@ -114,13 +113,17 @@ async def create_payment_record(
     return payment
 
 
-async def get_payment_by_id(session: AsyncSession, payment_id: str) -> Optional[BotPayment]:
+async def get_payment_by_id(
+    session: AsyncSession, payment_id: str
+) -> BotPayment | None:
     stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 
-async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Optional[BotUser]:
+async def get_user_by_telegram_id(
+    session: AsyncSession, telegram_id: int
+) -> BotUser | None:
     stmt = select(BotUser).where(BotUser.telegram_id == telegram_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -176,6 +179,7 @@ async def get_active_users_without_client(session: AsyncSession) -> list[BotUser
 
 # ---- ДОБАВЛЕННЫЕ ФУНКЦИИ ДЛЯ СОВМЕСТИМОСТИ ----
 
+
 async def update_vpn_subscription(
     session: AsyncSession,
     telegram_id: int,
@@ -218,7 +222,7 @@ async def update_bypass_subscription(
     return True
 
 
-async def get_user_full_data(session: AsyncSession, telegram_id: int) -> Optional[dict]:
+async def get_user_full_data(session: AsyncSession, telegram_id: int) -> dict | None:
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
         return None

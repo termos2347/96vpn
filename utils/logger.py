@@ -1,59 +1,62 @@
 import logging
 import sys
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
 from config import settings
 
 # Псевдонимы для модулей
 MODULE_ALIASES = {
-    '__main__': 'MAIN',
-    'asyncio': 'ASYNCIO',
-    'urllib3.connectionpool': 'CONNECTION',
-    'charset_normalizer': 'CHARSET',
-    'aiogram.event': 'AIOGRAM',
-    'aiohttp.access': 'AIOHTTP',
-    'aiohttp.internal': 'AIOHTTP',
-    'sqlalchemy.engine': 'SQLALCHEMY',
-    'alembic': 'ALEMBIC',
-    'handlers.common': 'COMMON',
-    'handlers.payment': 'PAYMENT',
-    'handlers.ui': 'UI',
-    'admin.bot': 'ADMIN',
-    'services.vpn_provider': 'VPN_PROV',
-    'services.vpn_manager': 'VPN_MGR',
-    'services.scheduler': 'SCHED',
-    'services.payment_yookassa': 'YOOKASSA',
-    'services.redis_service': 'REDIS',
-    'db.base': 'DATABASE',
-    'db.crud': 'CRUD',
-    'db.models': 'MODELS',
-    'internal_api': 'API',
-    'utils.logger': 'LOGGER',
-    'utils.decorators': 'DECOR',
-    'utils.validators': 'VALID',
-    'utils.encryption': 'CRYPTO',
-    'utils.cache': 'CACHE',
+    "__main__": "MAIN",
+    "asyncio": "ASYNCIO",
+    "urllib3.connectionpool": "CONNECTION",
+    "charset_normalizer": "CHARSET",
+    "aiogram.event": "AIOGRAM",
+    "aiohttp.access": "AIOHTTP",
+    "aiohttp.internal": "AIOHTTP",
+    "sqlalchemy.engine": "SQLALCHEMY",
+    "alembic": "ALEMBIC",
+    "handlers.common": "COMMON",
+    "handlers.payment": "PAYMENT",
+    "handlers.ui": "UI",
+    "admin.bot": "ADMIN",
+    "services.vpn_provider": "VPN_PROV",
+    "services.vpn_manager": "VPN_MGR",
+    "services.scheduler": "SCHED",
+    "services.payment_yookassa": "YOOKASSA",
+    "services.redis_service": "REDIS",
+    "db.base": "DATABASE",
+    "db.crud": "CRUD",
+    "db.models": "MODELS",
+    "internal_api": "API",
+    "utils.logger": "LOGGER",
+    "utils.decorators": "DECOR",
+    "utils.validators": "VALID",
+    "utils.encryption": "CRYPTO",
+    "utils.cache": "CACHE",
 }
 
-LOG_FORMAT = '%(asctime)s | %(level_short)s | %(module_name)s: %(message)s'
-LOG_DATE_FORMAT = '%Y.%m.%d %H:%M:%S'
+LOG_FORMAT = "%(asctime)s | %(level_short)s | %(module_name)s: %(message)s"
+LOG_DATE_FORMAT = "%Y.%m.%d %H:%M:%S"
+
 
 def get_module_name(name: str) -> str:
     alias = MODULE_ALIASES.get(name)
     if alias:
         return alias
-    parts = name.split('.')
+    parts = name.split(".")
     return parts[-1] if parts else name
 
 
 class CompactFormatter(logging.Formatter):
     """Базовый форматтер для файла (без цветов)."""
+
     LEVEL_MAP = {
-        'DEBUG': 'D',
-        'INFO': 'I',
-        'WARNING': 'W',
-        'ERROR': 'E',
-        'CRITICAL': 'C'
+        "DEBUG": "D",
+        "INFO": "I",
+        "WARNING": "W",
+        "ERROR": "E",
+        "CRITICAL": "C",
     }
 
     def __init__(self):
@@ -67,20 +70,21 @@ class CompactFormatter(logging.Formatter):
 
 class ColoredFormatter(CompactFormatter):
     """Цветной форматтер для консоли."""
+
     COLORS = {
-        'DEBUG': '\033[94m',    # Синий
-        'INFO': '\033[92m',     # Зелёный
-        'WARNING': '\033[93m',  # Жёлтый
-        'ERROR': '\033[91m',    # Красный
-        'CRITICAL': '\033[95m'  # Пурпурный
+        "DEBUG": "\033[94m",  # Синий
+        "INFO": "\033[92m",  # Зелёный
+        "WARNING": "\033[93m",  # Жёлтый
+        "ERROR": "\033[91m",  # Красный
+        "CRITICAL": "\033[95m",  # Пурпурный
     }
-    BOLD = '\033[1m'
-    RESET = '\033[0m'
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
 
     def format(self, record):
         levelname = record.levelname
         letter = self.LEVEL_MAP.get(levelname, levelname[0])
-        color = self.COLORS.get(levelname, '')
+        color = self.COLORS.get(levelname, "")
         # Жирная цветная буква
         colored_letter = f"{self.BOLD}{color}{letter}{self.RESET}"
         record.level_short = colored_letter
@@ -102,7 +106,7 @@ def setup_logger():
         log_file,
         maxBytes=settings.LOG_MAX_BYTES,
         backupCount=settings.LOG_BACKUP_COUNT,
-        encoding='utf-8'
+        encoding="utf-8",
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(CompactFormatter())
@@ -115,5 +119,7 @@ def setup_logger():
     root.addHandler(console)
     root.addHandler(file_handler)
 
-    logging.info("Логирование настроено: консоль (%s), файл (INFO)",
-                 "DEBUG" if settings.DEBUG else "WARNING+")
+    logging.info(
+        "Логирование настроено: консоль (%s), файл (INFO)",
+        "DEBUG" if settings.DEBUG else "WARNING+",
+    )

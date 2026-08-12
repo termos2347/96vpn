@@ -1,14 +1,16 @@
 # services/redis_service.py
 import logging
-from typing import Optional
+
 import redis.asyncio as redis
+
 from config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class RedisService:
     _instance = None
-    _client: Optional[redis.Redis] = None
+    _client: redis.Redis | None = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -30,7 +32,7 @@ class RedisService:
                     url,
                     decode_responses=True,
                     socket_connect_timeout=3,
-                    socket_timeout=3
+                    socket_timeout=3,
                 )
                 # Маскируем пароль для лога
                 display_url = url.split("@")[-1] if "@" in url else url
@@ -51,7 +53,7 @@ class RedisService:
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e}")
             self._client = None
-        
+
     async def close(self):
         if self._client:
             await self._client.close()
@@ -75,7 +77,7 @@ class RedisService:
             logger.error(f"Redis set_cache error: {e}")
             return False
 
-    async def get_cache(self, key: str) -> Optional[str]:
+    async def get_cache(self, key: str) -> str | None:
         if self._client is None:
             return None
         try:
@@ -116,5 +118,6 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis clear_rate_limit error: {e}")
             return False
+
 
 redis_service = RedisService()

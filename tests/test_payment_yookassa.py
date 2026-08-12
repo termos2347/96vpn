@@ -1,10 +1,13 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from services.payment_yookassa import YookassaService
+
 
 @pytest.mark.asyncio
 async def test_create_payment_success():
-    with patch('services.payment_yookassa.Payment.create') as mock_create:
+    with patch("services.payment_yookassa.Payment.create") as mock_create:
         mock_payment = MagicMock()
         mock_payment.id = "pay_123"
         mock_payment.status = "pending"

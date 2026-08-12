@@ -1,11 +1,15 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from aiogram.types import Message
-from utils.decorators import rate_limit, _user_actions
+
+from utils.decorators import _user_actions, rate_limit
+
 
 @pytest.fixture(autouse=True)
 def clear_rate_limits():
     _user_actions.clear()
+
 
 def make_message(user_id: int, username: str = "test"):
     msg = MagicMock()
@@ -15,6 +19,7 @@ def make_message(user_id: int, username: str = "test"):
     msg.from_user.username = username
     msg.answer = AsyncMock()
     return msg
+
 
 @pytest.mark.asyncio
 async def test_rate_limit_allows_first_call():
@@ -29,6 +34,7 @@ async def test_rate_limit_allows_first_call():
     await handler(message)
     assert called is True
 
+
 @pytest.mark.asyncio
 async def test_rate_limit_blocks_excessive_calls():
     message = make_message(456, "spammer")
@@ -41,6 +47,7 @@ async def test_rate_limit_blocks_excessive_calls():
     await handler(message)
     result = await handler(message)
     assert result is None
+
 
 @pytest.mark.asyncio
 async def test_rate_limit_resets_after_window():

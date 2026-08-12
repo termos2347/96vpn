@@ -1,17 +1,19 @@
-import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+
+import pytest
 from aiogram import Bot
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
 from db.models import Base
-from db.models import BotUser, BotPayment
-from services.vpn_manager import VPNManager
 from services.vpn_provider import XUIVPNProvider
+
 
 @pytest.fixture(scope="session")
 def event_loop():
     return asyncio.get_event_loop()
+
 
 @pytest.fixture(scope="function")
 async def test_engine():
@@ -21,15 +23,19 @@ async def test_engine():
     yield engine
     await engine.dispose()
 
+
 @pytest.fixture(scope="function")
 async def test_session(test_engine):
-    async_session = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with async_session() as session:
         yield session
 
+
 @pytest.fixture
 def mock_yookassa_payment():
-    with patch('services.payment_yookassa.Payment') as mock_payment_class:
+    with patch("services.payment_yookassa.Payment") as mock_payment_class:
         mock_create = MagicMock()
         mock_find = MagicMock()
         payment_mock = MagicMock()
@@ -44,6 +50,7 @@ def mock_yookassa_payment():
         mock_payment_class.find_one = mock_find
         yield mock_payment_class
 
+
 @pytest.fixture
 def mock_bot():
     bot = AsyncMock(spec=Bot)
@@ -54,13 +61,24 @@ def mock_bot():
     bot.send_animation = AsyncMock()
     return bot
 
+
 @pytest.fixture
 def mock_vpn_provider():
     provider = AsyncMock(spec=XUIVPNProvider)
     provider.login = AsyncMock(return_value=True)
-    provider.create_client = AsyncMock(return_value={"uuid": "test-uuid", "subId": "test-sub"})
+    provider.create_client = AsyncMock(
+        return_value={"uuid": "test-uuid", "subId": "test-sub"}
+    )
     provider.revoke_client = AsyncMock(return_value=True)
-    provider.get_client_by_uuid = AsyncMock(return_value={"uuid": "test-uuid", "subId": "test-sub", "email": "test@example.com"})
-    provider.get_subscription_link = MagicMock(return_value="https://test.com/sub/test-sub")
+    provider.get_client_by_uuid = AsyncMock(
+        return_value={
+            "uuid": "test-uuid",
+            "subId": "test-sub",
+            "email": "test@example.com",
+        }
+    )
+    provider.get_subscription_link = MagicMock(
+        return_value="https://test.com/sub/test-sub"
+    )
     provider._is_authenticated = True
     return provider

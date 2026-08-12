@@ -1,11 +1,11 @@
 import asyncio
 import logging
-from typing import Any, Callable, TypeVar, Awaitable
+from collections.abc import Awaitable, Callable
 from functools import wraps
+from typing import TypeVar
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
 
 from config import DATABASE_URL
 
@@ -21,16 +21,17 @@ engine = create_async_engine(
     pool_recycle=300,
     connect_args={
         "server_settings": {
-            "statement_timeout": "30s",   # 30 секунд на выполнение запроса
-            "lock_timeout": "15s"         # 15 секунд на ожидание блокировки
+            "statement_timeout": "30s",  # 30 секунд на выполнение запроса
+            "lock_timeout": "15s",  # 15 секунд на ожидание блокировки
         }
-    }
+    },
 )
 
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # ---------- Декоратор повторных попыток ----------
-T = TypeVar('T')
+T = TypeVar("T")
+
 
 def retry_db_operation(max_retries=3, delay=1, backoff=2):
     def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
@@ -44,14 +45,17 @@ def retry_db_operation(max_retries=3, delay=1, backoff=2):
                     last_exception = e
                     logger.warning(
                         f"DB operation {func.__name__} failed "
-                        f"(attempt {attempt+1}/{max_retries}): {e}"
+                        f"(attempt {attempt + 1}/{max_retries}): {e}"
                     )
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(delay * (backoff ** attempt))
+                        await asyncio.sleep(delay * (backoff**attempt))
             logger.error(f"All {max_retries} retries failed for {func.__name__}")
             raise last_exception
+
         return wrapper
+
     return decorator
+
 
 async def close_db():
     await engine.dispose()

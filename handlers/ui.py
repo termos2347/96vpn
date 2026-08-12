@@ -3,8 +3,16 @@
 Единый модуль интерфейса бота.
 Содержит все тексты сообщений и функции генерации клавиатур.
 """
+
 from datetime import datetime, timezone
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+
 from config import settings
 
 
@@ -84,12 +92,16 @@ class Texts:
         return "❌ У вас нет активной подписки. Оформите её в разделе «🚀 Оплатить подписку»."
 
     @staticmethod
-    def payment_success_with_date(vpn_end: datetime | None, days: int, link: str | None = None) -> str:
+    def payment_success_with_date(
+        vpn_end: datetime | None, days: int, link: str | None = None
+    ) -> str:
         """Сообщение об успешной оплате с указанием даты окончания."""
         now = datetime.now(timezone.utc)
         if vpn_end and vpn_end > now:
-            date_str = vpn_end.strftime('%d.%m.%Y')
-            msg = f"✅ Ваша подписка **продлена** до **{date_str}** (на {days} дней).\n\n"
+            date_str = vpn_end.strftime("%d.%m.%Y")
+            msg = (
+                f"✅ Ваша подписка **продлена** до **{date_str}** (на {days} дней).\n\n"
+            )
         else:
             msg = f"✅ Ваша подписка активирована на {days} дней.\n\n"
         if link:
@@ -131,7 +143,7 @@ class Keyboards:
         buttons = [
             [KeyboardButton(text="🚀 Оплатить подписку")],
             [KeyboardButton(text="🔑 Мои Ключи")],
-            [KeyboardButton(text="ℹ️ Инструкция и Поддержка")]
+            [KeyboardButton(text="ℹ️ Инструкция и Поддержка")],
         ]
         return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -140,8 +152,16 @@ class Keyboards:
         """Выбор валюты."""
         buttons = [
             [InlineKeyboardButton(text="🇷🇺 Рубли (RUB)", callback_data="currency_rub")],
-            [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="currency_stars")],
-            [InlineKeyboardButton(text="₿ USDT (TRC20)", callback_data="currency_usdt")]
+            [
+                InlineKeyboardButton(
+                    text="⭐ Telegram Stars", callback_data="currency_stars"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="₿ USDT (TRC20)", callback_data="currency_usdt"
+                )
+            ],
         ]
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -154,14 +174,22 @@ class Keyboards:
             label = f"{period_to_text(period)} — {price:.0f} {currency.upper()}"
             callback = f"tariff_{period}_{currency}"
             buttons.append([InlineKeyboardButton(text=label, callback_data=callback)])
-        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_currencies")])
+        buttons.append(
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_currencies")]
+        )
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
     @staticmethod
     def back_to_main_inline() -> InlineKeyboardMarkup:
         """Простая кнопка «Назад» в главное меню."""
         return InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main")]]
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Главное меню", callback_data="back_to_main"
+                    )
+                ]
+            ]
         )
 
     @staticmethod

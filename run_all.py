@@ -3,44 +3,48 @@ import asyncio
 import logging
 import signal
 import sys
-import traceback
-from aiohttp import web
-from aiogram import Bot, Dispatcher
-from sqlalchemy import text
 
-from config import TOKEN, settings
-from handlers import router as main_router
-from handlers.common import setup_bot_commands
-from services.scheduler import start_scheduler
-from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
-from services.vpn_provider import XUIVPNProvider
-from services.redis_service import redis_service
-from db.base import engine
-from internal_api import create_internal_app
-import admin.bot
-from utils.logger import setup_logger
+from aiogram import Bot, Dispatcher
+from aiohttp import web
 
 # Проверка миграций
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import text
+
+import admin.bot
+from config import TOKEN, settings
+from db.base import engine
+from handlers import router as main_router
+from handlers.common import setup_bot_commands
+from internal_api import create_internal_app
+from services.redis_service import redis_service
+from services.scheduler import start_scheduler
+from services.vpn_manager import VPNManager, get_vpn_manager, set_vpn_manager
+from services.vpn_provider import XUIVPNProvider
+from utils.logger import setup_logger
 
 try:
     from pyfiglet import Figlet
+
     HAS_PYFIGLET = True
 except ImportError:
     HAS_PYFIGLET = False
 
+
 def handle_asyncio_exception(loop, context):
     logger = logging.getLogger(__name__)
     logger.error(f"Asyncio exception: {context.get('message')}")
-    exception = context.get('exception')
+    exception = context.get("exception")
     if exception:
         logger.exception("Exception details", exc_info=exception)
         error_text = f"Asyncio exception: {exception}"
     else:
         error_text = f"Asyncio exception: {context.get('message')}"
     from admin.bot import log_error
+
     log_error(error_text, notify_admin=True)
+
 
 setup_logger()
 logger = logging.getLogger(__name__)
@@ -60,7 +64,9 @@ async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
             logger.info(" ✅ Database ready")
             return True
         except Exception as e:
-            logger.warning(f" DB connection attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning(
+                f" DB connection attempt {attempt}/{max_retries} failed: {e}"
+            )
             if attempt == max_retries:
                 raise
             await asyncio.sleep(delay)
@@ -75,12 +81,16 @@ async def check_migrations() -> None:
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
     if head_rev is None:
-        logger.error("❌ No migration revisions found. Please run 'alembic upgrade head'.")
+        logger.error(
+            "❌ No migration revisions found. Please run 'alembic upgrade head'."
+        )
         raise RuntimeError("No Alembic revisions")
     async with engine.connect() as conn:
         result = await conn.execute(text("SELECT to_regclass('alembic_version')"))
         if result.scalar() is None:
-            logger.error("❌ Table 'alembic_version' does not exist. Database not initialized with migrations.")
+            logger.error(
+                "❌ Table 'alembic_version' does not exist. Database not initialized with migrations."
+            )
             raise RuntimeError("Database not migrated. Run 'alembic upgrade head'.")
         result = await conn.execute(text("SELECT version_num FROM alembic_version"))
         row = result.fetchone()
@@ -89,13 +99,16 @@ async def check_migrations() -> None:
             raise RuntimeError("Alembic version missing")
         current_rev = row[0]
     if current_rev != head_rev:
-        logger.error(f"❌ Database revision mismatch! Current: {current_rev}, Expected (head): {head_rev}.")
+        logger.error(
+            f"❌ Database revision mismatch! Current: {current_rev}, Expected (head): {head_rev}."
+        )
         raise RuntimeError("Migration mismatch")
     logger.info(" ✅ Migrations up-to-date")
 
 
-async def set_webhook_with_retry(bot: Bot, url: str, secret_token: str,
-                                 max_retries: int = 5, base_delay: float = 1.0) -> bool:
+async def set_webhook_with_retry(
+    bot: Bot, url: str, secret_token: str, max_retries: int = 5, base_delay: float = 1.0
+) -> bool:
     for attempt in range(1, max_retries + 1):
         try:
             logger.info(f" Setting webhook {url} (attempt {attempt}/{max_retries})...")
@@ -145,7 +158,7 @@ async def on_startup():
             base_url=settings.XUI_MASTER_URL,
             api_token=settings.XUI_API_TOKEN,
             inbound_id=settings.XUI_INBOUND_ID,
-            sub_port=settings.XUI_SUB_PORT
+            sub_port=settings.XUI_SUB_PORT,
         )
         vpn_manager = VPNManager(provider)
         set_vpn_manager(vpn_manager)
@@ -180,7 +193,7 @@ async def on_startup():
             main_bot=main_bot,
             main_dp=main_dp,
             admin_bot=admin.bot.admin_bot,
-            admin_dp=admin.bot.dp
+            admin_dp=admin.bot.dp,
         )
         internal_runner = web.AppRunner(internal_app)
         await internal_runner.setup()
@@ -188,10 +201,12 @@ async def on_startup():
             internal_runner,
             host=settings.INTERNAL_API_HOST,
             port=settings.INTERNAL_API_PORT,
-            reuse_address=True
+            reuse_address=True,
         )
         await site.start()
-        logger.info(f" ✅ Internal API ready (http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT})")
+        logger.info(
+            f" ✅ Internal API ready (http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT})"
+        )
     except Exception as e:
         logger.error(f" ❌ Internal API error: {e}")
         raise
@@ -201,9 +216,15 @@ async def on_startup():
         await main_bot.delete_webhook()
         await admin.bot.admin_bot.delete_webhook()
 
-        if not await set_webhook_with_retry(main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET):
+        if not await set_webhook_with_retry(
+            main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET
+        ):
             raise RuntimeError("Main webhook setup failed")
-        if not await set_webhook_with_retry(admin.bot.admin_bot, settings.ADMIN_WEBHOOK_URL, settings.ADMIN_WEBHOOK_SECRET):
+        if not await set_webhook_with_retry(
+            admin.bot.admin_bot,
+            settings.ADMIN_WEBHOOK_URL,
+            settings.ADMIN_WEBHOOK_SECRET,
+        ):
             raise RuntimeError("Admin webhook setup failed")
         logger.info(" ✅ Webhooks configured")
     except Exception as e:
@@ -225,10 +246,10 @@ async def on_startup():
 
     if HAS_PYFIGLET:
         try:
-            f = Figlet(font='slant')
-            ascii_art = f.renderText('96VPN BOT')
+            f = Figlet(font="slant")
+            ascii_art = f.renderText("96VPN BOT")
             print("\n" + ascii_art)
-        except Exception as e:          # FIX: логируем ошибку рендера ASCII
+        except Exception as e:  # FIX: логируем ошибку рендера ASCII
             logger.warning(f"Failed to render ASCII art: {e}")
     else:
         print("\n" + "=" * 50)
@@ -249,13 +270,15 @@ async def on_shutdown():
             if not task.done():
                 task.cancel()
         try:
-            await asyncio.wait_for(asyncio.gather(*_background_tasks, return_exceptions=True), timeout=5.0)
+            await asyncio.wait_for(
+                asyncio.gather(*_background_tasks, return_exceptions=True), timeout=5.0
+            )
         except asyncio.TimeoutError:
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
     vpn_manager = get_vpn_manager()
-    if vpn_manager and hasattr(vpn_manager, 'provider'):
+    if vpn_manager and hasattr(vpn_manager, "provider"):
         try:
             await vpn_manager.provider.close()
         except Exception as e:
@@ -264,21 +287,21 @@ async def on_shutdown():
     if main_bot:
         try:
             await main_bot.delete_webhook()
-        except Exception as e:          # FIX: логируем ошибку удаления вебхука
+        except Exception as e:  # FIX: логируем ошибку удаления вебхука
             logger.warning(f"Error deleting main webhook: {e}")
         try:
             await main_bot.session.close()
-        except Exception as e:          # FIX: логируем ошибку закрытия сессии
+        except Exception as e:  # FIX: логируем ошибку закрытия сессии
             logger.warning(f"Error closing main bot session: {e}")
 
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
-        except Exception as e:          # FIX: логируем
+        except Exception as e:  # FIX: логируем
             logger.warning(f"Error deleting admin webhook: {e}")
         try:
             await admin.bot.admin_bot.session.close()
-        except Exception as e:          # FIX: логируем
+        except Exception as e:  # FIX: логируем
             logger.warning(f"Error closing admin bot session: {e}")
 
     await admin.bot.shutdown()
@@ -286,7 +309,7 @@ async def on_shutdown():
     if internal_runner:
         try:
             await internal_runner.cleanup()
-        except Exception as e:          # FIX: логируем
+        except Exception as e:  # FIX: логируем
             logger.warning(f"Error cleaning up internal runner: {e}")
 
     try:
@@ -344,6 +367,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Shutdown by user (KeyboardInterrupt)")
-    except Exception as e:
+    except Exception:
         logger.exception("Fatal error")
         sys.exit(1)

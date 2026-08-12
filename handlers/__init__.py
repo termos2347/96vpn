@@ -1,14 +1,15 @@
 # handlers/__init__.py
 import logging
+
 from aiogram import Router
+
+from config import settings
+from services.vpn_manager import VPNManager, get_vpn_manager, set_vpn_manager
+from services.vpn_provider import XUIVPNProvider
 
 from .common import router as common_router
 from .payment import router as payment_router
 from .ui import Keyboards
-
-from services.vpn_provider import XUIVPNProvider
-from services.vpn_manager import VPNManager, set_vpn_manager, get_vpn_manager
-from config import settings
 
 logger = logging.getLogger(__name__)
 

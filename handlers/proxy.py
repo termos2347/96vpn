@@ -1,6 +1,7 @@
-from aiogram import Router, F, types
+from aiogram import F, Router, types
 
 router = Router()
+
 
 @router.message(F.text == "🆓 Прокси")
 async def free_proxy(message: types.Message):
@@ -10,5 +11,5 @@ async def free_proxy(message: types.Message):
         f"🆓 Бесплатный MTProto прокси для Telegram:\n"
         f"`{proxy_link}`\n\n"
         f"Нажмите на ссылку — Telegram сам предложит подключиться.",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
     )

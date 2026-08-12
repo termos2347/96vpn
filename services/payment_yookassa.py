@@ -1,31 +1,29 @@
 # services/payment_yookassa.py
-import hashlib
 import asyncio
 import logging
-import aiohttp
 import uuid
-from typing import Optional, Dict, Any
-from yookassa import Configuration, Payment
-from yookassa.domain.exceptions import ApiError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from config import settings
 from datetime import datetime, timezone
-from db.crud import activate_subscription
-from db.models import BotPayment, BotUser
+from typing import Any
+
+import aiohttp
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from aiogram.exceptions import (
-    TelegramForbiddenError,
-    TelegramRetryAfter,
-    TelegramNetworkError,
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
 )
-from aiohttp import ClientError
+from yookassa import Configuration, Payment
+from yookassa.domain.exceptions import ApiError
 
-from services.vpn_manager import get_vpn_manager
 from admin import send_admin_alert
+from config import settings
 from db.base import retry_db_operation
+from db.crud import activate_subscription
+from db.models import BotPayment, BotUser
 from handlers.ui import Texts
+from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +37,16 @@ class YookassaService:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((ApiError, aiohttp.ClientError, asyncio.TimeoutError))
+        retry=retry_if_exception_type(
+            (ApiError, aiohttp.ClientError, asyncio.TimeoutError)
+        ),
     )
     async def create_payment(
-        self,
-        amount: float,
-        description: str,
-        metadata: dict
-    ) -> Optional[Dict[str, Any]]:
-        logger.info(f"💳 Создание платежа: amount={amount}, description={description}, metadata={metadata}")
+        self, amount: float, description: str, metadata: dict
+    ) -> dict[str, Any] | None:
+        logger.info(
+            f"💳 Создание платежа: amount={amount}, description={description}, metadata={metadata}"
+        )
         try:
             return_url = settings.YOOKASSA_RETURN_URL
             if not return_url:
@@ -55,29 +54,37 @@ class YookassaService:
                 return None
 
             idempotency_key = str(uuid.uuid4())
-            
+
             loop = asyncio.get_running_loop()
             payment = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
-                    lambda: Payment.create({
-                        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
-                        "confirmation": {"type": "redirect", "return_url": return_url},
-                        "capture": True,
-                        "description": description,
-                        "metadata": metadata
-                    }, idempotency_key)
+                    lambda: Payment.create(
+                        {
+                            "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+                            "confirmation": {
+                                "type": "redirect",
+                                "return_url": return_url,
+                            },
+                            "capture": True,
+                            "description": description,
+                            "metadata": metadata,
+                        },
+                        idempotency_key,
+                    ),
                 ),
-                timeout=10.0
+                timeout=10.0,
             )
-            
-            logger.info(f"✅ Платёж создан: id={payment.id}, status={payment.status}, confirmation_url={payment.confirmation.confirmation_url}")
-            
+
+            logger.info(
+                f"✅ Платёж создан: id={payment.id}, status={payment.status}, confirmation_url={payment.confirmation.confirmation_url}"
+            )
+
             return {
                 "payment_id": payment.id,
                 "status": payment.status,
                 "confirmation_url": payment.confirmation.confirmation_url,
-                "amount": payment.amount.value
+                "amount": payment.amount.value,
             }
 
         except asyncio.TimeoutError:
@@ -88,9 +95,11 @@ class YookassaService:
             return None
 
     @retry_db_operation(max_retries=3)
-    async def process_webhook(self, webhook_data: dict, session: AsyncSession, bot) -> bool:
+    async def process_webhook(
+        self, webhook_data: dict, session: AsyncSession, bot
+    ) -> bool:
         start_time = datetime.now(timezone.utc)
-        
+
         # === Извлекаем только критичные поля ===
         obj = webhook_data.get("object", {})
         payment_id = obj.get("id")
@@ -98,7 +107,9 @@ class YookassaService:
         amount_value = obj.get("amount", {}).get("value")
         metadata = obj.get("metadata", {})
 
-        logger.info(f"🔔 Webhook {payment_id}: event={event}, amount={amount_value} RUB")
+        logger.info(
+            f"🔔 Webhook {payment_id}: event={event}, amount={amount_value} RUB"
+        )
 
         if event != "payment.succeeded" or not payment_id:
             logger.info(f"⏭️ Webhook {payment_id}: ignored")
@@ -121,19 +132,21 @@ class YookassaService:
         try:
             verified = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
-                timeout=3.0
+                timeout=3.0,
             )
         except Exception as e:
             logger.error(f"❌ Webhook {payment_id}: double-check failed: {e}")
             if bot and db_payment:
                 await bot.send_message(
                     db_payment.telegram_id,
-                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ не придёт – напишите в поддержку."
+                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ не придёт – напишите в поддержку.",
                 )
             return False
 
         if verified.status != "succeeded":
-            logger.warning(f"⚠️ Webhook {payment_id}: status mismatch (API={verified.status})")
+            logger.warning(
+                f"⚠️ Webhook {payment_id}: status mismatch (API={verified.status})"
+            )
             return False
 
         # Сверяем сумму (обязательно)
@@ -155,7 +168,7 @@ class YookassaService:
         # Проверяем, что telegram_id в метаданных совпадает с БД (защита от подмены)
         if str(telegram_id) != metadata.get("telegram_id"):
             logger.error(f"❌ Webhook {payment_id}: telegram_id mismatch")
-            await send_admin_alert(f"⚠️ Подозрительный платёж: ID не совпадает")
+            await send_admin_alert("⚠️ Подозрительный платёж: ID не совпадает")
             return False
 
         # === 4. Обновляем статус платежа ===
@@ -165,7 +178,11 @@ class YookassaService:
         session.add(db_payment)
 
         # === 5. Активируем подписку ===
-        stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id).with_for_update(skip_locked=True)
+        stmt_user = (
+            select(BotUser)
+            .where(BotUser.telegram_id == telegram_id)
+            .with_for_update(skip_locked=True)
+        )
         user = (await session.execute(stmt_user)).scalar_one_or_none()
 
         success = await activate_subscription(
@@ -175,7 +192,9 @@ class YookassaService:
             logger.warning(f"⚠️ Webhook {payment_id}: activation failed")
             return False
 
-        logger.info(f"✅ Webhook {payment_id}: subscription activated for {telegram_id}")
+        logger.info(
+            f"✅ Webhook {payment_id}: subscription activated for {telegram_id}"
+        )
 
         # === 6. Отправка сообщения и фоновое создание ключа (только для VPN) ===
         if product_type == "vpn" and bot:
@@ -193,12 +212,14 @@ class YookassaService:
                             await bot.send_message(
                                 telegram_id,
                                 f"🔗 Ваш ключ:\n`{link}`",
-                                parse_mode="Markdown"
+                                parse_mode="Markdown",
                             )
                             logger.info(f"✅ Webhook {payment_id}: key sent")
                 except Exception as e:
                     logger.error(f"❌ Webhook {payment_id}: key creation error: {e}")
-                    await send_admin_alert(f"❌ Ошибка создания ключа для {telegram_id}: {e}")
+                    await send_admin_alert(
+                        f"❌ Ошибка создания ключа для {telegram_id}: {e}"
+                    )
 
             asyncio.create_task(create_key())
 

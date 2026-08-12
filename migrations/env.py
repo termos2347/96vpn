@@ -1,14 +1,12 @@
-import asyncio
 import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from sqlalchemy.ext.asyncio import create_async_engine
 from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
 
 # Добавляем корень проекта в путь
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -18,7 +16,6 @@ load_dotenv()
 
 # Импортируем метаданные модели
 from db.models import Base
-from config import settings
 
 # --- Конфигурация Alembic ---
 config = context.config
@@ -32,6 +29,7 @@ target_metadata = Base.metadata
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL not set in environment")
+
 
 def clean_db_url_for_psycopg2(url: str) -> str:
     """
@@ -47,17 +45,19 @@ def clean_db_url_for_psycopg2(url: str) -> str:
     # Извлекаем параметры запроса
     query_params = parse_qs(parsed.query)
     # Удаляем 'ssl' и 'sslmode', если они есть
-    query_params.pop('ssl', None)
-    query_params.pop('sslmode', None)
+    query_params.pop("ssl", None)
+    query_params.pop("sslmode", None)
 
     # Собираем URL заново
     new_query = urlencode(query_params, doseq=True)
     clean_url = urlunparse(parsed._replace(query=new_query))
     return clean_url
 
+
 # Получаем очищенный URL для синхронного драйвера
 SYNC_DATABASE_URL = clean_db_url_for_psycopg2(DATABASE_URL)
 config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL)
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
@@ -70,6 +70,7 @@ def run_migrations_offline() -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
+
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
@@ -86,6 +87,7 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
+
 
 if context.is_offline_mode():
     run_migrations_offline()

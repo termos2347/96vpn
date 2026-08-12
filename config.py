@@ -1,30 +1,29 @@
-import os
-import sys
-import logging
-import zoneinfo
 import json
+import logging
+import sys
+import zoneinfo
 from pathlib import Path
-from typing import List, Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator, ValidationError
-from dotenv import load_dotenv
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
 from cryptography.fernet import Fernet
-from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
+from dotenv import load_dotenv
+from pydantic import Field, ValidationError, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
+
 
 def clean_db_url(url: str) -> str:
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
-    query_params.pop('channel_binding', None)
+    query_params.pop("channel_binding", None)
     new_query = urlencode(query_params, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
-        case_sensitive=True,
-        extra="ignore"
+        env_file=".env", case_sensitive=True, extra="ignore"
     )
 
     # ---------- Режимы ----------
@@ -55,14 +54,14 @@ class Settings(BaseSettings):
     YOOKASSA_API_KEY: str = Field(..., min_length=1)
     YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
-    YOOKASSA_TRUSTED_IPS: List[str] = Field(..., min_length=1)
+    YOOKASSA_TRUSTED_IPS: list[str] = Field(..., min_length=1)
 
     # ---------- 3x-UI Master Panel ----------
     XUI_MASTER_URL: str = Field(..., min_length=1)
     XUI_API_TOKEN: str = Field(..., min_length=1)
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
-    
+
     # ---------- Rate limiting (для каждой группы отдельно) ----------
     RATE_LIMIT_START: int = 5
     RATE_LIMIT_HELP: int = 3
@@ -72,10 +71,12 @@ class Settings(BaseSettings):
     RATE_LIMIT_PAYMENT: int = 3
     RATE_LIMIT_STARS: int = 3
     RATE_LIMIT_ADMIN: int = 10
-    RATE_LIMIT_DEFAULT: int = 5  # на случай, если для какой-то команды не задано отдельно
-    
+    RATE_LIMIT_DEFAULT: int = (
+        5  # на случай, если для какой-то команды не задано отдельно
+    )
+
     # ---------- Redis ----------
-    REDIS_URL: Optional[str] = None  # приоритетнее остальных
+    REDIS_URL: str | None = None  # приоритетнее остальных
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
@@ -117,7 +118,7 @@ class Settings(BaseSettings):
     INTERNAL_API_URL: str = "http://localhost:5001"
 
     # ---------- Валидаторы ----------
-    @field_validator('YOOKASSA_TRUSTED_IPS', mode='before')
+    @field_validator("YOOKASSA_TRUSTED_IPS", mode="before")
     @classmethod
     def parse_trusted_ips(cls, v):
         if isinstance(v, list):
@@ -129,20 +130,24 @@ class Settings(BaseSettings):
         elif isinstance(v, str):
             try:
                 parsed = json.loads(v)
-                if isinstance(parsed, list) and parsed and all(isinstance(item, str) for item in parsed):
+                if (
+                    isinstance(parsed, list)
+                    and parsed
+                    and all(isinstance(item, str) for item in parsed)
+                ):
                     return parsed
             except json.JSONDecodeError:
                 pass
         raise ValueError("YOOKASSA_TRUSTED_IPS must be a JSON array of IP/CIDR strings")
 
-    @field_validator('DATABASE_URL')
+    @field_validator("DATABASE_URL")
     @classmethod
     def validate_database_url(cls, v):
-        if not v.startswith('postgresql'):
+        if not v.startswith("postgresql"):
             raise ValueError("DATABASE_URL must be a PostgreSQL connection string")
         return v
 
-    @field_validator('ENCRYPTION_KEY')
+    @field_validator("ENCRYPTION_KEY")
     @classmethod
     def validate_encryption_key(cls, v):
         try:
@@ -151,7 +156,7 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid ENCRYPTION_KEY: {e}")
         return v
 
-    @field_validator('TIMEZONE')
+    @field_validator("TIMEZONE")
     @classmethod
     def validate_timezone(cls, v):
         try:
@@ -160,54 +165,71 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid TIMEZONE: {e}")
         return v
 
-    @field_validator('YOOKASSA_SHOP_ID')
+    @field_validator("YOOKASSA_SHOP_ID")
     @classmethod
     def validate_shop_id(cls, v):
         if not v.isdigit():
             raise ValueError("YOOKASSA_SHOP_ID must be numeric")
         return v
 
-    @field_validator('YOOKASSA_API_KEY')
+    @field_validator("YOOKASSA_API_KEY")
     @classmethod
     def validate_api_key(cls, v):
         if len(v) < 20:
             raise ValueError("YOOKASSA_API_KEY too short")
         return v
 
-    @field_validator('WEBHOOK_URL', 'ADMIN_WEBHOOK_URL')
+    @field_validator("WEBHOOK_URL", "ADMIN_WEBHOOK_URL")
     @classmethod
     def validate_webhook_url(cls, v: str, info) -> str:
-        debug = info.data.get('DEBUG', False)
+        debug = info.data.get("DEBUG", False)
         if not debug:
-            if not v.startswith('https://'):
+            if not v.startswith("https://"):
                 raise ValueError(f"{info.field_name} must use HTTPS in production")
         else:
-            if v.startswith('http://'):
-                allowed_local = ('http://localhost', 'http://127.0.0.1')
+            if v.startswith("http://"):
+                allowed_local = ("http://localhost", "http://127.0.0.1")
                 if not any(v.startswith(prefix) for prefix in allowed_local):
-                    raise ValueError(f"In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1")
+                    raise ValueError(
+                        "In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1"
+                    )
         return v
 
-    @field_validator('XUI_MASTER_URL')
+    @field_validator("XUI_MASTER_URL")
     @classmethod
     def validate_xui_url(cls, v):
-        if not v.startswith(('http://', 'https://')):
+        if not v.startswith(("http://", "https://")):
             raise ValueError("XUI_MASTER_URL must start with http:// or https://")
         return v
 
     @property
     def VPN_PRICES(self) -> dict:
         return {
-            "rub": {"1m": self.VPN_PRICE_RUB_1M, "3m": self.VPN_PRICE_RUB_3M, "6m": self.VPN_PRICE_RUB_6M},
-            "stars": {"1m": self.VPN_PRICE_STARS_1M, "3m": self.VPN_PRICE_STARS_3M, "6m": self.VPN_PRICE_STARS_6M},
-            "usdt": {"1m": self.VPN_PRICE_USDT_1M, "3m": self.VPN_PRICE_USDT_3M, "6m": self.VPN_PRICE_USDT_6M},
+            "rub": {
+                "1m": self.VPN_PRICE_RUB_1M,
+                "3m": self.VPN_PRICE_RUB_3M,
+                "6m": self.VPN_PRICE_RUB_6M,
+            },
+            "stars": {
+                "1m": self.VPN_PRICE_STARS_1M,
+                "3m": self.VPN_PRICE_STARS_3M,
+                "6m": self.VPN_PRICE_STARS_6M,
+            },
+            "usdt": {
+                "1m": self.VPN_PRICE_USDT_1M,
+                "3m": self.VPN_PRICE_USDT_3M,
+                "6m": self.VPN_PRICE_USDT_6M,
+            },
         }
 
     @property
     def BYPASS_PRICES(self) -> dict:
         return {
             "rub": {"1m": self.BYPASS_PRICE_RUB_1M, "3m": self.BYPASS_PRICE_RUB_3M},
-            "stars": {"1m": self.BYPASS_PRICE_STARS_1M, "3m": self.BYPASS_PRICE_STARS_3M},
+            "stars": {
+                "1m": self.BYPASS_PRICE_STARS_1M,
+                "3m": self.BYPASS_PRICE_STARS_3M,
+            },
             "usdt": {"1m": self.BYPASS_PRICE_USDT_1M, "3m": self.BYPASS_PRICE_USDT_3M},
         }
 
@@ -243,7 +265,8 @@ DATABASE_URL = clean_db_url(settings.DATABASE_URL)
 
 IPS_FILE = Path("yookassa_ip.json")
 
-def load_trusted_ips() -> Optional[List[str]]:
+
+def load_trusted_ips() -> list[str] | None:
     if not IPS_FILE.exists():
         return None
     try:
@@ -252,13 +275,16 @@ def load_trusted_ips() -> Optional[List[str]]:
         if isinstance(data, list) and all(isinstance(x, str) for x in data):
             return data
         else:
-            logging.warning("yookassa_ip.json has invalid format, expected list of strings")
+            logging.warning(
+                "yookassa_ip.json has invalid format, expected list of strings"
+            )
             return None
     except Exception as e:
         logging.error(f"Failed to load yookassa_ip.json: {e}")
         return None
 
-def save_trusted_ips(ips: List[str]) -> bool:
+
+def save_trusted_ips(ips: list[str]) -> bool:
     try:
         with open(IPS_FILE, "w", encoding="utf-8") as f:
             json.dump(ips, f, indent=2, ensure_ascii=False)
@@ -267,10 +293,13 @@ def save_trusted_ips(ips: List[str]) -> bool:
         logging.error(f"Failed to save yookassa_ip.json: {e}")
         return False
 
+
 if not IPS_FILE.exists():
     initial_ips = settings.YOOKASSA_TRUSTED_IPS
     if save_trusted_ips(initial_ips):
-        logging.info(f"✅ Created yookassa_ip.json with initial IPs from .env ({len(initial_ips)} entries)")
+        logging.info(
+            f"✅ Created yookassa_ip.json with initial IPs from .env ({len(initial_ips)} entries)"
+        )
     else:
         logging.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
 
@@ -278,8 +307,12 @@ _loaded_ips = load_trusted_ips()
 if _loaded_ips is not None:
     if _loaded_ips:
         settings.YOOKASSA_TRUSTED_IPS = _loaded_ips
-        logging.info(f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)")
+        logging.info(
+            f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)"
+        )
     else:
-        logging.warning("⚠️ yookassa_ip.json contains an empty list. Keeping value from .env.")
+        logging.warning(
+            "⚠️ yookassa_ip.json contains an empty list. Keeping value from .env."
+        )
 else:
     logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")

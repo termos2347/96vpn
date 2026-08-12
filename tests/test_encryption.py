@@ -1,5 +1,5 @@
-import pytest
-from utils.encryption import encrypt_password, decrypt_password, is_encrypted
+from utils.encryption import decrypt_password, encrypt_password, is_encrypted
+
 
 def test_encryption():
     original = "my_secret_password"
@@ -9,10 +9,12 @@ def test_encryption():
     decrypted = decrypt_password(encrypted)
     assert decrypted == original
 
+
 def test_empty():
     assert encrypt_password("") == ""
     assert decrypt_password("") == ""
     assert is_encrypted("") == False
+
 
 def test_plain_text_auto_decrypt():
     plain = "not_encrypted"

@@ -1,9 +1,10 @@
-import uuid
-import logging
 import asyncio
-import aiohttp
+import logging
 import ssl
-from typing import Optional, Dict, Any, List
+import uuid
+from typing import Any
+
+import aiohttp
 
 from config import settings
 
@@ -16,7 +17,7 @@ class XUIVPNProvider:
     REQUEST_TIMEOUT = 30
 
     def __init__(self, base_url: str, api_token: str, inbound_id: int, sub_port: int):
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
         self.api_token = api_token
         self.inbound_id = inbound_id
         self.sub_port = sub_port
@@ -28,10 +29,10 @@ class XUIVPNProvider:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_token}"
+            "Authorization": f"Bearer {self.api_token}",
         }
 
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
         self._session_invalid = False
         self._closed = False
@@ -62,13 +63,15 @@ class XUIVPNProvider:
             if self._session is None or self._session.closed or self._session_invalid:
                 if self._session and not self._session.closed:
                     await self._session.close()
-                connector = aiohttp.TCPConnector(ssl=self._ssl_context(), limit=100, force_close=True)
+                connector = aiohttp.TCPConnector(
+                    ssl=self._ssl_context(), limit=100, force_close=True
+                )
                 timeout = aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
                 self._session = aiohttp.ClientSession(
                     connector=connector,
                     cookie_jar=aiohttp.CookieJar(unsafe=True),
                     timeout=timeout,
-                    headers=self.headers
+                    headers=self.headers,
                 )
                 self._session_invalid = False
                 logger.debug(f"Created new session for {self.base_url}")
@@ -82,13 +85,16 @@ class XUIVPNProvider:
                 self._session = None
         logger.info(f"XUI provider closed for {self.base_url}")
 
-    async def _retry_request(self, method: str, url: str, **kwargs) -> Optional[Dict[str, Any]]:
+    async def _retry_request(
+        self, method: str, url: str, **kwargs
+    ) -> dict[str, Any] | None:
         attempt = 0
-        last_error = None
         while attempt < self.MAX_RETRIES:
             try:
                 session = await self._get_session()
-                kwargs.setdefault("headers", {})["Authorization"] = f"Bearer {self.api_token}"
+                kwargs.setdefault("headers", {})["Authorization"] = (
+                    f"Bearer {self.api_token}"
+                )
                 method_func = getattr(session, method.lower())
                 async with method_func(url, **kwargs) as resp:
                     if resp.status == 200:
@@ -100,22 +106,26 @@ class XUIVPNProvider:
                         logger.error("API token invalid or expired")
                         return None
                     else:
-                        logger.warning(f"HTTP {resp.status} from {url}, attempt {attempt+1}")
+                        logger.warning(
+                            f"HTTP {resp.status} from {url}, attempt {attempt + 1}"
+                        )
             except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
-                logger.warning(f"Network error on {url} (attempt {attempt+1}): {type(net_err).__name__}")
+                logger.warning(
+                    f"Network error on {url} (attempt {attempt + 1}): {type(net_err).__name__}"
+                )
                 self._session_invalid = True
-                last_error = net_err
-            except Exception as e:
-                logger.exception(f"Unexpected error on {url}, attempt {attempt+1}")
-                last_error = e
+            except Exception:
+                logger.exception(f"Unexpected error on {url}, attempt {attempt + 1}")
 
             attempt += 1
             if attempt < self.MAX_RETRIES:
                 await asyncio.sleep(self.RETRY_DELAY * (2 ** (attempt - 1)))
-        logger.error(f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts")
+        logger.error(
+            f"Failed to {method.upper()} {url} after {self.MAX_RETRIES} attempts"
+        )
         return None
 
-    async def create_client(self, email: str, sub_id: str) -> Optional[Dict[str, str]]:
+    async def create_client(self, email: str, sub_id: str) -> dict[str, str] | None:
         if not email or not sub_id:
             logger.error("Email and sub_id are required")
             return None
@@ -142,8 +152,8 @@ class XUIVPNProvider:
                 "expiryTime": 0,
                 "enable": True,
                 "tgId": user_id,
-                "subId": sub_id
-            }
+                "subId": sub_id,
+            },
         }
 
         url = f"{self.base_url}/panel/api/clients/add"
@@ -157,11 +167,11 @@ class XUIVPNProvider:
             else:
                 logger.error(f"Failed to create client: {result}")
                 return None
-        except Exception as e:
-            logger.exception(f"Exception creating client: {e}")
+        except Exception:
+            logger.exception("Exception creating client")
             return None
 
-    async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
+    async def get_client_by_email(self, email: str) -> dict[str, str] | None:
         """
         Ищет клиента по email.
         Пытается извлечь subId из разных полей ответа.
@@ -174,7 +184,9 @@ class XUIVPNProvider:
                 data = result.get("obj")
                 if data:
                     # Пробуем найти subId в разных местах
-                    sub_id = data.get("subId") or data.get("subid") or data.get("sub_id")
+                    sub_id = (
+                        data.get("subId") or data.get("subid") or data.get("sub_id")
+                    )
                     client_uuid = data.get("id") or data.get("uuid")
                     client_email = data.get("email")
                     enable = data.get("enable")
@@ -182,7 +194,11 @@ class XUIVPNProvider:
                     # Если sub_id не найден, возможно, клиент вложен в "client"
                     if sub_id is None and "client" in data:
                         client_obj = data["client"]
-                        sub_id = client_obj.get("subId") or client_obj.get("subid") or client_obj.get("sub_id")
+                        sub_id = (
+                            client_obj.get("subId")
+                            or client_obj.get("subid")
+                            or client_obj.get("sub_id")
+                        )
                         client_uuid = client_obj.get("id") or client_obj.get("uuid")
                         client_email = client_obj.get("email")
                         enable = client_obj.get("enable")
@@ -198,11 +214,11 @@ class XUIVPNProvider:
                         logger.warning(f"Client found but no subId in response: {data}")
                         return None
             return None
-        except Exception as e:
-            logger.exception(f"Error getting client by email {email}: {e}")
+        except Exception:
+            logger.exception(f"Error getting client by email {email}")
             return None
 
-    async def get_client_by_sub_id(self, sub_id: str) -> Optional[Dict[str, str]]:
+    async def get_client_by_sub_id(self, sub_id: str) -> dict[str, str] | None:
         """
         Пытается найти клиента по subId через эндпоинт /getSub/{subId}.
         Выполняет только одну попытку (без ретраев), так как эндпоинт часто недоступен.
@@ -226,7 +242,11 @@ class XUIVPNProvider:
                         if result and result.get("success"):
                             data = result.get("obj")
                             if data:
-                                sub_id_from_resp = data.get("subId") or data.get("subid") or data.get("sub_id")
+                                sub_id_from_resp = (
+                                    data.get("subId")
+                                    or data.get("subid")
+                                    or data.get("sub_id")
+                                )
                                 if sub_id_from_resp:
                                     return {
                                         "uuid": data.get("id") or data.get("uuid"),
@@ -234,8 +254,10 @@ class XUIVPNProvider:
                                         "email": data.get("email"),
                                         "enable": data.get("enable"),
                                     }
-                    except Exception as e:
-                        logging.error(f"Ошибка в get_client_by_sub_id при парсинге ответа: {e}", exc_info=True)
+                    except Exception:
+                        logger.exception(
+                            "Ошибка в get_client_by_sub_id при парсинге ответа"
+                        )
                 elif resp.status == 404:
                     logger.debug(f"Client with subId {sub_id} not found (404)")
                 else:
@@ -245,7 +267,7 @@ class XUIVPNProvider:
             logger.warning(f"getSub endpoint failed: {e}")
             return None
 
-    async def get_all_clients(self) -> List[Dict]:
+    async def get_all_clients(self) -> list[dict]:
         """Получает список всех клиентов (используется как fallback)."""
         url = f"{self.base_url}/panel/api/clients"
         try:
@@ -253,8 +275,8 @@ class XUIVPNProvider:
             if result and result.get("success"):
                 return result.get("obj", [])
             return []
-        except Exception as e:
-            logger.exception(f"Error getting all clients: {e}")
+        except Exception:
+            logger.exception("Error getting all clients")
             return []
 
     def get_subscription_link(self, sub_id: str) -> str:
@@ -273,6 +295,6 @@ class XUIVPNProvider:
             else:
                 logger.warning(f"Failed to revoke by subId, result: {result}")
                 return False
-        except Exception as e:
-            logger.exception(f"Error revoking client by subId {sub_id}: {e}")
+        except Exception:
+            logger.exception(f"Error revoking client by subId {sub_id}")
             return False

@@ -1,29 +1,32 @@
 # handlers/payment.py
 import logging
 import uuid
-from aiogram import Router, F, types
-from aiogram.types import CallbackQuery, Message
+
+from aiogram import F, Router, types
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
-from handlers.ui import Texts, Keyboards
-from db.base import AsyncSessionLocal
-from db.models import BotPayment, BotUser
-from db.crud import activate_subscription
-from config import settings
-from services.payment_yookassa import yookassa_service
-from services.vpn_manager import get_vpn_manager
 from admin import send_admin_alert
 from admin.bot import log_error
+from config import settings
+from db.base import AsyncSessionLocal
+from db.crud import activate_subscription
+from db.models import BotPayment, BotUser
+from handlers.ui import Keyboards, Texts
+from services.payment_yookassa import yookassa_service
+from services.vpn_manager import get_vpn_manager
 from utils.decorators import rate_limit
-from utils.validators import validate_user_id, validate_currency, ValidationError
+from utils.validators import ValidationError, validate_currency, validate_user_id
 
 logger = logging.getLogger(__name__)
 router = Router(name="payment")
 
 
 # ---------- Вспомогательная функция для безопасного ответа на callback ----------
-async def safe_answer_callback(callback: CallbackQuery, text: str = None, show_alert: bool = False):
+async def safe_answer_callback(
+    callback: CallbackQuery, text: str = None, show_alert: bool = False
+):
     """Безопасно отвечает на callback, игнорируя ошибку 'query is too old'."""
     try:
         if text:
@@ -59,10 +62,7 @@ async def currency_chosen(callback: CallbackQuery):
             await safe_answer_callback(callback)
             return
 
-        await callback.message.edit_text(
-            new_text,
-            reply_markup=new_markup
-        )
+        await callback.message.edit_text(new_text, reply_markup=new_markup)
         await safe_answer_callback(callback)
     except ValidationError as e:
         logger.warning(f"Validation error in currency_chosen: {e}")
@@ -74,7 +74,9 @@ async def currency_chosen(callback: CallbackQuery):
             await safe_answer_callback(callback)
         else:
             logger.exception(f"Telegram error in currency_chosen: {e}")
-            await safe_answer_callback(callback, "❌ Ошибка обновления", show_alert=True)
+            await safe_answer_callback(
+                callback, "❌ Ошибка обновления", show_alert=True
+            )
     except Exception as e:
         logger.exception(f"Error in currency_chosen: {e}")
         await safe_answer_callback(callback, "❌ Внутренняя ошибка", show_alert=True)
@@ -106,17 +108,16 @@ async def tariff_chosen(callback: CallbackQuery):
 
         # Создаём временную запись платежа в БД (pending)
         local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                new_payment = BotPayment(
-                    payment_id=local_tx_id,
-                    telegram_id=user_id,
-                    amount=price,
-                    currency=currency.upper(),
-                    status="pending",
-                    is_paid=False
-                )
-                session.add(new_payment)
+        async with AsyncSessionLocal() as session, session.begin():
+            new_payment = BotPayment(
+                payment_id=local_tx_id,
+                telegram_id=user_id,
+                amount=price,
+                currency=currency.upper(),
+                status="pending",
+                is_paid=False,
+            )
+            session.add(new_payment)
 
         # Вызываем Yookassa
         metadata = {
@@ -124,19 +125,23 @@ async def tariff_chosen(callback: CallbackQuery):
             "telegram_id": user_id,
             "product_type": "vpn",
             "period": period,
-            "currency": currency.upper()
+            "currency": currency.upper(),
         }
         description = f"Подписка {period} ({currency})"
         payment = await yookassa_service.create_payment(price, description, metadata)
 
         if not payment:
-            await safe_answer_callback(callback, "❌ Ошибка создания платежа", show_alert=True)
+            await safe_answer_callback(
+                callback, "❌ Ошибка создания платежа", show_alert=True
+            )
             return
 
         yookassa_id = payment.get("payment_id")
         url = payment.get("confirmation_url")
         if not url or not yookassa_id:
-            await safe_answer_callback(callback, "❌ Не удалось получить ссылку на оплату", show_alert=True)
+            await safe_answer_callback(
+                callback, "❌ Не удалось получить ссылку на оплату", show_alert=True
+            )
             return
 
         # Обновляем запись платежа реальным ID от Yookassa
@@ -149,7 +154,9 @@ async def tariff_chosen(callback: CallbackQuery):
                     db_payment.payment_id = yookassa_id
                 else:
                     logger.error(f"Local payment {local_tx_id} vanished!")
-                    await safe_answer_callback(callback, "❌ Системная ошибка", show_alert=True)
+                    await safe_answer_callback(
+                        callback, "❌ Системная ошибка", show_alert=True
+                    )
                     return
 
         # Показываем ссылку на оплату
@@ -157,14 +164,14 @@ async def tariff_chosen(callback: CallbackQuery):
             await callback.message.edit_text(
                 Texts.payment_link(price, currency, period),
                 reply_markup=Keyboards.payment_url_button(url),
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
             )
         except TelegramBadRequest as e:
             if "message not found" in str(e):
                 await callback.message.answer(
                     Texts.payment_link(price, currency, period),
                     reply_markup=Keyboards.payment_url_button(url),
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
                 )
             else:
                 raise
@@ -172,11 +179,17 @@ async def tariff_chosen(callback: CallbackQuery):
         await safe_answer_callback(callback)
     except ValidationError as e:
         logger.warning(f"Validation error in tariff_chosen: {e}")
-        await safe_answer_callback(callback, "❌ Некорректные параметры", show_alert=True)
+        await safe_answer_callback(
+            callback, "❌ Некорректные параметры", show_alert=True
+        )
     except Exception as e:
         logger.exception(f"Error in tariff_chosen: {e}")
-        log_error(f"Payment error for user {callback.from_user.id}: {e}", notify_admin=True)
-        await safe_answer_callback(callback, "❌ Внутренняя ошибка сервера", show_alert=True)
+        log_error(
+            f"Payment error for user {callback.from_user.id}: {e}", notify_admin=True
+        )
+        await safe_answer_callback(
+            callback, "❌ Внутренняя ошибка сервера", show_alert=True
+        )
 
 
 # ---------- Обработка успешного платежа через Stars (если используется) ----------
@@ -201,7 +214,9 @@ async def successful_payment(message: Message):
     target_user_id = int(user_id_str)
 
     if message.from_user.id != target_user_id:
-        await message.answer("⚠️ Вы не можете оплатить подписку для другого пользователя.")
+        await message.answer(
+            "⚠️ Вы не можете оплатить подписку для другого пользователя."
+        )
         return
 
     async with AsyncSessionLocal() as session:
@@ -215,14 +230,22 @@ async def successful_payment(message: Message):
     try:
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
+                stmt_user = (
+                    select(BotUser)
+                    .where(BotUser.telegram_id == target_user_id)
+                    .with_for_update()
+                )
                 user = (await session.execute(stmt_user)).scalar_one_or_none()
                 if not user:
                     user = BotUser(telegram_id=target_user_id)
                     session.add(user)
                     await session.flush()
                     # повторная блокировка
-                    stmt_user = select(BotUser).where(BotUser.telegram_id == target_user_id).with_for_update()
+                    stmt_user = (
+                        select(BotUser)
+                        .where(BotUser.telegram_id == target_user_id)
+                        .with_for_update()
+                    )
                     user = (await session.execute(stmt_user)).scalar_one()
 
                 success = await activate_subscription(
@@ -231,7 +254,7 @@ async def successful_payment(message: Message):
                     product_type,
                     period,
                     telegram_payment_id,
-                    user=user
+                    user=user,
                 )
     except Exception as e:
         logger.exception(f"Activation error for payment {telegram_payment_id}")
@@ -261,11 +284,17 @@ async def successful_payment(message: Message):
             await message.answer(msg, parse_mode="Markdown")
 
             if not link and vpn_manager:
-                await send_admin_alert(f"⚠️ Не удалось создать ключ для {target_user_id}")
+                await send_admin_alert(
+                    f"⚠️ Не удалось создать ключ для {target_user_id}"
+                )
         except Exception as e:
             logger.exception(f"Key creation failed for user {target_user_id}")
             log_error(f"Key creation failed: {e}", notify_admin=True)
             await message.answer(Texts.key_creation_error())
-            await send_admin_alert(f"❌ Ошибка создания ключа для {target_user_id}: {e}")
+            await send_admin_alert(
+                f"❌ Ошибка создания ключа для {target_user_id}: {e}"
+            )
     else:
-        await message.answer(f"✅ Подписка на {product_type} на {days} дней активирована!")
+        await message.answer(
+            f"✅ Подписка на {product_type} на {days} дней активирована!"
+        )
