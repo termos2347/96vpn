@@ -115,8 +115,8 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                                         telegram_id,
                                         f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней."
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as send_error:   # FIX: логируем ошибку повторной отправки
+                                    logger.error(f"Failed to send link to {telegram_id} after retry: {send_error}")
                             except (TelegramNetworkError, ClientError) as e:
                                 logger.warning(f"Network error sending link to {telegram_id} from API: {e}")
                             except Exception as e:
@@ -129,7 +129,6 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
 
     async def yookassa_webhook(request):
         client_ip = get_client_ip(request)
-        # Проверка IP (без лишнего лога, только при ошибке)
         if not client_ip or not ip_in_network(client_ip):
             logger.warning(f"⛔ Blocked unauthorized webhook attempt from IP: {client_ip}")
             return web.json_response({"error": "forbidden"}, status=403)

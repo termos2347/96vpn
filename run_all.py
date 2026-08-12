@@ -228,8 +228,8 @@ async def on_startup():
             f = Figlet(font='slant')
             ascii_art = f.renderText('96VPN BOT')
             print("\n" + ascii_art)
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем ошибку рендера ASCII
+            logger.warning(f"Failed to render ASCII art: {e}")
     else:
         print("\n" + "=" * 50)
         print("✅ Bot is running! Press Ctrl+C to stop.")
@@ -264,30 +264,30 @@ async def on_shutdown():
     if main_bot:
         try:
             await main_bot.delete_webhook()
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем ошибку удаления вебхука
+            logger.warning(f"Error deleting main webhook: {e}")
         try:
             await main_bot.session.close()
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем ошибку закрытия сессии
+            logger.warning(f"Error closing main bot session: {e}")
 
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем
+            logger.warning(f"Error deleting admin webhook: {e}")
         try:
             await admin.bot.admin_bot.session.close()
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем
+            logger.warning(f"Error closing admin bot session: {e}")
 
     await admin.bot.shutdown()
 
     if internal_runner:
         try:
             await internal_runner.cleanup()
-        except Exception:
-            pass
+        except Exception as e:          # FIX: логируем
+            logger.warning(f"Error cleaning up internal runner: {e}")
 
     try:
         await engine.dispose()

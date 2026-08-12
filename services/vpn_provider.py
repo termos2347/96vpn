@@ -161,7 +161,6 @@ class XUIVPNProvider:
             logger.exception(f"Exception creating client: {e}")
             return None
 
-    # --- ИСПРАВЛЕННЫЙ МЕТОД get_client_by_email ---
     async def get_client_by_email(self, email: str) -> Optional[Dict[str, str]]:
         """
         Ищет клиента по email.
@@ -203,7 +202,6 @@ class XUIVPNProvider:
             logger.exception(f"Error getting client by email {email}: {e}")
             return None
 
-    # --- ДОПОЛНИТЕЛЬНЫЙ МЕТОД ПОИСКА ПО subId ---
     async def get_client_by_sub_id(self, sub_id: str) -> Optional[Dict[str, str]]:
         """
         Пытается найти клиента по subId через эндпоинт /getSub/{subId}.
@@ -236,8 +234,8 @@ class XUIVPNProvider:
                                         "email": data.get("email"),
                                         "enable": data.get("enable"),
                                     }
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.error(f"Ошибка в get_client_by_sub_id при парсинге ответа: {e}", exc_info=True)
                 elif resp.status == 404:
                     logger.debug(f"Client with subId {sub_id} not found (404)")
                 else:
@@ -247,7 +245,6 @@ class XUIVPNProvider:
             logger.warning(f"getSub endpoint failed: {e}")
             return None
 
-    # --- МЕТОД ДЛЯ ПОЛУЧЕНИЯ ВСЕХ КЛИЕНТОВ (для fallback-поиска по части email) ---
     async def get_all_clients(self) -> List[Dict]:
         """Получает список всех клиентов (используется как fallback)."""
         url = f"{self.base_url}/panel/api/clients"

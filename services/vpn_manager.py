@@ -236,9 +236,8 @@ class VPNManager:
                 "Сервер временно перегружен, мы уже выдаем вам ключ, администратор уведомлен."
             )
             await bot.session.close()
-        except Exception:
-            pass
-
+        except Exception as e:
+            logger.warning(f"Error closing temporary bot session: {e}")
 
 _vpn_manager: Optional[VPNManager] = None
 

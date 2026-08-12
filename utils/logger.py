@@ -4,7 +4,7 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from config import settings
 
-# Псевдонимы для понятных названий модулей
+# Псевдонимы для модулей
 MODULE_ALIASES = {
     '__main__': 'MAIN',
     'asyncio': 'ASYNCIO',
@@ -35,8 +35,10 @@ MODULE_ALIASES = {
     'utils.cache': 'CACHE',
 }
 
+LOG_FORMAT = '%(asctime)s | %(level_short)s | %(module_name)s: %(message)s'
+LOG_DATE_FORMAT = '%Y.%m.%d %H:%M:%S'
+
 def get_module_name(name: str) -> str:
-    """Возвращает понятное имя модуля (из словаря или последняя часть)."""
     alias = MODULE_ALIASES.get(name)
     if alias:
         return alias
@@ -45,6 +47,7 @@ def get_module_name(name: str) -> str:
 
 
 class CompactFormatter(logging.Formatter):
+    """Базовый форматтер для файла (без цветов)."""
     LEVEL_MAP = {
         'DEBUG': 'D',
         'INFO': 'I',
@@ -53,23 +56,44 @@ class CompactFormatter(logging.Formatter):
         'CRITICAL': 'C'
     }
 
+    def __init__(self):
+        super().__init__(fmt=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
+
     def format(self, record):
         record.level_short = self.LEVEL_MAP.get(record.levelname, record.levelname[0])
         record.module_name = get_module_name(record.name)
         return super().format(record)
 
 
-def setup_logger():
-    """Настраивает логирование с компактным форматом и осмысленными именами модулей."""
-    formatter = CompactFormatter(
-        '%(asctime)s | %(level_short)-1s | %(module_name)s: %(message)s',
-        datefmt='%Y.%m.%d %H:%M:%S'
-    )
+class ColoredFormatter(CompactFormatter):
+    """Цветной форматтер для консоли."""
+    COLORS = {
+        'DEBUG': '\033[94m',    # Синий
+        'INFO': '\033[92m',     # Зелёный
+        'WARNING': '\033[93m',  # Жёлтый
+        'ERROR': '\033[91m',    # Красный
+        'CRITICAL': '\033[95m'  # Пурпурный
+    }
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
 
+    def format(self, record):
+        levelname = record.levelname
+        letter = self.LEVEL_MAP.get(levelname, levelname[0])
+        color = self.COLORS.get(levelname, '')
+        # Жирная цветная буква
+        colored_letter = f"{self.BOLD}{color}{letter}{self.RESET}"
+        record.level_short = colored_letter
+        record.module_name = get_module_name(record.name)
+        return logging.Formatter.format(self, record)
+
+
+def setup_logger():
+    """Настраивает логирование с ротацией: консоль – цветная, файл – без цветов."""
     # Консоль
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.DEBUG if settings.DEBUG else logging.WARNING)
-    console.setFormatter(formatter)
+    console.setFormatter(ColoredFormatter())
 
     # Файл
     log_file = Path("logs/bot.log")
@@ -81,7 +105,7 @@ def setup_logger():
         encoding='utf-8'
     )
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(CompactFormatter())
 
     # Корневой логгер
     root = logging.getLogger()

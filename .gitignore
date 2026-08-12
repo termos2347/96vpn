@@ -18,7 +18,7 @@ logs/
 *.logs
 logs/
 
-migrations\versions\
+migrations/versions/
 .pytest_cache
 
 alembic.ini

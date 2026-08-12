@@ -457,8 +457,8 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                     f"📡 Рассылка: {success+fail}/{total} (✅ {success}, ❌ {fail})",
                     reply_markup=cancel_kb
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to update broadcast status: {e}")   # ИСПРАВЛЕНО
         await asyncio.sleep(DELAY_BETWEEN_BATCH)
 
     _broadcast_cancel_flags.pop(cancel_flag_key, None)
