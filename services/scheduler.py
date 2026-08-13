@@ -26,7 +26,7 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
             logger.info(f"Task {task_name} cancelled")
             raise
         except Exception as e:
-            logger.error(f"Task {task_name} crashed: {e}", exc_info=True)
+            logger.error(f"Task {task_name} crashed")
             await send_admin_alert(
                 f"❌ Фоновая задача {task_name} упала: {e}. Будет перезапущена через {restart_delay}с."
             )
@@ -253,7 +253,7 @@ async def start_scheduler(bot):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"check_expired_subscriptions failed: {e}", exc_info=True)
+                logger.error("check_expired_subscriptions failed")
                 await send_admin_alert(f"check_expired_subscriptions failed: {e}")
             await asyncio.sleep(INTERVAL_CHECK_EXPIRED)
 
@@ -264,7 +264,7 @@ async def start_scheduler(bot):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"send_expiry_reminders failed: {e}", exc_info=True)
+                logger.error("send_expiry_reminders failed")
                 await send_admin_alert(f"send_expiry_reminders failed: {e}")
             await asyncio.sleep(INTERVAL_REMINDERS)
 
@@ -275,7 +275,7 @@ async def start_scheduler(bot):
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"retry_missing_keys failed: {e}", exc_info=True)
+                logger.error("retry_missing_keys failed")
                 await send_admin_alert(f"retry_missing_keys failed: {e}")
             await asyncio.sleep(INTERVAL_RETRY_KEYS)
 

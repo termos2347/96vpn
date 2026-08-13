@@ -12,6 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
+# Создаём логгер для этого модуля
+logger = logging.getLogger(__name__)
+
 
 def clean_db_url(url: str) -> str:
     parsed = urlparse(url)
@@ -62,7 +65,7 @@ class Settings(BaseSettings):
     XUI_INBOUND_ID: int = Field(..., ge=1)
     XUI_SUB_PORT: int = Field(..., ge=1, le=65535)
 
-    # ---------- Rate limiting (для каждой группы отдельно) ----------
+    # ---------- Rate limiting ----------
     RATE_LIMIT_START: int = 5
     RATE_LIMIT_HELP: int = 3
     RATE_LIMIT_MY_KEYS: int = 3
@@ -71,12 +74,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_PAYMENT: int = 3
     RATE_LIMIT_STARS: int = 3
     RATE_LIMIT_ADMIN: int = 10
-    RATE_LIMIT_DEFAULT: int = (
-        5  # на случай, если для какой-то команды не задано отдельно
-    )
+    RATE_LIMIT_DEFAULT: int = 5
 
     # ---------- Redis ----------
-    REDIS_URL: str | None = None  # приоритетнее остальных
+    REDIS_URL: str | None = None
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
@@ -152,7 +153,7 @@ class Settings(BaseSettings):
     def validate_encryption_key(cls, v):
         try:
             Fernet(v.encode())
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             raise ValueError(f"Invalid ENCRYPTION_KEY: {e}")
         return v
 
@@ -161,7 +162,7 @@ class Settings(BaseSettings):
     def validate_timezone(cls, v):
         try:
             zoneinfo.ZoneInfo(v)
-        except Exception as e:
+        except (ValueError, zoneinfo.ZoneInfoNotFoundError) as e:
             raise ValueError(f"Invalid TIMEZONE: {e}")
         return v
 
@@ -246,9 +247,9 @@ try:
     settings = Settings()
 except ValidationError as e:
     logging.basicConfig(level=logging.ERROR)
-    logging.error("Configuration validation failed:")
+    logger.error("Configuration validation failed:")
     for error in e.errors():
-        logging.error(f"  - {error.get('loc')[0]}: {error.get('msg')}")
+        logger.error(f"  - {error.get('loc')[0]}: {error.get('msg')}")
     sys.exit(1)
 
 TOKEN = settings.BOT_TOKEN
@@ -275,12 +276,12 @@ def load_trusted_ips() -> list[str] | None:
         if isinstance(data, list) and all(isinstance(x, str) for x in data):
             return data
         else:
-            logging.warning(
+            logger.warning(
                 "yookassa_ip.json has invalid format, expected list of strings"
             )
             return None
-    except Exception as e:
-        logging.error(f"Failed to load yookassa_ip.json: {e}")
+    except (json.JSONDecodeError, OSError, TypeError) as e:
+        logger.error(f"Failed to load yookassa_ip.json: {e}")
         return None
 
 
@@ -289,30 +290,30 @@ def save_trusted_ips(ips: list[str]) -> bool:
         with open(IPS_FILE, "w", encoding="utf-8") as f:
             json.dump(ips, f, indent=2, ensure_ascii=False)
         return True
-    except Exception as e:
-        logging.error(f"Failed to save yookassa_ip.json: {e}")
+    except (OSError, TypeError) as e:
+        logger.error(f"Failed to save yookassa_ip.json: {e}")
         return False
 
 
 if not IPS_FILE.exists():
     initial_ips = settings.YOOKASSA_TRUSTED_IPS
     if save_trusted_ips(initial_ips):
-        logging.info(
+        logger.info(
             f"✅ Created yookassa_ip.json with initial IPs from .env ({len(initial_ips)} entries)"
         )
     else:
-        logging.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
+        logger.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
 
 _loaded_ips = load_trusted_ips()
 if _loaded_ips is not None:
     if _loaded_ips:
         settings.YOOKASSA_TRUSTED_IPS = _loaded_ips
-        logging.info(
+        logger.info(
             f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)"
         )
     else:
-        logging.warning(
+        logger.warning(
             "⚠️ yookassa_ip.json contains an empty list. Keeping value from .env."
         )
 else:
-    logging.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
+    logger.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")

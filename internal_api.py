@@ -1,7 +1,9 @@
 import asyncio
+import ipaddress
 import logging
 
 from aiogram.exceptions import (
+    TelegramAPIError,
     TelegramForbiddenError,
     TelegramNetworkError,
     TelegramRetryAfter,
@@ -27,8 +29,6 @@ def get_client_ip(request: web.Request) -> str:
 
 
 def ip_in_network(ip: str) -> bool:
-    import ipaddress
-
     trusted = settings.YOOKASSA_TRUSTED_IPS
     try:
         ip_obj = ipaddress.ip_address(ip)
@@ -39,7 +39,7 @@ def ip_in_network(ip: str) -> bool:
             else:
                 if ip_obj == ipaddress.ip_address(net):
                     return True
-    except Exception as e:
+    except ValueError as e:
         logger.error(f"IP validation error: {e}")
     return False
 
@@ -79,33 +79,32 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             )
 
         try:
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
+            async with AsyncSessionLocal() as session, session.begin():
+                stmt_user = (
+                    select(BotUser)
+                    .where(BotUser.telegram_id == telegram_id)
+                    .with_for_update()
+                )
+                user = (await session.execute(stmt_user)).scalar_one_or_none()
+                if not user:
+                    user = BotUser(telegram_id=telegram_id)
+                    session.add(user)
+                    await session.flush()
                     stmt_user = (
                         select(BotUser)
                         .where(BotUser.telegram_id == telegram_id)
                         .with_for_update()
                     )
-                    user = (await session.execute(stmt_user)).scalar_one_or_none()
-                    if not user:
-                        user = BotUser(telegram_id=telegram_id)
-                        session.add(user)
-                        await session.flush()
-                        stmt_user = (
-                            select(BotUser)
-                            .where(BotUser.telegram_id == telegram_id)
-                            .with_for_update()
-                        )
-                        user = (await session.execute(stmt_user)).scalar_one()
+                    user = (await session.execute(stmt_user)).scalar_one()
 
-                    success = await activate_subscription(
-                        session,
-                        telegram_id,
-                        product_type,
-                        period,
-                        payment_id,
-                        user=user,
-                    )
+                success = await activate_subscription(
+                    session,
+                    telegram_id,
+                    product_type,
+                    period,
+                    payment_id,
+                    user=user,
+                )
             if success:
                 if product_type == "vpn":
                     vpn_manager = get_vpn_manager()
@@ -132,7 +131,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                                         telegram_id,
                                         f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней.",
                                     )
-                                except Exception as send_error:  # FIX: логируем ошибку повторной отправки
+                                except TelegramAPIError as send_error:
                                     logger.error(
                                         f"Failed to send link to {telegram_id} after retry: {send_error}"
                                     )
@@ -146,8 +145,8 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                                 )
                 return web.json_response({"status": "ok"})
             return web.json_response({"status": "already_activated"}, status=200)
-        except Exception as e:
-            logger.error(f"Activation error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Activation error")
             return web.json_response({"status": "error"}, status=500)
 
     async def yookassa_webhook(request):
@@ -168,11 +167,10 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                 logger.error("Main bot not set, cannot process yookassa webhook")
                 return web.json_response({"error": "main bot not ready"}, status=503)
 
-            async with AsyncSessionLocal() as session:
-                async with session.begin():
-                    success = await yookassa_service.process_webhook(
-                        data, session, main_bot
-                    )
+            async with AsyncSessionLocal() as session, session.begin():
+                success = await yookassa_service.process_webhook(
+                    data, session, main_bot
+                )
 
             if success:
                 logger.info("✅ Yookassa webhook processed successfully")
@@ -181,8 +179,8 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                 logger.warning("❌ Yookassa webhook processing failed")
                 return web.json_response({"status": "error"}, status=400)
 
-        except Exception as e:
-            logger.error(f"❌ Yookassa webhook error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("❌ Yookassa webhook error")
             return web.json_response({"status": "error"}, status=500)
 
     async def telegram_webhook(request):
@@ -202,8 +200,8 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             update = Update(**data)
             await main_dp.feed_update(main_bot, update)
             return web.json_response({"status": "ok"})
-        except Exception as e:
-            logger.error(f"Main bot webhook error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Main bot webhook error")
             return web.json_response({"status": "error"}, status=500)
 
     async def admin_telegram_webhook(request):
@@ -223,8 +221,8 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             update = Update(**data)
             await admin_dp.feed_update(admin_bot, update)
             return web.json_response({"status": "ok"})
-        except Exception as e:
-            logger.error(f"Admin bot webhook error: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Admin bot webhook error")
             return web.json_response({"status": "error"}, status=500)
 
     app.router.add_post("/activate", handle_activation)

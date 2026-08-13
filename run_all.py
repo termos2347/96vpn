@@ -26,7 +26,6 @@ from utils.logger import setup_logger
 
 try:
     from pyfiglet import Figlet
-
     HAS_PYFIGLET = True
 except ImportError:
     HAS_PYFIGLET = False
@@ -42,7 +41,6 @@ def handle_asyncio_exception(loop, context):
     else:
         error_text = f"Asyncio exception: {context.get('message')}"
     from admin.bot import log_error
-
     log_error(error_text, notify_admin=True)
 
 
@@ -249,7 +247,7 @@ async def on_startup():
             f = Figlet(font="slant")
             ascii_art = f.renderText("96VPN BOT")
             print("\n" + ascii_art)
-        except Exception as e:  # FIX: логируем ошибку рендера ASCII
+        except Exception as e:
             logger.warning(f"Failed to render ASCII art: {e}")
     else:
         print("\n" + "=" * 50)
@@ -258,7 +256,7 @@ async def on_startup():
 
 
 async def on_shutdown():
-    global _shutting_down, _background_tasks
+    global _shutting_down  # _background_tasks не присваивается, убрали
     if _shutting_down:
         return
     _shutting_down = True
@@ -287,21 +285,21 @@ async def on_shutdown():
     if main_bot:
         try:
             await main_bot.delete_webhook()
-        except Exception as e:  # FIX: логируем ошибку удаления вебхука
+        except Exception as e:
             logger.warning(f"Error deleting main webhook: {e}")
         try:
             await main_bot.session.close()
-        except Exception as e:  # FIX: логируем ошибку закрытия сессии
+        except Exception as e:
             logger.warning(f"Error closing main bot session: {e}")
 
     if admin.bot.admin_bot:
         try:
             await admin.bot.admin_bot.delete_webhook()
-        except Exception as e:  # FIX: логируем
+        except Exception as e:
             logger.warning(f"Error deleting admin webhook: {e}")
         try:
             await admin.bot.admin_bot.session.close()
-        except Exception as e:  # FIX: логируем
+        except Exception as e:
             logger.warning(f"Error closing admin bot session: {e}")
 
     await admin.bot.shutdown()
@@ -309,7 +307,7 @@ async def on_shutdown():
     if internal_runner:
         try:
             await internal_runner.cleanup()
-        except Exception as e:  # FIX: логируем
+        except Exception as e:
             logger.warning(f"Error cleaning up internal runner: {e}")
 
     try:
@@ -330,8 +328,8 @@ async def shutdown_with_timeout():
         await asyncio.wait_for(on_shutdown(), timeout=10.0)
     except asyncio.TimeoutError:
         logger.error("Shutdown timed out, forcing exit")
-    except Exception as e:
-        logger.exception(f"Unexpected error during shutdown: {e}")
+    except Exception:
+        logger.exception("Unexpected error during shutdown")  # убрали {e}
 
 
 async def main():

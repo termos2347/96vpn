@@ -19,6 +19,7 @@ from aiogram.types import (
     Message,
 )
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
 from db.base import AsyncSessionLocal, engine, retry_db_operation
@@ -68,7 +69,7 @@ class BroadcastStates(StatesGroup):
 
 # ========== Запуск и остановка ==========
 async def startup():
-    global admin_bot, dp, _router_attached
+    global admin_bot, _router_attached  # dp не присваивается – убрали
 
     try:
         if admin_bot is None:
@@ -115,16 +116,15 @@ async def startup():
         if not commands:
             raise RuntimeError("Failed to set admin bot commands (empty list returned)")
 
-        # Логируем только успех (без лишних деталей)
         logger.info("✅ Admin bot initialized")
 
-    except Exception as e:
-        logger.error(f"❌ Admin bot startup failed: {e}")
+    except Exception:
+        logger.exception("❌ Admin bot startup failed")  # G201 + TRY401
         raise
 
 
 async def shutdown():
-    global admin_bot, dp, _router_attached
+    global _router_attached  # dp не присваивается
     if admin_bot:
         try:
             await admin_bot.delete_webhook()
@@ -165,7 +165,7 @@ async def cmd_health(message: types.Message):
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         status += "• БД: подключена\n"
-    except Exception as e:
+    except SQLAlchemyError as e:  # конкретное исключение
         status += f"• БД: ошибка ({e})\n"
         log_error(f"Health check DB error: {e}", notify_admin=False)
 
@@ -216,13 +216,11 @@ async def cmd_broadcast(message: Message):
             )
             return
 
-        # Разбираем аргументы
-        arg_part = text_parts[1]  # всё после команды
+        arg_part = text_parts[1]
         only_active = False
         broadcast_text = arg_part
 
         if arg_part.startswith("--active"):
-            # Удаляем флаг
             broadcast_text = arg_part[len("--active") :].lstrip()
             only_active = True
 
@@ -230,8 +228,6 @@ async def cmd_broadcast(message: Message):
             await message.answer("❌ Сообщение не может быть пустым.")
             return
 
-        # Сохраняем данные в контексте для callback'а (можно использовать FSM или глобальный словарь)
-        # Временно сохраним в памяти с привязкой к пользователю-админу
         if not hasattr(cmd_broadcast, "pending_broadcasts"):
             cmd_broadcast.pending_broadcasts = {}
 
@@ -242,7 +238,6 @@ async def cmd_broadcast(message: Message):
             "original_message": message,
         }
 
-        # Отправляем запрос на подтверждение
         await message.answer(
             f"⚠️ Вы собираетесь отправить сообщение **всем {'активным ' if only_active else ''}пользователям**.\n\n"
             f"Сообщение:\n```\n{broadcast_text}\n```\n\n"
@@ -251,8 +246,8 @@ async def cmd_broadcast(message: Message):
             reply_markup=get_confirm_keyboard(),
         )
 
-    except Exception as e:
-        logger.error(f"Error in cmd_broadcast: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error in cmd_broadcast")  # G201 + TRY401
         await message.answer("❌ Ошибка при подготовке рассылки.")
 
 
@@ -273,9 +268,6 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
 
 @dp.callback_query(F.data.startswith("broadcast_confirm_"))
 async def broadcast_confirm_callback(callback: CallbackQuery):
-    """
-    Обрабатывает нажатие кнопок подтверждения рассылки.
-    """
     try:
         await callback.answer()
 
@@ -290,18 +282,15 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
 
         if callback.data == "broadcast_confirm_no":
             await callback.message.edit_text("❌ Рассылка отменена.")
-            # Удаляем данные
             cmd_broadcast.pending_broadcasts.pop(admin_id, None)
             return
 
-        # Подтверждение "Да"
         broadcast_text = pending["text"]
         only_active = pending["only_active"]
-        original_message = pending["original_message"]
+        # original_message не используется – убрали
 
         await callback.message.edit_text("⏳ Начинаю рассылку...")
 
-        # Собираем пользователей
         async with AsyncSessionLocal() as session:
             stmt = select(BotUser.telegram_id)
             if only_active:
@@ -316,15 +305,14 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             cmd_broadcast.pending_broadcasts.pop(admin_id, None)
             return
 
-        # Отправляем
         success_count = 0
         fail_count = 0
         for uid in user_ids:
             try:
                 await callback.bot.send_message(uid, broadcast_text)
                 success_count += 1
-                await asyncio.sleep(0.05)  # защита от лимитов
-            except Exception as e:
+                await asyncio.sleep(0.05)
+            except TelegramAPIError as e:  # конкретное исключение
                 fail_count += 1
                 logger.warning(f"Broadcast failed for user {uid}: {e}")
 
@@ -334,11 +322,10 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             f"Не удалось: {fail_count}"
         )
 
-        # Удаляем данные
         cmd_broadcast.pending_broadcasts.pop(admin_id, None)
 
-    except Exception as e:
-        logger.error(f"Error in broadcast_confirm_callback: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error in broadcast_confirm_callback")
         await callback.message.edit_text("❌ Ошибка при выполнении рассылки.")
 
 
@@ -434,7 +421,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
 
         await original_msg.delete()
     except Exception as e:
-        logger.error("Failed to fetch original message for broadcast", exc_info=True)
+        logger.exception("Failed to fetch original message for broadcast")
         log_error(f"Broadcast fetch error: {e}", notify_admin=True)
         await callback.message.answer(
             f"❌ Не удалось получить сообщение для рассылки: {e}"
@@ -475,7 +462,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
             await admin_bot.download(file_id, destination=buf)
             media_bytes = buf.getvalue()
         except Exception as e:
-            logger.error("Failed to download media for broadcast", exc_info=True)
+            logger.exception("Failed to download media for broadcast")
             log_error(f"Broadcast media download error: {e}", notify_admin=True)
             await status_msg.edit_text(f"❌ Не удалось скачать файл: {e}")
             _broadcast_cancel_flags.pop(cancel_flag_key, None)
@@ -515,7 +502,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                 else:
                     await bot_instance.send_message(uid, text)
                 return True
-            except Exception as e:
+            except TelegramAPIError as e:
                 logger.debug(f"Broadcast failed for {uid}: {e}")
                 return False
 
@@ -541,8 +528,8 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                     f"📡 Рассылка: {success + fail}/{total} (✅ {success}, ❌ {fail})",
                     reply_markup=cancel_kb,
                 )
-            except Exception as e:
-                logger.debug(f"Failed to update broadcast status: {e}")  # ИСПРАВЛЕНО
+            except TelegramAPIError as e:
+                logger.debug(f"Failed to update broadcast status: {e}")
         await asyncio.sleep(DELAY_BETWEEN_BATCH)
 
     _broadcast_cancel_flags.pop(cancel_flag_key, None)
@@ -623,11 +610,6 @@ async def cmd_userinfo(message: types.Message):
 
 @retry_db_operation(max_retries=3)
 async def cmd_grant(message: Message):
-    """
-    Формат: /grant <telegram_id> <days>
-    Пример: /grant 123456789 30
-    Выдаёт VPN-подписку указанному пользователю на заданное количество дней.
-    """
     try:
         args = message.text.split()
         if len(args) != 3:
@@ -642,7 +624,6 @@ async def cmd_grant(message: Message):
         telegram_id = int(args[1])
         days = int(args[2])
 
-        # Проверка валидности дней (можно использовать validate_days из utils.validators)
         valid_days = [30, 90, 180]
         if days not in valid_days:
             await message.answer(
@@ -655,7 +636,6 @@ async def cmd_grant(message: Message):
             await message.answer("❌ VPN менеджер не инициализирован.")
             return
 
-        # Создаём ключ (этот метод уже обёрнут в retry_db_operation внутри vpn_manager)
         link = await vpn_manager.create_key(telegram_id, days)
 
         if link:
@@ -664,7 +644,6 @@ async def cmd_grant(message: Message):
                 f"🔗 Ссылка: `{link}`",
                 parse_mode="Markdown",
             )
-            # Отправим уведомление пользователю (если бот не заблокирован)
             try:
                 await message.bot.send_message(
                     telegram_id,
@@ -673,7 +652,7 @@ async def cmd_grant(message: Message):
                     f"Скопируйте ссылку и вставьте в VPN-приложение.",
                     parse_mode="Markdown",
                 )
-            except Exception as e:
+            except TelegramAPIError as e:
                 logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
         else:
             await message.answer(
@@ -686,18 +665,13 @@ async def cmd_grant(message: Message):
         await message.answer(
             "❌ Неверный формат аргументов. Убедитесь, что telegram_id и days – числа."
         )
-    except Exception as e:
-        logger.error(f"Error in cmd_grant: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error in cmd_grant")
         await message.answer("❌ Ошибка при выполнении команды.")
 
 
 @retry_db_operation(max_retries=3)
 async def cmd_revoke(message: Message):
-    """
-    Отзывает VPN-ключ у пользователя.
-    Формат: /revoke <telegram_id>
-    Пример: /revoke 123456789
-    """
     try:
         args = message.text.split()
         if len(args) != 2:
@@ -710,7 +684,7 @@ async def cmd_revoke(message: Message):
             return
 
         telegram_id = int(args[1])
-        validate_user_id(telegram_id)  # проверка валидности
+        validate_user_id(telegram_id)
 
         vpn_manager = get_vpn_manager()
         if not vpn_manager:
@@ -724,12 +698,11 @@ async def cmd_revoke(message: Message):
                 f"✅ VPN-ключ для пользователя `{telegram_id}` отозван.",
                 parse_mode="Markdown",
             )
-            # Уведомляем пользователя
             try:
                 await message.bot.send_message(
                     telegram_id, "❌ Ваш VPN-ключ был отозван администратором."
                 )
-            except Exception as e:
+            except TelegramAPIError as e:
                 logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
         else:
             await message.answer(
@@ -740,53 +713,41 @@ async def cmd_revoke(message: Message):
 
     except ValueError as e:
         await message.answer(f"❌ Ошибка: {e}")
-    except Exception as e:
-        logger.error(f"Error in cmd_revoke: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error in cmd_revoke")
         await message.answer("❌ Ошибка при выполнении команды.")
 
 
 # ========== Статистика ==========
 @retry_db_operation(max_retries=3)
 async def cmd_stats(message: Message):
-    """
-    Выводит сводную статистику:
-    - всего пользователей
-    - активных VPN-подписок
-    - активных подписок на обход DPI
-    - количество платежей за сегодня/всего
-    """
     try:
         async with AsyncSessionLocal() as session:
             now = datetime.now(timezone.utc)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-            # Общее число пользователей
             total_users = await session.scalar(
                 select(func.count()).select_from(BotUser)
             )
 
-            # Активные VPN-подписки (vpn_subscription_end > now)
             active_vpn = await session.scalar(
                 select(func.count())
                 .select_from(BotUser)
                 .where(BotUser.vpn_subscription_end > now)
             )
 
-            # Активные подписки на обход DPI (bypass_subscription_end > now)
             active_bypass = await session.scalar(
                 select(func.count())
                 .select_from(BotUser)
                 .where(BotUser.bypass_subscription_end > now)
             )
 
-            # Платежи сегодня
             payments_today = await session.scalar(
                 select(func.count())
                 .select_from(BotPayment)
                 .where(BotPayment.created_at >= today_start)
             )
 
-            # Все успешные платежи (is_paid=True)
             total_payments = await session.scalar(
                 select(func.count())
                 .select_from(BotPayment)
@@ -804,8 +765,8 @@ async def cmd_stats(message: Message):
 
             await message.answer(stats_text, parse_mode="Markdown")
 
-    except Exception as e:
-        logger.error(f"Error in cmd_stats: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Error in cmd_stats")
         await message.answer("❌ Ошибка при получении статистики.")
 
 

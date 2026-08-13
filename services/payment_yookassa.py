@@ -90,8 +90,8 @@ class YookassaService:
         except asyncio.TimeoutError:
             logger.error("❌ Таймаут при создании платежа в ЮKassa (10s)")
             return None
-        except Exception as e:
-            logger.error(f"❌ Ошибка создания платежа: {e}", exc_info=True)
+        except Exception:
+            logger.error("❌ Ошибка создания платежа")
             return None
 
     @retry_db_operation(max_retries=3)

@@ -217,7 +217,7 @@ class VPNManager:
                     client = await asyncio.wait_for(
                         self.provider.get_client_by_email(email), timeout=10.0
                     )
-                except:
+                except Exception:
                     client = None
 
                 if client is None:

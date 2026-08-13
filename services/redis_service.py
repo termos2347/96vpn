@@ -65,7 +65,7 @@ class RedisService:
             raise RuntimeError("Redis not connected")
         return self._client
 
-    async def set_cache(self, key: str, value: str, ttl: int = None) -> bool:
+    async def set_cache(self, key: str, value: str, ttl: int | None = None) -> bool:
         if self._client is None:
             return False
         try:

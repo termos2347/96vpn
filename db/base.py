@@ -42,6 +42,8 @@ def retry_db_operation(max_retries=3, delay=1, backoff=2):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
+                    # Здесь мы намеренно перехватываем все исключения,
+                    # чтобы повторить операцию – это стандартный паттерн.
                     last_exception = e
                     logger.warning(
                         f"DB operation {func.__name__} failed "

@@ -2,6 +2,7 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import ClassVar
 
 from config import settings
 
@@ -51,7 +52,7 @@ def get_module_name(name: str) -> str:
 class CompactFormatter(logging.Formatter):
     """Базовый форматтер для файла (без цветов)."""
 
-    LEVEL_MAP = {
+    LEVEL_MAP: ClassVar[dict] = {
         "DEBUG": "D",
         "INFO": "I",
         "WARNING": "W",
@@ -71,7 +72,7 @@ class CompactFormatter(logging.Formatter):
 class ColoredFormatter(CompactFormatter):
     """Цветной форматтер для консоли."""
 
-    COLORS = {
+    COLORS: ClassVar[dict] = {
         "DEBUG": "\033[94m",  # Синий
         "INFO": "\033[92m",  # Зелёный
         "WARNING": "\033[93m",  # Жёлтый
@@ -85,7 +86,6 @@ class ColoredFormatter(CompactFormatter):
         levelname = record.levelname
         letter = self.LEVEL_MAP.get(levelname, levelname[0])
         color = self.COLORS.get(levelname, "")
-        # Жирная цветная буква
         colored_letter = f"{self.BOLD}{color}{letter}{self.RESET}"
         record.level_short = colored_letter
         record.module_name = get_module_name(record.name)
@@ -94,6 +94,9 @@ class ColoredFormatter(CompactFormatter):
 
 def setup_logger():
     """Настраивает логирование с ротацией: консоль – цветная, файл – без цветов."""
+    # Создаём свой логгер вместо использования корневого
+    logger = logging.getLogger(__name__)
+
     # Консоль
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.DEBUG if settings.DEBUG else logging.WARNING)
@@ -111,7 +114,7 @@ def setup_logger():
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(CompactFormatter())
 
-    # Корневой логгер
+    # Корневой логгер – используем для глобальной настройки
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     for h in root.handlers[:]:
@@ -119,7 +122,8 @@ def setup_logger():
     root.addHandler(console)
     root.addHandler(file_handler)
 
-    logging.info(
+    # Логируем через свой логгер, а не через корневой
+    logger.info(
         "Логирование настроено: консоль (%s), файл (INFO)",
         "DEBUG" if settings.DEBUG else "WARNING+",
     )

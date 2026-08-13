@@ -28,20 +28,19 @@ async def test_activate_success(internal_app, mock_bot):
 
     with patch(
         "internal_api.activate_subscription", new=AsyncMock(return_value=True)
-    ) as mock_activate:
-        with patch("internal_api.get_vpn_manager") as mock_get_manager:
-            mock_manager = AsyncMock()
-            mock_manager.create_key = AsyncMock(return_value="https://test.com/sub/xyz")
-            mock_get_manager.return_value = mock_manager
+    ) as mock_activate, patch("internal_api.get_vpn_manager") as mock_get_manager:
+        mock_manager = AsyncMock()
+        mock_manager.create_key = AsyncMock(return_value="https://test.com/sub/xyz")
+        mock_get_manager.return_value = mock_manager
 
-            resp = await client.post("/activate", json=payload, headers=headers)
-            assert resp.status == 200
-            data = await resp.json()
-            assert data == {"status": "ok"}
+        resp = await client.post("/activate", json=payload, headers=headers)
+        assert resp.status == 200
+        data = await resp.json()
+        assert data == {"status": "ok"}
 
-            mock_activate.assert_called_once()
-            mock_manager.create_key.assert_called_once_with(123, 30)
-            mock_bot.send_message.assert_called_once()
+        mock_activate.assert_called_once()
+        mock_manager.create_key.assert_called_once_with(123, 30)
+        mock_bot.send_message.assert_called_once()
 
     await client.close()
 

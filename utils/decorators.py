@@ -16,9 +16,7 @@ def rate_limit(max_per_minute: int = 5):
         @wraps(func)
         async def wrapper(message_or_callback, *args, **kwargs):
             # Определяем user_id
-            if isinstance(message_or_callback, Message) or isinstance(
-                message_or_callback, CallbackQuery
-            ):
+            if isinstance(message_or_callback, (Message, CallbackQuery)):
                 user_id = message_or_callback.from_user.id
             else:
                 return await func(message_or_callback, *args, **kwargs)
