@@ -133,14 +133,15 @@ async def on_startup():
     logger.info("=" * 50)
 
     # 1. Redis
-    try:
-        await redis_service.connect()
-        if redis_service._client is not None:
-            logger.info(" ✅ Redis connected")
-        else:
-            logger.warning(" ⚠️ Redis not available")
-    except Exception as e:
-        logger.warning(f" ⚠️ Redis connection failed: {e}")
+    if settings.REDIS_ENABLED:
+        try:
+            await redis_service.connect()
+            if redis_service._client is not None:
+                logger.info(" ✅ Redis connected")
+            else:
+                logger.warning(" ⚠️ Redis not available")
+        except Exception as e:
+            logger.warning(f" ⚠️ Redis connection failed: {e}")
 
     # 2. Database
     try:

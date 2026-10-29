@@ -15,8 +15,8 @@ from config import INTERNAL_API_SECRET, settings
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import activate_subscription
 from db.models import BotUser
-from handlers import get_vpn_manager
 from services.payment_yookassa import yookassa_service
+from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ def get_client_ip(request: web.Request) -> str:
     real_ip = request.headers.get("X-Real-IP")
     if real_ip:
         return real_ip
-    return request.remote
+    return request.remote or ""
 
 
 def ip_in_network(ip: str) -> bool:

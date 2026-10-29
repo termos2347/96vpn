@@ -17,9 +17,32 @@ logger = logging.getLogger(__name__)
 
 
 def clean_db_url(url: str) -> str:
+    """Готовит DATABASE_URL к использованию с asyncpg.
+
+    asyncpg не понимает libpq-параметры ``sslmode`` и ``channel_binding``.
+    Убираем ``channel_binding`` полностью, а ``sslmode`` конвертируем
+    в понятный asyncpg параметр ``ssl``.
+    """
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
+
+    # channel_binding — только для libpq, asyncpg его не принимает
     query_params.pop("channel_binding", None)
+
+    # sslmode -> ssl (asyncpg понимает: true/false/require/prefer/allow/disable)
+    sslmode_values = query_params.pop("sslmode", None)
+    if sslmode_values:
+        mode = sslmode_values[0].lower() if isinstance(sslmode_values, list) else str(sslmode_values).lower()
+        mapping = {
+            "disable": "false",
+            "allow": "allow",
+            "prefer": "prefer",
+            "require": "require",
+            "verify-ca": "require",
+            "verify-full": "require",
+        }
+        query_params["ssl"] = [mapping.get(mode, "true")]
+
     new_query = urlencode(query_params, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
 
@@ -77,6 +100,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: int = 5
 
     # ---------- Redis ----------
+    REDIS_ENABLED: bool = True
     REDIS_URL: str | None = None
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -244,7 +268,7 @@ class Settings(BaseSettings):
 
 
 try:
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
 except ValidationError as e:
     logging.basicConfig(level=logging.ERROR)
     logger.error("Configuration validation failed:")

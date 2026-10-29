@@ -18,16 +18,16 @@ class RedisService:
         return cls._instance
 
     async def connect(self):
+        if not settings.REDIS_ENABLED:
+            logger.info("ℹ️ Redis disabled (REDIS_ENABLED=false), running without cache")
+            return
+
         if self._client is not None:
             return
 
         try:
             if settings.REDIS_URL:
                 url = settings.REDIS_URL
-                if url.startswith("redis://") and not url.startswith("rediss://"):
-                    url = url.replace("redis://", "rediss://", 1)
-                    settings.REDIS_URL = url
-
                 self._client = redis.Redis.from_url(
                     url,
                     decode_responses=True,
@@ -52,12 +52,22 @@ class RedisService:
             logger.info(f"✅ Connected to Redis at {display_url}")
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e}")
+            if self._client is not None:
+                try:
+                    await self._client.close()
+                except Exception:
+                    pass
             self._client = None
 
     async def close(self):
         if self._client:
-            await self._client.close()
-            logger.info("Redis connection closed")
+            try:
+                await self._client.close()
+                logger.info("Redis connection closed")
+            except Exception as e:
+                logger.warning(f"Error closing Redis connection: {e}")
+            finally:
+                self._client = None
 
     @property
     def client(self) -> redis.Redis:
@@ -81,7 +91,10 @@ class RedisService:
         if self._client is None:
             return None
         try:
-            return await self.client.get(key)
+            result = await self.client.get(key)
+            if result is None or isinstance(result, str):
+                return result
+            return result.decode()
         except Exception as e:
             logger.error(f"Redis get_cache error: {e}")
             return None

@@ -35,8 +35,11 @@ npx localtunnel --port 5001 --subdomain my-test-96
 ```
 
 ```bash
-chmod +x run.sh
-./run.sh
+chmod +x install.sh start.sh
+
+./install.sh
+
+./start.sh
 ```
 ## Миграции базы данных
 

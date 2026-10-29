@@ -13,7 +13,7 @@ from sqlalchemy import select
 from admin import send_admin_alert
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.models import BotUser
-from handlers import get_vpn_manager
+from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
