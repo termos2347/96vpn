@@ -2,21 +2,17 @@
 import logging
 import uuid
 
-from aiogram import F, Router, types
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 
-from admin import send_admin_alert
 from admin.bot import log_error
 from config import settings
 from db.base import AsyncSessionLocal
-from db.crud import activate_subscription
-from db.models import BotPayment, BotUser
+from db.models import BotPayment
 from handlers.ui import Keyboards, Texts
 from services.payment_yookassa import yookassa_service
-from services.vpn_manager import get_vpn_manager
 from utils.decorators import rate_limit
 from utils.validators import ValidationError, validate_currency, validate_user_id
 
@@ -39,50 +35,26 @@ async def safe_answer_callback(
             raise
 
 
-@router.callback_query(F.data.startswith("currency_"))
-@rate_limit(max_per_minute=settings.RATE_LIMIT_TARIFF)
-async def currency_chosen(callback: CallbackQuery):
-    try:
-        currency = callback.data.split("_")[1]
-        if currency not in settings.VPN_PRICES:
-            raise ValidationError(f"Invalid currency: {currency}")
-
-        new_text = Texts.tariff_selection(currency)
-        new_markup = Keyboards.tariff_selection(currency)
-
-        current_text = callback.message.text
-        current_markup = callback.message.reply_markup
-        if current_text == new_text and current_markup == new_markup:
-            await safe_answer_callback(callback)
-            return
-
-        await callback.message.edit_text(new_text, reply_markup=new_markup)
-        await safe_answer_callback(callback)
-    except ValidationError as e:
-        logger.warning(f"Validation error in currency_chosen: {e}")
-        await safe_answer_callback(callback, "❌ Некорректная валюта", show_alert=True)
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            logger.debug("Message already has the same content, ignoring.")
-            await safe_answer_callback(callback)
-        else:
-            logger.exception("Telegram error in currency_chosen")
-            await safe_answer_callback(
-                callback, "❌ Ошибка обновления", show_alert=True
-            )
-    except Exception:
-        # Любая другая ошибка – логируем и показываем общее сообщение
-        logger.exception("Error in currency_chosen")
-        await safe_answer_callback(callback, "❌ Внутренняя ошибка", show_alert=True)
-
-
 @router.callback_query(F.data.startswith("tariff_"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_PAYMENT)
 async def tariff_chosen(callback: CallbackQuery):
+    # Guard: сообщение должно быть доступно (не InaccessibleMessage / None)
+    if not isinstance(callback.message, Message):
+        await safe_answer_callback(
+            callback, "❌ Сообщение устарело", show_alert=True
+        )
+        return
+
+    # Guard: data не может быть None (по фильтру), но Pylance этого не знает
+    data = callback.data
+    if not data:
+        await safe_answer_callback(callback, "❌ Ошибка данных", show_alert=True)
+        return
+
     try:
-        parts = callback.data.split("_")
+        parts = data.split("_")
         if len(parts) != 3:
-            raise ValidationError(f"Invalid tariff callback: {callback.data}")
+            raise ValidationError(f"Invalid tariff callback: {data}")
         period = parts[1]
         currency = parts[2]
 
@@ -172,113 +144,4 @@ async def tariff_chosen(callback: CallbackQuery):
         )
         await safe_answer_callback(
             callback, "❌ Внутренняя ошибка сервера", show_alert=True
-        )
-
-
-@router.pre_checkout_query()
-async def pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    await pre_checkout_query.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-@rate_limit(max_per_minute=settings.RATE_LIMIT_STARS)
-async def successful_payment(message: Message):
-    payment = message.successful_payment
-    payload = payment.invoice_payload
-    telegram_payment_id = payment.telegram_payment_charge_id
-
-    parts = payload.split("_")
-    if len(parts) < 4:
-        await message.answer(Texts.payment_error())
-        return
-    product_type, period, _, user_id_str = parts[0], parts[1], parts[2], parts[3]
-    target_user_id = int(user_id_str)
-
-    if message.from_user.id != target_user_id:
-        await message.answer(
-            "⚠️ Вы не можете оплатить подписку для другого пользователя."
-        )
-        return
-
-    try:
-        async with AsyncSessionLocal() as session:
-            stmt = select(BotPayment).where(BotPayment.payment_id == telegram_payment_id)
-            existing = (await session.execute(stmt)).scalar_one_or_none()
-            if existing and existing.is_paid:
-                await message.answer(Texts.payment_already_processed())
-                return
-    except SQLAlchemyError:
-        logger.exception(f"DB error checking payment {telegram_payment_id}")
-        await message.answer(Texts.payment_error())
-        return
-
-    success = False
-    try:
-        async with AsyncSessionLocal() as session, session.begin():
-            stmt_user = (
-                select(BotUser)
-                .where(BotUser.telegram_id == target_user_id)
-                .with_for_update()
-            )
-            user = (await session.execute(stmt_user)).scalar_one_or_none()
-            if not user:
-                user = BotUser(telegram_id=target_user_id)
-                session.add(user)
-                await session.flush()
-                stmt_user = (
-                    select(BotUser)
-                    .where(BotUser.telegram_id == target_user_id)
-                    .with_for_update()
-                )
-                user = (await session.execute(stmt_user)).scalar_one()
-
-            success = await activate_subscription(
-                session,
-                target_user_id,
-                product_type,
-                period,
-                telegram_payment_id,
-                user=user,
-            )
-    except SQLAlchemyError as e:
-        logger.exception(f"Activation error for payment {telegram_payment_id}")
-        log_error(f"Activation error: {e}", notify_admin=True)
-        await message.answer(Texts.payment_error())
-        return
-
-    if not success:
-        await message.answer(Texts.payment_already_processed())
-        return
-
-    days = settings.PERIOD_DAYS.get(period, 0)
-    if product_type == "vpn":
-        try:
-            async with AsyncSessionLocal() as session:
-                stmt = select(BotUser).where(BotUser.telegram_id == target_user_id)
-                user = (await session.execute(stmt)).scalar_one_or_none()
-                vpn_end = user.vpn_subscription_end if user else None
-
-            vpn_manager = get_vpn_manager()
-            if vpn_manager:
-                link = await vpn_manager.create_key(target_user_id, days)
-            else:
-                link = None
-
-            msg = Texts.payment_success_with_date(vpn_end, days, link)
-            await message.answer(msg, parse_mode="Markdown")
-
-            if not link and vpn_manager:
-                await send_admin_alert(
-                    f"⚠️ Не удалось создать ключ для {target_user_id}"
-                )
-        except Exception as e:
-            logger.exception(f"Key creation failed for user {target_user_id}")
-            log_error(f"Key creation failed: {e}", notify_admin=True)
-            await message.answer(Texts.key_creation_error())
-            await send_admin_alert(
-                f"❌ Ошибка создания ключа для {target_user_id}: {e}"
-            )
-    else:
-        await message.answer(
-            f"✅ Подписка на {product_type} на {days} дней активирована!"
         )

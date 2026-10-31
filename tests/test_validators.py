@@ -23,8 +23,9 @@ def test_validate_days():
 
 def test_validate_currency():
     assert validate_currency("rub")
-    with pytest.raises(ValidationError):
-        validate_currency("eur")
+    for invalid in ("eur", "gbp", "RUB", "usd", ""):
+        with pytest.raises(ValidationError):
+            validate_currency(invalid)
 
 
 def test_validate_uuid():

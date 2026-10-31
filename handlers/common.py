@@ -19,15 +19,20 @@ router = Router(name="common")
 @router.message(Command("start"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_START)
 async def cmd_start(message: Message):
-    user_id = message.from_user.id
+    if message.from_user is None:
+        return
+    user = message.from_user
+    user_id = user.id
+
     async with AsyncSessionLocal() as session:
-        user = await get_or_create_bot_user(session, user_id)
-        if not user.username:
-            user.username = message.from_user.username
+        db_user = await get_or_create_bot_user(session, user_id)
+        if not db_user.username:
+            db_user.username = user.username
             await session.commit()
-        vpn_end = user.vpn_subscription_end
+        vpn_end = db_user.vpn_subscription_end
+
     await message.answer(
-        Texts.main_menu(message.from_user.first_name, vpn_end),
+        Texts.main_menu(user.first_name, vpn_end),
         reply_markup=Keyboards.main_menu(),
     )
 
@@ -35,19 +40,25 @@ async def cmd_start(message: Message):
 @router.message(F.text == "🚀 Оплатить подписку")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_BUY_VPN)
 async def handle_buy_vpn(message: Message):
+    # Оплата только в рублях — сразу показываем тарифы
     await message.answer(
-        Texts.currency_selection(), reply_markup=Keyboards.currency_selection()
+        Texts.tariff_selection("rub"),
+        reply_markup=Keyboards.tariff_selection("rub"),
     )
 
 
 @router.message(F.text == "🔑 Мои Ключи")
 @rate_limit(max_per_minute=settings.RATE_LIMIT_MY_KEYS)
 async def handle_my_keys(message: Message):
+    if message.from_user is None:
+        return
     user_id = message.from_user.id
+
     vpn_manager = get_vpn_manager()
     if not vpn_manager:
         await message.answer(Texts.vpn_not_available())
         return
+
     link = await vpn_manager.get_or_create_link(user_id)
     await message.answer(Texts.my_keys(link), parse_mode="Markdown")
 
@@ -60,22 +71,21 @@ async def handle_help(message: Message):
 
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery):
+    # В aiogram 3 callback.message может быть Message | InaccessibleMessage | None
+    if not isinstance(callback.message, Message):
+        await callback.answer("Сообщение устарело", show_alert=True)
+        return
+
     await callback.message.delete()
+
     user_id = callback.from_user.id
     async with AsyncSessionLocal() as session:
-        user = await get_or_create_bot_user(session, user_id)
-        vpn_end = user.vpn_subscription_end
+        db_user = await get_or_create_bot_user(session, user_id)
+        vpn_end = db_user.vpn_subscription_end
+
     await callback.message.answer(
         Texts.main_menu(callback.from_user.first_name, vpn_end),
         reply_markup=Keyboards.main_menu(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "back_to_currencies")
-async def back_to_currencies(callback: CallbackQuery):
-    await callback.message.edit_text(
-        Texts.currency_selection(), reply_markup=Keyboards.currency_selection()
     )
     await callback.answer()
 
@@ -85,5 +95,4 @@ async def setup_bot_commands(bot):
         types.BotCommand(command="start", description="Главное меню"),
     ]
     await bot.set_my_commands(commands)
-    # Логируем только в DEBUG
     logger.debug("Main bot commands set")

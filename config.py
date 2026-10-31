@@ -12,27 +12,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
-# Создаём логгер для этого модуля
 logger = logging.getLogger(__name__)
 
 
 def clean_db_url(url: str) -> str:
-    """Готовит DATABASE_URL к использованию с asyncpg.
-
-    asyncpg не понимает libpq-параметры ``sslmode`` и ``channel_binding``.
-    Убираем ``channel_binding`` полностью, а ``sslmode`` конвертируем
-    в понятный asyncpg параметр ``ssl``.
-    """
+    """Готовит DATABASE_URL к использованию с asyncpg."""
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
 
-    # channel_binding — только для libpq, asyncpg его не принимает
     query_params.pop("channel_binding", None)
 
-    # sslmode -> ssl (asyncpg понимает: true/false/require/prefer/allow/disable)
     sslmode_values = query_params.pop("sslmode", None)
     if sslmode_values:
-        mode = sslmode_values[0].lower() if isinstance(sslmode_values, list) else str(sslmode_values).lower()
+        mode = (
+            sslmode_values[0].lower()
+            if isinstance(sslmode_values, list)
+            else str(sslmode_values).lower()
+        )
         mapping = {
             "disable": "false",
             "allow": "allow",
@@ -95,7 +91,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_BUY_VPN: int = 3
     RATE_LIMIT_TARIFF: int = 5
     RATE_LIMIT_PAYMENT: int = 3
-    RATE_LIMIT_STARS: int = 3
     RATE_LIMIT_ADMIN: int = 10
     RATE_LIMIT_DEFAULT: int = 5
 
@@ -124,19 +119,9 @@ class Settings(BaseSettings):
     VPN_PRICE_RUB_1M: float = 199.0
     VPN_PRICE_RUB_3M: float = 499.0
     VPN_PRICE_RUB_6M: float = 899.0
-    VPN_PRICE_STARS_1M: float = 150.0
-    VPN_PRICE_STARS_3M: float = 400.0
-    VPN_PRICE_STARS_6M: float = 700.0
-    VPN_PRICE_USDT_1M: float = 3.5
-    VPN_PRICE_USDT_3M: float = 9.0
-    VPN_PRICE_USDT_6M: float = 16.0
 
     BYPASS_PRICE_RUB_1M: float = 150.0
     BYPASS_PRICE_RUB_3M: float = 400.0
-    BYPASS_PRICE_STARS_1M: float = 75.0
-    BYPASS_PRICE_STARS_3M: float = 200.0
-    BYPASS_PRICE_USDT_1M: float = 2.0
-    BYPASS_PRICE_USDT_3M: float = 4.5
 
     INTERNAL_API_HOST: str = "127.0.0.1"
     INTERNAL_API_PORT: int = 5001
@@ -235,27 +220,15 @@ class Settings(BaseSettings):
                 "3m": self.VPN_PRICE_RUB_3M,
                 "6m": self.VPN_PRICE_RUB_6M,
             },
-            "stars": {
-                "1m": self.VPN_PRICE_STARS_1M,
-                "3m": self.VPN_PRICE_STARS_3M,
-                "6m": self.VPN_PRICE_STARS_6M,
-            },
-            "usdt": {
-                "1m": self.VPN_PRICE_USDT_1M,
-                "3m": self.VPN_PRICE_USDT_3M,
-                "6m": self.VPN_PRICE_USDT_6M,
-            },
         }
 
     @property
     def BYPASS_PRICES(self) -> dict:
         return {
-            "rub": {"1m": self.BYPASS_PRICE_RUB_1M, "3m": self.BYPASS_PRICE_RUB_3M},
-            "stars": {
-                "1m": self.BYPASS_PRICE_STARS_1M,
-                "3m": self.BYPASS_PRICE_STARS_3M,
+            "rub": {
+                "1m": self.BYPASS_PRICE_RUB_1M,
+                "3m": self.BYPASS_PRICE_RUB_3M,
             },
-            "usdt": {"1m": self.BYPASS_PRICE_USDT_1M, "3m": self.BYPASS_PRICE_USDT_3M},
         }
 
     @property

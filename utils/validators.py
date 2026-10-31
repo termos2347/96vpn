@@ -26,8 +26,8 @@ def validate_days(days: int) -> bool:
 
 
 def validate_currency(currency: str) -> bool:
-    """Проверяет валидность валюты."""
-    valid_currencies = ["rub", "stars", "usdt"]
+    """Проверяет валидность валюты (поддерживается только RUB)."""
+    valid_currencies = ["rub"]
     if currency not in valid_currencies:
         raise ValidationError(
             f"Invalid currency: {currency}. Must be one of {valid_currencies}"

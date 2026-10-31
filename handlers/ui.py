@@ -35,10 +35,6 @@ class Texts:
         )
 
     @staticmethod
-    def currency_selection() -> str:
-        return "💳 Выберите валюту для оплаты:"
-
-    @staticmethod
     def tariff_selection(currency: str) -> str:
         """Текст для выбора тарифа в конкретной валюте."""
         return f"💳 Выберите срок подписки (оплата в {currency.upper()}):"
@@ -148,24 +144,6 @@ class Keyboards:
         return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
     @staticmethod
-    def currency_selection() -> InlineKeyboardMarkup:
-        """Выбор валюты."""
-        buttons = [
-            [InlineKeyboardButton(text="🇷🇺 Рубли (RUB)", callback_data="currency_rub")],
-            [
-                InlineKeyboardButton(
-                    text="⭐ Telegram Stars", callback_data="currency_stars"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="₿ USDT (TRC20)", callback_data="currency_usdt"
-                )
-            ],
-        ]
-        return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    @staticmethod
     def tariff_selection(currency: str) -> InlineKeyboardMarkup:
         """Выбор тарифа для конкретной валюты."""
         prices = settings.VPN_PRICES.get(currency, {})
@@ -175,7 +153,7 @@ class Keyboards:
             callback = f"tariff_{period}_{currency}"
             buttons.append([InlineKeyboardButton(text=label, callback_data=callback)])
         buttons.append(
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_currencies")]
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
         )
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
