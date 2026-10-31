@@ -1,4 +1,52 @@
 # tests/conftest.py
+"""
+Общие фикстуры для тестов.
+
+ВАЖНО: env-переменные выставляются на уровне модуля ДО первого импорта
+`config` — иначе pydantic-settings попытается прочитать боевой `.env`
+(или упадёт с ValidationError, если его нет).
+"""
+import os
+
+# --- Обязательные переменные для Settings (см. config.py) ---
+os.environ.setdefault("BOT_TOKEN", "123456:TEST_MAIN_BOT_TOKEN")
+os.environ.setdefault("ADMIN_BOT_TOKEN", "123456:TEST_ADMIN_BOT_TOKEN")
+os.environ.setdefault("ADMIN_CHAT_ID", "123456789")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test_db"
+)
+
+# Webhook'и — в DEBUG-режиме допускается http://localhost
+os.environ.setdefault("WEBHOOK_URL", "http://localhost:5001/webhook")
+os.environ.setdefault("WEBHOOK_SECRET", "test_webhook_secret_0123456789")
+os.environ.setdefault("ADMIN_WEBHOOK_URL", "http://localhost:5001/webhook/admin")
+os.environ.setdefault(
+    "ADMIN_WEBHOOK_SECRET", "test_admin_webhook_secret_0123456789"
+)
+
+# Валидный Fernet-ключ (32 url-safe base64 байта). НЕ боевой!
+os.environ.setdefault(
+    "ENCRYPTION_KEY", "dGVzdF9mZXJuZXRfa2V5X2Zvcl90ZXN0c19vbmx5Xz0="
+)
+os.environ.setdefault("INTERNAL_API_SECRET", "test_internal_api_secret")
+
+# ЮKassa — заглушки
+os.environ.setdefault("YOOKASSA_SHOP_ID", "123456")
+os.environ.setdefault("YOOKASSA_API_KEY", "test_" + "x" * 40)
+os.environ.setdefault("YOOKASSA_TRUSTED_IPS", '["127.0.0.1", "185.71.76.0/24"]')
+
+# 3x-UI — заглушки
+os.environ.setdefault("XUI_MASTER_URL", "http://localhost:2053")
+os.environ.setdefault("XUI_API_TOKEN", "test_xui_token_0123456789abcdef")
+os.environ.setdefault("XUI_INBOUND_ID", "1")
+os.environ.setdefault("XUI_SUB_PORT", "2096")
+
+# Отключаем Redis и проверку миграций в тестах
+os.environ.setdefault("REDIS_ENABLED", "false")
+os.environ.setdefault("SKIP_MIGRATION_CHECK", "true")
+os.environ.setdefault("DEBUG", "true")  # разрешает http://localhost для webhook
+
+# --- Теперь безопасно импортировать проект ---
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

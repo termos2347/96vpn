@@ -22,7 +22,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import ADMIN_CHAT_ID, save_trusted_ips, settings
-from db.base import AsyncSessionLocal, engine, retry_db_operation
+from db.base import AsyncSessionLocal, engine
 from db.crud import get_user_full_data
 from db.models import BotPayment, BotUser
 from services.vpn_manager import get_vpn_manager
@@ -199,7 +199,6 @@ async def cmd_errors(message: types.Message):
 
 
 # ========== Текстовая рассылка ==========
-@retry_db_operation(max_retries=3)
 async def cmd_broadcast(message: Message):
     try:
         text_parts = (message.text or "").split(maxsplit=1)
@@ -749,7 +748,6 @@ async def cmd_userinfo(message: types.Message):
     await message.answer(text_msg, parse_mode="Markdown")
 
 
-@retry_db_operation(max_retries=3)
 async def cmd_grant(message: Message):
     try:
         args = (message.text or "").split()
@@ -814,7 +812,6 @@ async def cmd_grant(message: Message):
         await message.answer("❌ Ошибка при выполнении команды.")
 
 
-@retry_db_operation(max_retries=3)
 async def cmd_revoke(message: Message):
     try:
         args = (message.text or "").split()
@@ -864,7 +861,6 @@ async def cmd_revoke(message: Message):
 
 
 # ========== Статистика ==========
-@retry_db_operation(max_retries=3)
 async def cmd_stats(message: Message):
     try:
         async with AsyncSessionLocal() as session:
