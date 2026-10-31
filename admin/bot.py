@@ -30,13 +30,13 @@ from utils.validators import validate_user_id
 
 logger = logging.getLogger(__name__)
 
-# Глобальные переменные
-admin_bot: Bot = None
+# Глобальные переменные — честно Optional
+admin_bot: Bot | None = None
 dp = Dispatcher()
-main_bot: Bot = None
+main_bot: Bot | None = None
 
-error_log = []
-_broadcast_cancel_flags = {}
+error_log: list[str] = []
+_broadcast_cancel_flags: dict[int, bool] = {}
 _router_attached = False
 
 
@@ -52,7 +52,7 @@ def log_error(message: str, notify_admin: bool = False):
 
 async def send_admin_alert(message: str):
     try:
-        if admin_bot and settings.ADMIN_CHAT_ID:
+        if admin_bot is not None and settings.ADMIN_CHAT_ID:
             await admin_bot.send_message(
                 chat_id=settings.ADMIN_CHAT_ID,
                 text=f"⚠️ Административное уведомление:\n\n{message}",
@@ -69,18 +69,15 @@ class BroadcastStates(StatesGroup):
 
 # ========== Запуск и остановка ==========
 async def startup():
-    global admin_bot, _router_attached  # dp не присваивается – убрали
+    global admin_bot, _router_attached
 
     try:
         if admin_bot is None:
             admin_bot = Bot(token=settings.ADMIN_BOT_TOKEN)
-            if admin_bot is None:
-                raise RuntimeError("Failed to create admin bot instance")
 
         if not _router_attached:
             _router_attached = True
 
-        # Устанавливаем команды
         await admin_bot.set_my_commands(
             [
                 BotCommand(command="start", description="Запуск бота"),
@@ -88,7 +85,12 @@ async def startup():
                 BotCommand(command="health", description="Проверка состояния системы"),
                 BotCommand(command="errors", description="Последние ошибки"),
                 BotCommand(
-                    command="broadcast", description="Рассылка (ответьте на сообщение)"
+                    command="broadcast",
+                    description="Текстовая рассылка (/broadcast <текст>)",
+                ),
+                BotCommand(
+                    command="broadcast_media",
+                    description="Медиа-рассылка (ответьте на сообщение)",
                 ),
                 BotCommand(
                     command="userinfo",
@@ -111,7 +113,6 @@ async def startup():
             ]
         )
 
-        # Проверяем, что команды установились
         commands = await admin_bot.get_my_commands()
         if not commands:
             raise RuntimeError("Failed to set admin bot commands (empty list returned)")
@@ -119,12 +120,12 @@ async def startup():
         logger.info("✅ Admin bot initialized")
 
     except Exception:
-        logger.exception("❌ Admin bot startup failed")  # G201 + TRY401
+        logger.exception("❌ Admin bot startup failed")
         raise
 
 
 async def shutdown():
-    global _router_attached  # dp не присваивается
+    global _router_attached
     if admin_bot:
         try:
             await admin_bot.delete_webhook()
@@ -142,20 +143,22 @@ async def cmd_start(message: types.Message):
 
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
-    text = (
+    text_msg = (
         "📋 Доступные команды:\n\n"
         "/start – Запустить бота\n"
         "/health – состояние системы\n"
         "/errors – последние ошибки\n"
-        "/broadcast – рассылка (reply на сообщение)\n"
+        "/broadcast <текст> – текстовая рассылка\n"
+        "/broadcast_media – медиа-рассылка (reply на сообщение)\n"
         "/userinfo <telegram_id> – информация о пользователе\n"
         "/grant <telegram_id> <days> – выдать/продлить VPN\n"
         "/revoke <telegram_id> – отозвать VPN\n"
         "/stats – статистика по подпискам\n"
         "/yookassa_ips – показать доверенные IP ЮKassa\n"
-        '/set_yookassa_ips <JSON> – установить доверенные IP (пример: ["185.71.76.0/24", ...])\n'
+        '/set_yookassa_ips <JSON> – установить доверенные IP '
+        '(пример: ["185.71.76.0/24", ...])\n'
     )
-    await message.answer(text)
+    await message.answer(text_msg)
 
 
 @dp.message(Command("health"))
@@ -165,7 +168,7 @@ async def cmd_health(message: types.Message):
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         status += "• БД: подключена\n"
-    except SQLAlchemyError as e:  # конкретное исключение
+    except SQLAlchemyError as e:
         status += f"• БД: ошибка ({e})\n"
         log_error(f"Health check DB error: {e}", notify_admin=False)
 
@@ -195,18 +198,11 @@ async def cmd_errors(message: types.Message):
     await message.answer(text_lines)
 
 
-# ========== Рассылка ==========
+# ========== Текстовая рассылка ==========
 @retry_db_operation(max_retries=3)
 async def cmd_broadcast(message: Message):
-    """
-    Рассылает сообщение всем пользователям бота (или только с активной подпиской).
-    Формат: /broadcast [--active] <текст сообщения>
-    --active — опциональный флаг, отправляет только пользователям с активной VPN-подпиской.
-    Пример: /broadcast Всем привет!
-    Пример: /broadcast --active Важная информация для активных пользователей.
-    """
     try:
-        text_parts = message.text.split(maxsplit=1)
+        text_parts = (message.text or "").split(maxsplit=1)
         if len(text_parts) < 2:
             await message.answer(
                 "❌ Неверный формат.\n"
@@ -231,6 +227,9 @@ async def cmd_broadcast(message: Message):
         if not hasattr(cmd_broadcast, "pending_broadcasts"):
             cmd_broadcast.pending_broadcasts = {}
 
+        if message.from_user is None:
+            return
+
         admin_id = message.from_user.id
         cmd_broadcast.pending_broadcasts[admin_id] = {
             "text": broadcast_text,
@@ -239,7 +238,8 @@ async def cmd_broadcast(message: Message):
         }
 
         await message.answer(
-            f"⚠️ Вы собираетесь отправить сообщение **всем {'активным ' if only_active else ''}пользователям**.\n\n"
+            f"⚠️ Вы собираетесь отправить сообщение **всем "
+            f"{'активным ' if only_active else ''}пользователям**.\n\n"
             f"Сообщение:\n```\n{broadcast_text}\n```\n\n"
             f"Подтвердите действие:",
             parse_mode="Markdown",
@@ -247,7 +247,7 @@ async def cmd_broadcast(message: Message):
         )
 
     except Exception:
-        logger.exception("Error in cmd_broadcast")  # G201 + TRY401
+        logger.exception("Error in cmd_broadcast")
         await message.answer("❌ Ошибка при подготовке рассылки.")
 
 
@@ -266,10 +266,94 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+# ========== Медиа-рассылка (вход в FSM) ==========
+@dp.message(Command("broadcast_media"))
+async def cmd_broadcast_media(message: Message, state: FSMContext):
+    """Медиа-рассылка: ответьте этой командой на сообщение с фото/видео/документом."""
+    if message.from_user is None:
+        return
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+
+    if message.reply_to_message is None:
+        await message.answer(
+            "❌ Команда должна быть ответом на сообщение с медиа.\n"
+            "Пример: отправьте фото/видео и ответьте на него "
+            "`/broadcast_media`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    reply = message.reply_to_message
+
+    has_media = bool(
+        reply.photo or reply.video or reply.animation or reply.document
+    )
+    if not has_media:
+        await message.answer(
+            "❌ В сообщении нет фото/видео/анимации/документа.\n"
+            "Для текстовой рассылки используйте `/broadcast <текст>`."
+        )
+        return
+
+    max_size = settings.MAX_BROADCAST_FILE_SIZE_MB * 1024 * 1024
+    media_obj = (
+        (reply.photo[-1] if reply.photo else None)
+        or reply.video
+        or reply.animation
+        or reply.document
+    )
+    if media_obj and media_obj.file_size and media_obj.file_size > max_size:
+        await message.answer(
+            f"❌ Файл слишком большой "
+            f"({media_obj.file_size // (1024 * 1024)} МБ). "
+            f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+        )
+        return
+
+    await state.set_state(BroadcastStates.confirm)
+    await state.update_data(
+        reply_message_id=reply.message_id,
+        reply_chat_id=message.chat.id,
+    )
+
+    confirm_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Отправить", callback_data="broadcast_send"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена", callback_data="broadcast_cancel"
+                ),
+            ]
+        ]
+    )
+    await message.answer(
+        "⚠️ Вы собираетесь разослать это сообщение **всем пользователям**.\n\n"
+        "Подтвердите действие:",
+        parse_mode="Markdown",
+        reply_markup=confirm_kb,
+    )
+
+
 @dp.callback_query(F.data.startswith("broadcast_confirm_"))
 async def broadcast_confirm_callback(callback: CallbackQuery):
     try:
         await callback.answer()
+
+        if not isinstance(callback.message, Message):
+            await callback.answer("Сообщение устарело", show_alert=True)
+            return
+
+        if callback.from_user is None:
+            return
+
+        if callback.bot is None:
+            await callback.answer("Бот недоступен", show_alert=True)
+            return
+        bot = callback.bot
 
         admin_id = callback.from_user.id
         pending = getattr(cmd_broadcast, "pending_broadcasts", {}).get(admin_id)
@@ -287,7 +371,6 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
 
         broadcast_text = pending["text"]
         only_active = pending["only_active"]
-        # original_message не используется – убрали
 
         await callback.message.edit_text("⏳ Начинаю рассылку...")
 
@@ -309,10 +392,10 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
         fail_count = 0
         for uid in user_ids:
             try:
-                await callback.bot.send_message(uid, broadcast_text)
+                await bot.send_message(uid, broadcast_text)
                 success_count += 1
                 await asyncio.sleep(0.05)
-            except TelegramAPIError as e:  # конкретное исключение
+            except TelegramAPIError as e:
                 fail_count += 1
                 logger.warning(f"Broadcast failed for user {uid}: {e}")
 
@@ -326,15 +409,31 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
 
     except Exception:
         logger.exception("Error in broadcast_confirm_callback")
-        await callback.message.edit_text("❌ Ошибка при выполнении рассылки.")
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text("❌ Ошибка при выполнении рассылки.")
 
 
+# ========== Медиа-рассылка (FSM-обработчик) ==========
 @dp.callback_query(
     StateFilter(BroadcastStates.confirm), F.data.startswith("broadcast_")
 )
 async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user is None:
+        return
     if str(callback.from_user.id) != ADMIN_CHAT_ID:
         await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    if not isinstance(callback.message, Message):
+        await callback.answer("Сообщение устарело", show_alert=True)
+        return
+
+    if callback.bot is None:
+        await callback.answer("Бот недоступен", show_alert=True)
+        return
+
+    if callback.data is None:
+        await callback.answer()
         return
 
     action = callback.data.split("_")[1]
@@ -352,15 +451,20 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     reply_chat_id = data.get("reply_chat_id")
     await state.clear()
 
+    if not isinstance(reply_msg_id, int) or not isinstance(reply_chat_id, int):
+        await callback.message.answer("❌ Некорректные данные для рассылки.")
+        return
+
+    bot = callback.bot
     try:
-        original_msg = await callback.bot.forward_message(
+        original_msg = await bot.forward_message(
             chat_id=callback.message.chat.id,
             from_chat_id=reply_chat_id,
             message_id=reply_msg_id,
         )
-        text = original_msg.text or original_msg.caption
-        media_type = None
-        file_id = None
+        text = original_msg.text or original_msg.caption or ""
+        media_type: str | None = None
+        file_id: str | None = None
         filename = "file"
 
         MAX_SIZE = settings.MAX_BROADCAST_FILE_SIZE_MB * 1024 * 1024
@@ -374,8 +478,10 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                 and original_msg.photo[-1].file_size > MAX_SIZE
             ):
                 await callback.message.answer(
-                    f"❌ Файл слишком большой ({original_msg.photo[-1].file_size // (1024 * 1024)} МБ). "
-                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                    f"❌ Файл слишком большой "
+                    f"({original_msg.photo[-1].file_size // (1024 * 1024)} МБ). "
+                    f"Максимальный размер: "
+                    f"{settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
                 )
                 await original_msg.delete()
                 return
@@ -383,10 +489,15 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
             media_type = "video"
             file_id = original_msg.video.file_id
             filename = "video.mp4"
-            if original_msg.video.file_size and original_msg.video.file_size > MAX_SIZE:
+            if (
+                original_msg.video.file_size
+                and original_msg.video.file_size > MAX_SIZE
+            ):
                 await callback.message.answer(
-                    f"❌ Файл слишком большой ({original_msg.video.file_size // (1024 * 1024)} МБ). "
-                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                    f"❌ Файл слишком большой "
+                    f"({original_msg.video.file_size // (1024 * 1024)} МБ). "
+                    f"Максимальный размер: "
+                    f"{settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
                 )
                 await original_msg.delete()
                 return
@@ -399,8 +510,10 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                 and original_msg.animation.file_size > MAX_SIZE
             ):
                 await callback.message.answer(
-                    f"❌ Файл слишком большой ({original_msg.animation.file_size // (1024 * 1024)} МБ). "
-                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                    f"❌ Файл слишком большой "
+                    f"({original_msg.animation.file_size // (1024 * 1024)} МБ). "
+                    f"Максимальный размер: "
+                    f"{settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
                 )
                 await original_msg.delete()
                 return
@@ -413,8 +526,10 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
                 and original_msg.document.file_size > MAX_SIZE
             ):
                 await callback.message.answer(
-                    f"❌ Файл слишком большой ({original_msg.document.file_size // (1024 * 1024)} МБ). "
-                    f"Максимальный размер: {settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
+                    f"❌ Файл слишком большой "
+                    f"({original_msg.document.file_size // (1024 * 1024)} МБ). "
+                    f"Максимальный размер: "
+                    f"{settings.MAX_BROADCAST_FILE_SIZE_MB} МБ."
                 )
                 await original_msg.delete()
                 return
@@ -436,6 +551,12 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("Нет пользователей для рассылки.")
         return
 
+    if main_bot is None:
+        await callback.message.answer(
+            "❌ Основной бот не инициализирован, рассылка невозможна."
+        )
+        return
+
     total = len(user_ids)
     cancel_flag_key = callback.message.chat.id
     _broadcast_cancel_flags[cancel_flag_key] = False
@@ -455,11 +576,15 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=cancel_kb,
     )
 
-    media_bytes = None
+    media_bytes: bytes | None = None
     if media_type:
+        if file_id is None:
+            await status_msg.edit_text("❌ Не удалось получить file_id.")
+            _broadcast_cancel_flags.pop(cancel_flag_key, None)
+            return
         try:
             buf = BytesIO()
-            await admin_bot.download(file_id, destination=buf)
+            await bot.download(file_id, destination=buf)
             media_bytes = buf.getvalue()
         except Exception as e:
             logger.exception("Failed to download media for broadcast")
@@ -471,36 +596,37 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     SEMAPHORE_LIMIT = 5
     DELAY_BETWEEN_BATCH = 1
     semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+    broadcast_bot = main_bot
 
-    async def send_to_user(uid: int, bot_instance: Bot):
+    async def send_to_user(uid: int) -> bool:
         async with semaphore:
             try:
-                if media_type == "photo":
-                    await bot_instance.send_photo(
+                if media_type == "photo" and media_bytes is not None:
+                    await broadcast_bot.send_photo(
                         uid,
                         BufferedInputFile(media_bytes, filename=filename),
                         caption=text,
                     )
-                elif media_type == "video":
-                    await bot_instance.send_video(
+                elif media_type == "video" and media_bytes is not None:
+                    await broadcast_bot.send_video(
                         uid,
                         BufferedInputFile(media_bytes, filename=filename),
                         caption=text,
                     )
-                elif media_type == "animation":
-                    await bot_instance.send_animation(
+                elif media_type == "animation" and media_bytes is not None:
+                    await broadcast_bot.send_animation(
                         uid,
                         BufferedInputFile(media_bytes, filename=filename),
                         caption=text,
                     )
-                elif media_type == "document":
-                    await bot_instance.send_document(
+                elif media_type == "document" and media_bytes is not None:
+                    await broadcast_bot.send_document(
                         uid,
                         BufferedInputFile(media_bytes, filename=filename),
                         caption=text,
                     )
                 else:
-                    await bot_instance.send_message(uid, text)
+                    await broadcast_bot.send_message(uid, text)
                 return True
             except TelegramAPIError as e:
                 logger.debug(f"Broadcast failed for {uid}: {e}")
@@ -511,13 +637,14 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
     for i in range(0, total, SEMAPHORE_LIMIT):
         if _broadcast_cancel_flags.get(cancel_flag_key, False):
             await status_msg.edit_text(
-                f"🛑 Рассылка остановлена пользователем. Отправлено: {success}, ошибок: {fail}"
+                f"🛑 Рассылка остановлена пользователем. "
+                f"Отправлено: {success}, ошибок: {fail}"
             )
             _broadcast_cancel_flags.pop(cancel_flag_key, None)
             return
 
         batch = user_ids[i : i + SEMAPHORE_LIMIT]
-        tasks = [send_to_user(uid, main_bot) for uid in batch]
+        tasks = [send_to_user(uid) for uid in batch]
         results = await asyncio.gather(*tasks)
         success += sum(results)
         fail += len(results) - sum(results)
@@ -525,7 +652,8 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         if (i + SEMAPHORE_LIMIT) % 50 == 0 or i + SEMAPHORE_LIMIT >= total:
             try:
                 await status_msg.edit_text(
-                    f"📡 Рассылка: {success + fail}/{total} (✅ {success}, ❌ {fail})",
+                    f"📡 Рассылка: {success + fail}/{total} "
+                    f"(✅ {success}, ❌ {fail})",
                     reply_markup=cancel_kb,
                 )
             except TelegramAPIError as e:
@@ -543,9 +671,18 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(lambda c: c.data and c.data.startswith("stop_broadcast_"))
 async def stop_broadcast(callback: types.CallbackQuery):
+    if callback.from_user is None:
+        return
     if str(callback.from_user.id) != ADMIN_CHAT_ID:
         await callback.answer("Нет доступа", show_alert=True)
         return
+    if callback.data is None:
+        await callback.answer()
+        return
+    if not isinstance(callback.message, Message):
+        await callback.answer("Сообщение устарело", show_alert=True)
+        return
+
     key = int(callback.data.split("_")[2])
     _broadcast_cancel_flags[key] = True
     await callback.answer("⏳ Останавливаю рассылку...")
@@ -555,11 +692,13 @@ async def stop_broadcast(callback: types.CallbackQuery):
 # ========== Управление пользователями ==========
 @dp.message(Command("userinfo"))
 async def cmd_userinfo(message: types.Message):
+    if message.from_user is None:
+        return
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
 
-    args = message.text.split()
+    args = (message.text or "").split()
     if len(args) < 2:
         await message.answer("❗ Используйте: /userinfo <telegram_id>")
         return
@@ -570,7 +709,9 @@ async def cmd_userinfo(message: types.Message):
         log_error(f"Invalid telegram_id in userinfo: {args[1]}", notify_admin=False)
         return
 
-    data = await get_user_full_data(tid)
+    async with AsyncSessionLocal() as session:
+        data = await get_user_full_data(session, tid)
+
     if not data:
         await message.answer(f"❌ Пользователь с ID {tid} не найден.")
         return
@@ -592,7 +733,7 @@ async def cmd_userinfo(message: types.Message):
 
     vpn_key = data["vpn_client_id"] or "не создан"
 
-    text = (
+    text_msg = (
         f"👤 **Пользователь**: {tid}\n"
         f"🔹 **Username**: @{data['username'] or '—'}\n"
         f"📧 **Email**: {data['email'] or '—'}\n"
@@ -605,13 +746,13 @@ async def cmd_userinfo(message: types.Message):
         f"   Окончание: {bypass_end_str}\n"
         f"   Осталось: {bypass_left} дн."
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text_msg, parse_mode="Markdown")
 
 
 @retry_db_operation(max_retries=3)
 async def cmd_grant(message: Message):
     try:
-        args = message.text.split()
+        args = (message.text or "").split()
         if len(args) != 3:
             await message.answer(
                 "❌ Неверный формат.\n"
@@ -636,22 +777,24 @@ async def cmd_grant(message: Message):
             await message.answer("❌ VPN менеджер не инициализирован.")
             return
 
-        link = await vpn_manager.create_key(telegram_id, days)
+        link = await vpn_manager.grant_subscription(telegram_id, days)
 
         if link:
             await message.answer(
-                f"✅ VPN-подписка выдана пользователю `{telegram_id}` на **{days}** дней.\n"
+                f"✅ VPN-подписка выдана пользователю `{telegram_id}` "
+                f"на **{days}** дней.\n"
                 f"🔗 Ссылка: `{link}`",
                 parse_mode="Markdown",
             )
             try:
-                await message.bot.send_message(
-                    telegram_id,
-                    f"🎉 Администратор выдал вам VPN-подписку на {days} дней.\n"
-                    f"🔗 Ссылка для подключения: `{link}`\n\n"
-                    f"Скопируйте ссылку и вставьте в VPN-приложение.",
-                    parse_mode="Markdown",
-                )
+                if message.bot is not None:
+                    await message.bot.send_message(
+                        telegram_id,
+                        f"🎉 Администратор выдал вам VPN-подписку на {days} дней.\n"
+                        f"🔗 Ссылка для подключения: `{link}`\n\n"
+                        f"Скопируйте ссылку и вставьте в VPN-приложение.",
+                        parse_mode="Markdown",
+                    )
             except TelegramAPIError as e:
                 logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
         else:
@@ -663,7 +806,8 @@ async def cmd_grant(message: Message):
 
     except ValueError:
         await message.answer(
-            "❌ Неверный формат аргументов. Убедитесь, что telegram_id и days – числа."
+            "❌ Неверный формат аргументов. "
+            "Убедитесь, что telegram_id и days – числа."
         )
     except Exception:
         logger.exception("Error in cmd_grant")
@@ -673,7 +817,7 @@ async def cmd_grant(message: Message):
 @retry_db_operation(max_retries=3)
 async def cmd_revoke(message: Message):
     try:
-        args = message.text.split()
+        args = (message.text or "").split()
         if len(args) != 2:
             await message.answer(
                 "❌ Неверный формат.\n"
@@ -699,9 +843,10 @@ async def cmd_revoke(message: Message):
                 parse_mode="Markdown",
             )
             try:
-                await message.bot.send_message(
-                    telegram_id, "❌ Ваш VPN-ключ был отозван администратором."
-                )
+                if message.bot is not None:
+                    await message.bot.send_message(
+                        telegram_id, "❌ Ваш VPN-ключ был отозван администратором."
+                    )
             except TelegramAPIError as e:
                 logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
         else:
@@ -751,7 +896,7 @@ async def cmd_stats(message: Message):
             total_payments = await session.scalar(
                 select(func.count())
                 .select_from(BotPayment)
-                .where(BotPayment.is_paid == True)
+                .where(BotPayment.is_paid == True)  # noqa: E712
             )
 
             stats_text = (
@@ -770,9 +915,11 @@ async def cmd_stats(message: Message):
         await message.answer("❌ Ошибка при получении статистики.")
 
 
-# ========== Команды для управления IP-адресами ЮKassa ==========
+# ========== Управление IP-адресами ЮKassa ==========
 @dp.message(Command("yookassa_ips"))
 async def cmd_show_yookassa_ips(message: types.Message):
+    if message.from_user is None:
+        return
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
@@ -791,11 +938,13 @@ async def cmd_show_yookassa_ips(message: types.Message):
 
 @dp.message(Command("set_yookassa_ips"))
 async def cmd_set_yookassa_ips(message: types.Message):
+    if message.from_user is None:
+        return
     if str(message.from_user.id) != ADMIN_CHAT_ID:
         await message.answer("❌ Нет доступа.")
         return
 
-    args = message.text.split(maxsplit=1)
+    args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
             "❗ Используйте: `/set_yookassa_ips <JSON-массив>`\n"
@@ -819,7 +968,8 @@ async def cmd_set_yookassa_ips(message: types.Message):
         settings.YOOKASSA_TRUSTED_IPS = new_ips
 
         await message.answer(
-            f"✅ Список доверенных IP обновлён.\n\n```json\n{json.dumps(new_ips, indent=2, ensure_ascii=False)}\n```",
+            f"✅ Список доверенных IP обновлён.\n\n"
+            f"```json\n{json.dumps(new_ips, indent=2, ensure_ascii=False)}\n```",
             parse_mode="Markdown",
         )
     except json.JSONDecodeError:

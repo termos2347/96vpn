@@ -1,3 +1,5 @@
+# tests/test_webhook_yookassa.py
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -38,7 +40,9 @@ async def test_webhook_success(test_session, mock_bot, mock_yookassa_payment):
 
     with patch("services.payment_yookassa.get_vpn_manager") as mock_get_manager:
         mock_manager = AsyncMock()
-        mock_manager.create_key = AsyncMock(return_value="https://test.com/sub/xyz")
+        mock_manager.get_or_create_link = AsyncMock(
+            return_value="https://test.com/sub/xyz"
+        )
         mock_get_manager.return_value = mock_manager
 
         webhook_data = {"event": "payment.succeeded", "object": {"id": payment_id}}
@@ -47,6 +51,7 @@ async def test_webhook_success(test_session, mock_bot, mock_yookassa_payment):
 
         assert result is True
 
+        # Платёж помечен оплаченным, подписка продлена
         stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
         db_payment = (await test_session.execute(stmt)).scalar_one()
         assert db_payment.is_paid is True
@@ -57,8 +62,21 @@ async def test_webhook_success(test_session, mock_bot, mock_yookassa_payment):
         assert user.vpn_subscription_end is not None
         assert user.vpn_subscription_end > datetime.now(timezone.utc)
 
-        mock_manager.create_key.assert_called_once_with(telegram_id, 30)
-        mock_bot.send_message.assert_called_once()
+        # Даём фоновой задаче _create_key_task завершиться
+        await asyncio.sleep(0)
+
+        # Ожидаем два сообщения:
+        #   1) подтверждение активации подписки (основной поток)
+        #   2) ссылка на ключ (фоновая задача _create_key_task)
+        assert mock_bot.send_message.call_count == 2
+
+        activation_call = mock_bot.send_message.call_args_list[0]
+        assert activation_call.args[0] == telegram_id
+        assert "подписка" in activation_call.args[1].lower()
+
+        key_call = mock_bot.send_message.call_args_list[1]
+        assert key_call.args[0] == telegram_id
+        assert "https://test.com/sub/xyz" in key_call.args[1]
 
 
 @pytest.mark.asyncio

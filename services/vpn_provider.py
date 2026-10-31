@@ -48,13 +48,18 @@ class XUIVPNProvider:
             logger.error(f"Failed to extract host from URL: {url}")
             return ""
 
-    def _ssl_context(self):
+    def _ssl_context(self) -> bool | ssl.SSLContext:
+        """Возвращает SSL-настройки для TCPConnector.
+
+        True  — использовать дефолтный контекст с проверкой сертификата.
+        SSLContext — кастомный контекст (при VERIFY_SSL=false — без проверки).
+        """
         if not settings.VERIFY_SSL:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             return ctx
-        return None
+        return True
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._closed:
@@ -105,13 +110,27 @@ class XUIVPNProvider:
                     elif resp.status == 401:
                         logger.error("API token invalid or expired")
                         return None
-                    else:
+                    elif resp.status == 429:
                         logger.warning(
-                            f"HTTP {resp.status} from {url}, attempt {attempt + 1}"
+                            f"HTTP 429 from {url} (rate limited), "
+                            f"attempt {attempt + 1}/{self.MAX_RETRIES}"
                         )
+                    elif resp.status >= 500:
+                        logger.warning(
+                            f"HTTP {resp.status} from {url} (server error), "
+                            f"attempt {attempt + 1}/{self.MAX_RETRIES}"
+                        )
+                    else:
+                        # 4xx (кроме 401/429) — бессмысленно ретраить
+                        logger.warning(
+                            f"HTTP {resp.status} from {url} "
+                            f"(client error, no retry)"
+                        )
+                        return None
             except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
                 logger.warning(
-                    f"Network error on {url} (attempt {attempt + 1}): {type(net_err).__name__}"
+                    f"Network error on {url} (attempt {attempt + 1}): "
+                    f"{type(net_err).__name__}"
                 )
                 self._session_invalid = True
             except Exception:
@@ -183,7 +202,6 @@ class XUIVPNProvider:
             if result and result.get("success"):
                 data = result.get("obj")
                 if data:
-                    # Пробуем найти subId в разных местах
                     sub_id = (
                         data.get("subId") or data.get("subid") or data.get("sub_id")
                     )
@@ -191,7 +209,6 @@ class XUIVPNProvider:
                     client_email = data.get("email")
                     enable = data.get("enable")
 
-                    # Если sub_id не найден, возможно, клиент вложен в "client"
                     if sub_id is None and "client" in data:
                         client_obj = data["client"]
                         sub_id = (
@@ -226,7 +243,6 @@ class XUIVPNProvider:
         if not sub_id:
             return None
 
-        # Обрезаем до 16 символов, если передан полный UUID
         if len(sub_id) > 16:
             original = sub_id
             sub_id = sub_id[:16]
@@ -286,6 +302,16 @@ class XUIVPNProvider:
         return f"https://{self._server_host}:{self.sub_port}/sub/{sub_id}"
 
     async def revoke_client(self, sub_id: str) -> bool:
+        """
+        Удаляет клиента по subId.
+        В БД хранится полный UUID (36 символов), а панель использует
+        укороченный subId (первые 16 символов) — поэтому обрезаем.
+        """
+        if not sub_id:
+            logger.error("revoke_client: empty sub_id")
+            return False
+
+        sub_id = sub_id[:16]
         url = f"{self.base_url}/panel/api/clients/delSub/{sub_id}"
         try:
             result = await self._retry_request("POST", url)

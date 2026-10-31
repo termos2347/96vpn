@@ -5,12 +5,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from db.base import AsyncSessionLocal, retry_db_operation
-from db.crud import get_or_create_bot_user
+from db.crud import get_or_create_bot_user, update_vpn_subscription
 from services.redis_service import redis_service
 from services.vpn_provider import XUIVPNProvider
 
 logger = logging.getLogger(__name__)
-MAX_SUBSCRIPTION_DAYS = 96 * 365
 
 
 class VPNManager:
@@ -19,27 +18,23 @@ class VPNManager:
 
     # ---- Вспомогательные методы для Redis ----
     async def _get_cached_link(self, user_id: int) -> str | None:
-        key = f"vpn_link:{user_id}"
-        return await redis_service.get_cache(key)
+        return await redis_service.get_cache(f"vpn_link:{user_id}")
 
-    async def _set_cached_link(self, user_id: int, link: str):
-        key = f"vpn_link:{user_id}"
-        await redis_service.set_cache(key, link)
+    async def _set_cached_link(self, user_id: int, link: str) -> None:
+        await redis_service.set_cache(f"vpn_link:{user_id}", link)
 
-    async def _invalidate_cache(self, user_id: int):
-        key = f"vpn_link:{user_id}"
-        await redis_service.delete_cache(key)
+    async def _invalidate_cache(self, user_id: int) -> None:
+        await redis_service.delete_cache(f"vpn_link:{user_id}")
         logger.debug(f"Cache invalidated for user {user_id}")
 
-    # ---- Основные методы ----
+    # ---- Создание ключа (НЕ трогает дату окончания подписки!) ----
     @retry_db_operation(max_retries=3)
-    async def create_key(self, user_id: int, days: int, session=None) -> str | None:
-        if days > MAX_SUBSCRIPTION_DAYS:
-            logger.warning(
-                f"Requested {days} days for user {user_id}, capped to {MAX_SUBSCRIPTION_DAYS}"
-            )
-            days = MAX_SUBSCRIPTION_DAYS
+    async def create_vpn_key(self, user_id: int, session=None) -> str | None:
+        """Создаёт клиента на VPN-панели и сохраняет vpn_client_id.
 
+        ВАЖНО: не изменяет vpn_subscription_end. Продление подписки —
+        ответственность activate_subscription / update_vpn_subscription.
+        """
         client_uuid = str(uuid.uuid4())
         email = f"tg_{user_id}_{client_uuid[:8]}"
         sub_id = client_uuid[:16]
@@ -69,40 +64,36 @@ class VPNManager:
             )
             return None
 
-        sub_id = client_data.get("subId", sub_id)
-        link = self.provider.get_subscription_link(sub_id)
+        real_sub_id = client_data.get("subId", sub_id)
+        link = self.provider.get_subscription_link(real_sub_id)
 
         if session is None:
             async with AsyncSessionLocal() as sess, sess.begin():
                 user = await get_or_create_bot_user(sess, user_id)
-                self._update_user_object(user, client_uuid, link, days)
+                user.vpn_client_id = client_uuid
         else:
             user = await get_or_create_bot_user(session, user_id)
-            self._update_user_object(user, client_uuid, link, days)
+            user.vpn_client_id = client_uuid
 
+        logger.info(f"Key created for user {user_id}: client_id={client_uuid}")
         return link
 
-    def _update_user_object(self, user, client_uuid: str, link: str, days: int):
-        user.vpn_client_id = client_uuid
-        now = datetime.now(timezone.utc)
-        if user.vpn_subscription_end is None or user.vpn_subscription_end <= now:
-            new_end = now + timedelta(days=days)
-        else:
-            new_end = user.vpn_subscription_end + timedelta(days=days)
-        max_allowed = now + timedelta(days=MAX_SUBSCRIPTION_DAYS)
-        if new_end > max_allowed:
-            new_end = max_allowed
-            logger.warning(
-                f"Capped subscription end for user {user.telegram_id} to {max_allowed}"
-            )
-        user.vpn_subscription_end = new_end
-        logger.info(
-            f"Updated user {user.telegram_id}: client_id={client_uuid}, end={new_end}"
-        )
+    # ---- Выдача подписки админом: продлить + создать ключ ----
+    @retry_db_operation(max_retries=3)
+    async def grant_subscription(self, user_id: int, days: int) -> str | None:
+        """Продлевает подписку на `days` и создаёт ключ. Для /grant."""
+        async with AsyncSessionLocal() as session, session.begin():
+            await get_or_create_bot_user(session, user_id)  # создаём если нет
+            ok = await update_vpn_subscription(session, user_id, days)
+        if not ok:
+            logger.error(f"grant_subscription: could not update subscription for {user_id}")
+            return None
 
+        return await self.create_vpn_key(user_id)
+
+    # ---- Получение или создание ссылки ----
     @retry_db_operation(max_retries=3)
     async def get_or_create_link(self, user_id: int) -> str | None:
-        # 1. Проверяем кэш в Redis
         cached_link = await self._get_cached_link(user_id)
         if cached_link:
             logger.info(f"Returning cached link for user {user_id}")
@@ -127,15 +118,12 @@ class VPNManager:
 
                 client = None
 
-                # 2. Поиск по email
                 if email:
                     try:
                         logger.debug(f"Checking client by email: {email}")
                         client = await asyncio.wait_for(
                             self.provider.get_client_by_email(email), timeout=5.0
                         )
-                        if client:
-                            logger.debug(f"Client found by email: {client}")
                     except asyncio.TimeoutError:
                         logger.warning(
                             f"Timeout getting client by email for user {user_id}"
@@ -145,7 +133,6 @@ class VPNManager:
                             f"Error getting client by email for user {user_id}: {e}"
                         )
 
-                # 3. Если по email не найден – пробуем по subId (обрезанный до 16 символов)
                 if not client and user.vpn_client_id:
                     sub_id_to_search = user.vpn_client_id[:16]
                     try:
@@ -156,8 +143,6 @@ class VPNManager:
                             self.provider.get_client_by_sub_id(sub_id_to_search),
                             timeout=5.0,
                         )
-                        if client:
-                            logger.debug(f"Client found by subId: {client}")
                     except asyncio.TimeoutError:
                         logger.warning(
                             f"Timeout getting client by subId for user {user_id}"
@@ -171,33 +156,24 @@ class VPNManager:
                     await self._set_cached_link(user_id, link)
                     return link
 
-                # 4. Клиент не найден – инвалидируем кэш и создаём новый
                 if user.vpn_client_id:
                     logger.warning(
                         f"Stored client_id {user.vpn_client_id} not found on panel, will recreate"
                     )
                     await self._invalidate_cache(user_id)
 
-                days_left = (user.vpn_subscription_end - now).days
-                if days_left < 1:
-                    days_left = 30
-                elif days_left > MAX_SUBSCRIPTION_DAYS:
-                    days_left = MAX_SUBSCRIPTION_DAYS
-                logger.info(
-                    f"Creating new key for user {user_id}, days_left={days_left}"
-                )
-
-                new_link = await self.create_key(user_id, days_left, session=session)
+                # ВАЖНО: дни не передаём, подписку не продлеваем
+                new_link = await self.create_vpn_key(user_id, session=session)
                 if new_link:
                     await self._set_cached_link(user_id, new_link)
                     return new_link
-                else:
-                    logger.error(f"Failed to create new key for user {user_id}")
-                    return None
 
+                logger.error(f"Failed to create new key for user {user_id}")
+                return None
+
+    # ---- Отзыв ключа ----
     @retry_db_operation(max_retries=3)
     async def revoke_key(self, user_id: int) -> bool:
-        # Инвалидируем кэш при отзыве
         await self._invalidate_cache(user_id)
 
         async with AsyncSessionLocal() as session, session.begin():
@@ -249,10 +225,10 @@ class VPNManager:
             user = await get_or_create_bot_user(session, user_id)
             user.vpn_client_id = None
             user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
-            logger.info(f"Key revoked for user {user_id}")
-            return True
+        logger.info(f"Key revoked for user {user_id}")
+        return True
 
-    async def _notify_admin_and_user(self, user_id: int, error_msg: str):
+    async def _notify_admin_and_user(self, user_id: int, error_msg: str) -> None:
         from admin import send_admin_alert
 
         await send_admin_alert(

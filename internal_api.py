@@ -1,3 +1,4 @@
+# internal_api.py
 import asyncio
 import ipaddress
 import logging
@@ -20,12 +21,26 @@ from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
+# Дефолтный набор прокси, от которых принимаем X-Real-IP.
+# Если nginx стоит на другой машине — переопределите через
+# settings.TRUSTED_PROXY_IPS (добавив поле в config.py).
+_DEFAULT_TRUSTED_PROXIES = ("127.0.0.1", "::1", "localhost")
+
 
 def get_client_ip(request: web.Request) -> str:
+    """
+    Возвращает IP клиента.
+    X-Real-IP принимаем только если запрос пришёл с доверенного прокси —
+    иначе любой внешний клиент мог бы подделать IP и обойти IP-фильтр ЮKassa.
+    """
+    remote = request.remote or ""
     real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
+
+    trusted = getattr(settings, "TRUSTED_PROXY_IPS", None) or _DEFAULT_TRUSTED_PROXIES
+
+    if real_ip and remote in trusted:
         return real_ip
-    return request.remote or ""
+    return remote
 
 
 def ip_in_network(ip: str) -> bool:
@@ -33,12 +48,17 @@ def ip_in_network(ip: str) -> bool:
     try:
         ip_obj = ipaddress.ip_address(ip)
         for net in trusted:
-            if "/" in net:
-                if ip_obj in ipaddress.ip_network(net):
-                    return True
-            else:
-                if ip_obj == ipaddress.ip_address(net):
-                    return True
+            try:
+                # strict=False — чтобы "1.2.3.4/24" в конфиге не падал
+                net_obj = ipaddress.ip_network(net, strict=False)
+            except ValueError:
+                logger.warning(f"Invalid CIDR in YOOKASSA_TRUSTED_IPS: {net!r}")
+                continue
+            # Сравнение IPv4 с IPv6-сетью даёт TypeError — пропускаем чужие семейства
+            if ip_obj.version != net_obj.version:
+                continue
+            if ip_obj in net_obj:
+                return True
     except ValueError as e:
         logger.error(f"IP validation error: {e}")
     return False
@@ -105,12 +125,13 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                     payment_id,
                     user=user,
                 )
+
             if success:
                 if product_type == "vpn":
                     vpn_manager = get_vpn_manager()
                     if vpn_manager:
                         days = settings.PERIOD_DAYS[period]
-                        link = await vpn_manager.create_key(telegram_id, days)
+                        link = await vpn_manager.create_vpn_key(telegram_id)
                         if link and main_bot:
                             try:
                                 await main_bot.send_message(

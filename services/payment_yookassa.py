@@ -22,8 +22,11 @@ from config import settings
 from db.base import retry_db_operation
 from db.crud import activate_subscription
 from db.models import BotPayment, BotUser
-from handlers.ui import Texts
 from services.vpn_manager import get_vpn_manager
+
+# ВАЖНО: НЕ импортируем handlers.ui на уровне модуля —
+# это вызывает циклический импорт (см. комментарий в шапке admin/bot.py).
+# Тексты импортируются лениво внутри process_webhook().
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,8 @@ class YookassaService:
         self, amount: float, description: str, metadata: dict
     ) -> dict[str, Any] | None:
         logger.info(
-            f"💳 Создание платежа: amount={amount}, description={description}, metadata={metadata}"
+            f"💳 Создание платежа: amount={amount}, "
+            f"description={description}, metadata={metadata}"
         )
         try:
             return_url = settings.YOOKASSA_RETURN_URL
@@ -76,15 +80,29 @@ class YookassaService:
                 timeout=10.0,
             )
 
+            confirmation_url = (
+                payment.confirmation.confirmation_url
+                if payment.confirmation
+                else None
+            )
+            if not confirmation_url:
+                logger.error("❌ ЮKassa не вернула confirmation_url")
+                return None
+
+            amount_value = (
+                payment.amount.value if payment.amount else f"{amount:.2f}"
+            )
+
             logger.info(
-                f"✅ Платёж создан: id={payment.id}, status={payment.status}, confirmation_url={payment.confirmation.confirmation_url}"
+                f"✅ Платёж создан: id={payment.id}, status={payment.status}, "
+                f"confirmation_url={confirmation_url}"
             )
 
             return {
                 "payment_id": payment.id,
                 "status": payment.status,
-                "confirmation_url": payment.confirmation.confirmation_url,
-                "amount": payment.amount.value,
+                "confirmation_url": confirmation_url,
+                "amount": amount_value,
             }
 
         except asyncio.TimeoutError:
@@ -98,25 +116,38 @@ class YookassaService:
     async def process_webhook(
         self, webhook_data: dict, session: AsyncSession, bot
     ) -> bool:
+        # ЛЕНИВЫЙ ИМПОРТ — обходит циклический импорт:
+        # handlers/__init__.py → handlers/payment.py → payment_yookassa.py
+        from handlers.ui import Texts
+
         start_time = datetime.now(timezone.utc)
 
-        # === Извлекаем только критичные поля ===
         obj = webhook_data.get("object", {})
         payment_id = obj.get("id")
         event = webhook_data.get("event")
         amount_value = obj.get("amount", {}).get("value")
-        metadata = obj.get("metadata", {})
+        metadata = obj.get("metadata", {}) or {}
 
         logger.info(
             f"🔔 Webhook {payment_id}: event={event}, amount={amount_value} RUB"
         )
 
-        if event != "payment.succeeded" or not payment_id:
-            logger.info(f"⏭️ Webhook {payment_id}: ignored")
+        if not payment_id:
+            logger.warning("⏭️ Webhook: no payment_id (malformed payload)")
             return False
 
-        # === 1. Проверка в БД ===
-        stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
+        if event != "payment.succeeded":
+            # Возвращаем True, чтобы aiohttp-хендлер отдал 200.
+            # Иначе ЮKassa будет ретраить canceled/refunded вечно.
+            logger.info(f"⏭️ Webhook {payment_id}: event={event} acknowledged")
+            return True
+
+        # === 1. Проверка в БД с блокировкой строки ===
+        stmt = (
+            select(BotPayment)
+            .where(BotPayment.payment_id == payment_id)
+            .with_for_update()
+        )
         db_payment = (await session.execute(stmt)).scalar_one_or_none()
         if not db_payment:
             logger.error(f"❌ Webhook {payment_id}: not found in DB")
@@ -127,7 +158,7 @@ class YookassaService:
             logger.info(f"ℹ️ Webhook {payment_id}: already processed")
             return True
 
-        # === 2. Double-check через API ЮKassa (только статус и сумма) ===
+        # === 2. Double-check через API ЮKassa ===
         loop = asyncio.get_running_loop()
         try:
             verified = await asyncio.wait_for(
@@ -139,7 +170,8 @@ class YookassaService:
             if bot and db_payment:
                 await bot.send_message(
                     db_payment.telegram_id,
-                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ не придёт – напишите в поддержку.",
+                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ "
+                    "не придёт – напишите в поддержку.",
                 )
             return False
 
@@ -149,35 +181,51 @@ class YookassaService:
             )
             return False
 
-        # Сверяем сумму (обязательно)
+        if verified.amount is None or verified.amount.value is None:
+            logger.error(f"❌ Webhook {payment_id}: API не вернул сумму")
+            await send_admin_alert(
+                f"⚠️ ЮKassa не вернула сумму по платежу {payment_id}"
+            )
+            return False
+
         if abs(float(db_payment.amount) - float(verified.amount.value)) > 0.01:
             logger.critical(f"🚨 Webhook {payment_id}: amount mismatch!")
             await send_admin_alert(f"🚨 Несовпадение суммы для платежа {payment_id}")
             return False
 
-        # === 3. Извлекаем метаданные (только то, что нужно) ===
+        # === 3. Метаданные ===
+        # webhook может не содержать metadata (или содержать подделку) —
+        # берём объединение, отдавая приоритет ответу API (verified).
+        verified_metadata = getattr(verified, "metadata", None) or {}
+        combined_metadata = {**metadata, **verified_metadata}
+
         telegram_id = db_payment.telegram_id
-        product_type = metadata.get("product_type")
-        period = metadata.get("period")
+        product_type = combined_metadata.get("product_type")
+        period = combined_metadata.get("period")
+        metadata_telegram_id = combined_metadata.get("telegram_id")
 
         if not product_type or not period:
-            logger.warning(f"⚠️ Webhook {payment_id}: missing metadata")
+            logger.warning(
+                f"⚠️ Webhook {payment_id}: missing metadata "
+                f"(webhook={metadata}, verified={verified_metadata})"
+            )
             await send_admin_alert(f"⚠️ Неполные метаданные в платеже {payment_id}")
             return False
 
-        # Проверяем, что telegram_id в метаданных совпадает с БД (защита от подмены)
-        if str(telegram_id) != metadata.get("telegram_id"):
-            logger.error(f"❌ Webhook {payment_id}: telegram_id mismatch")
+        # telegram_id в metadata может прийти как str или int — сравниваем строки
+        if str(telegram_id) != str(metadata_telegram_id):
+            logger.error(
+                f"❌ Webhook {payment_id}: telegram_id mismatch "
+                f"(db={telegram_id}, metadata={metadata_telegram_id})"
+            )
             await send_admin_alert("⚠️ Подозрительный платёж: ID не совпадает")
             return False
 
-        # === 4. Обновляем статус платежа ===
-        db_payment.status = "succeeded"
-        db_payment.is_paid = True
-        db_payment.updated_at = datetime.now(timezone.utc)
-        session.add(db_payment)
-
-        # === 5. Активируем подписку ===
+        # === 4. Продление подписки ===
+        # ВАЖНО: activate_subscription сам пометит BotPayment.is_paid=True
+        # (внутри одной транзакции, после успешной активации).
+        # Здесь НЕ ставим is_paid заранее — иначе при неудаче активации
+        # платёж останется помеченным оплаченным, а подписка — нет.
         stmt_user = (
             select(BotUser)
             .where(BotUser.telegram_id == telegram_id)
@@ -192,18 +240,22 @@ class YookassaService:
             logger.warning(f"⚠️ Webhook {payment_id}: activation failed")
             return False
 
+        if user is None:
+            stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id)
+            user = (await session.execute(stmt_user)).scalar_one_or_none()
+
         logger.info(
             f"✅ Webhook {payment_id}: subscription activated for {telegram_id}"
         )
 
-        # === 6. Отправка сообщения и фоновое создание ключа (только для VPN) ===
+        # === 5. Сообщение + фоновое создание ключа ===
         if product_type == "vpn" and bot:
             days = settings.PERIOD_DAYS.get(period, 0)
-            msg = Texts.payment_success_with_date(user.vpn_subscription_end, days, None)
+            vpn_end = user.vpn_subscription_end if user else None
+            msg = Texts.payment_success_with_date(vpn_end, days, None)
             await bot.send_message(telegram_id, msg, parse_mode="Markdown")
 
-            # Фоновая задача
-            async def create_key():
+            async def _create_key_task():
                 try:
                     vpn_manager = get_vpn_manager()
                     if vpn_manager:
@@ -221,9 +273,8 @@ class YookassaService:
                         f"❌ Ошибка создания ключа для {telegram_id}: {e}"
                     )
 
-            asyncio.create_task(create_key())
+            asyncio.create_task(_create_key_task())
 
-        # === 7. Итог ===
         elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         logger.info(f"✅ Webhook {payment_id}: done in {elapsed:.2f}s")
         return True

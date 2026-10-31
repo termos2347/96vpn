@@ -1,18 +1,12 @@
-import asyncio
+# tests/conftest.py
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiogram import Bot
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from db.models import Base
 from services.vpn_provider import XUIVPNProvider
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    return asyncio.get_event_loop()
 
 
 @pytest.fixture(scope="function")
@@ -26,10 +20,10 @@ async def test_engine():
 
 @pytest.fixture(scope="function")
 async def test_session(test_engine):
-    async_session = sessionmaker(
+    session_factory = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    async with async_session() as session:
+    async with session_factory() as session:
         yield session
 
 
@@ -65,12 +59,18 @@ def mock_bot():
 @pytest.fixture
 def mock_vpn_provider():
     provider = AsyncMock(spec=XUIVPNProvider)
-    provider.login = AsyncMock(return_value=True)
     provider.create_client = AsyncMock(
         return_value={"uuid": "test-uuid", "subId": "test-sub"}
     )
     provider.revoke_client = AsyncMock(return_value=True)
-    provider.get_client_by_uuid = AsyncMock(
+    provider.get_client_by_email = AsyncMock(
+        return_value={
+            "uuid": "test-uuid",
+            "subId": "test-sub",
+            "email": "test@example.com",
+        }
+    )
+    provider.get_client_by_sub_id = AsyncMock(
         return_value={
             "uuid": "test-uuid",
             "subId": "test-sub",
@@ -80,5 +80,4 @@ def mock_vpn_provider():
     provider.get_subscription_link = MagicMock(
         return_value="https://test.com/sub/test-sub"
     )
-    provider._is_authenticated = True
     return provider
