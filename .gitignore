@@ -1,28 +1,28 @@
-# Секретные данные
+# --- Runtime и секреты ---
 .env
+.env.bak
+*.bak
 
-# Кэш Python
+# Доверенные IP ЮKassa — локальный runtime-файл
+yookassa_ip.json
+yookassa_ip.json.bak
+
+# --- Логи и кэш ---
+logs/
+*.log
+*.logs
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
 
-# Виртуальное окружение
+# --- Venv ---
 .venv/
-.env/
 
-# Файлы IDE
+# --- IDE ---
 .vscode/
 .idea/
 
-# Логи
-logs/
-*.logs
-logs/
-
-migrations/versions/
-.pytest_cache
-
-alembic.ini
-
+# --- Локальные ручные тесты ---
 test_async_api.py
 test_manual_api.py
 test_provider.py
