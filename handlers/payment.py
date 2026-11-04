@@ -1,11 +1,11 @@
 # handlers/payment.py
+import asyncio
 import logging
 import uuid
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import select
 
 from admin.bot import log_error
 from config import settings
@@ -38,14 +38,12 @@ async def safe_answer_callback(
 @router.callback_query(F.data.startswith("tariff_"))
 @rate_limit(max_per_minute=settings.RATE_LIMIT_PAYMENT)
 async def tariff_chosen(callback: CallbackQuery):
-    # Guard: сообщение должно быть доступно (не InaccessibleMessage / None)
     if not isinstance(callback.message, Message):
         await safe_answer_callback(
             callback, "❌ Сообщение устарело", show_alert=True
         )
         return
 
-    # Guard: data не может быть None (по фильтру), но Pylance этого не знает
     data = callback.data
     if not data:
         await safe_answer_callback(callback, "❌ Ошибка данных", show_alert=True)
@@ -66,18 +64,6 @@ async def tariff_chosen(callback: CallbackQuery):
         price = settings.VPN_PRICES[currency][period]
         user_id = callback.from_user.id
 
-        local_tx_id = f"tmp_{uuid.uuid4().hex[:16]}"
-        async with AsyncSessionLocal() as session, session.begin():
-            new_payment = BotPayment(
-                payment_id=local_tx_id,
-                telegram_id=user_id,
-                amount=price,
-                currency=currency.upper(),
-                status="pending",
-                is_paid=False,
-            )
-            session.add(new_payment)
-
         metadata = {
             "source": "bot",
             "telegram_id": user_id,
@@ -86,8 +72,12 @@ async def tariff_chosen(callback: CallbackQuery):
             "currency": currency.upper(),
         }
         description = f"Подписка {period} ({currency})"
-        payment = await yookassa_service.create_payment(price, description, metadata)
 
+        # 1) СНАЧАЛА создаём платёж в ЮKassa и получаем настоящий ID.
+        # Это закрывает окно гонки: вебхук не может прийти раньше,
+        # чем пользователь оплатит — а значит к моменту вебхука
+        # запись в БД уже точно будет с правильным payment_id.
+        payment = await yookassa_service.create_payment(price, description, metadata)
         if not payment:
             await safe_answer_callback(
                 callback, "❌ Ошибка создания платежа", show_alert=True
@@ -102,19 +92,59 @@ async def tariff_chosen(callback: CallbackQuery):
             )
             return
 
-        async with AsyncSessionLocal() as session, session.begin():
-            stmt = select(BotPayment).where(BotPayment.payment_id == local_tx_id)
-            res = await session.execute(stmt)
-            db_payment = res.scalar_one_or_none()
-            if db_payment:
-                db_payment.payment_id = yookassa_id
-            else:
-                logger.error(f"Local payment {local_tx_id} vanished!")
-                await safe_answer_callback(
-                    callback, "❌ Системная ошибка", show_alert=True
+        # 2) Вставляем запись с реальным payment_id.
+        try:
+            async with AsyncSessionLocal() as session, session.begin():
+                session.add(
+                    BotPayment(
+                        payment_id=yookassa_id,
+                        telegram_id=user_id,
+                        amount=price,
+                        currency=currency.upper(),
+                        status="pending",
+                        is_paid=False,
+                    )
                 )
-                return
+        except Exception as db_err:
+            logger.exception(
+                f"Failed to save payment {yookassa_id} for user {user_id}: {db_err}"
+            )
+            log_error(
+                f"Платёж {yookassa_id} создан в ЮKassa, но не сохранён в БД: "
+                f"{db_err}",
+                notify_admin=True,
+            )
 
+            # Best-effort отмена платежа в ЮKassa, чтобы не оставлять
+            # "висящий" pending-платёж. URL пользователю НЕ показывали —
+            # оплатить он не мог, но чистоту наводим.
+            try:
+                from yookassa import Payment as YooPayment
+
+                idem_key = str(uuid.uuid4())
+                await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(
+                        None, YooPayment.cancel, yookassa_id, idem_key
+                    ),
+                    timeout=5.0,
+                )
+                logger.info(
+                    f"Payment {yookassa_id} cancelled after DB error"
+                )
+            except Exception as cancel_err:
+                logger.warning(
+                    f"Failed to cancel payment {yookassa_id}: {cancel_err}"
+                )
+
+            await safe_answer_callback(
+                callback,
+                "❌ Системная ошибка. Платёж не был показан — повторите попытку. "
+                "Если деньги списались — обратитесь в поддержку.",
+                show_alert=True,
+            )
+            return
+
+        # 3) Показываем ссылку на оплату
         try:
             await callback.message.edit_text(
                 Texts.payment_link(price, currency, period),

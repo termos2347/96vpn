@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
+from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
@@ -25,10 +26,42 @@ from db.models import BotPayment, BotUser
 from services.vpn_manager import get_vpn_manager
 
 # ВАЖНО: НЕ импортируем handlers.ui на уровне модуля —
-# это вызывает циклический импорт (см. комментарий в шапке admin/bot.py).
-# Тексты импортируются лениво внутри process_webhook().
+# это вызывает циклический импорт. Тексты импортируются лениво
+# внутри process_webhook().
 
 logger = logging.getLogger(__name__)
+
+# --- Трекинг fire-and-forget задач ---
+# Позволяет корректно отменять их при shutdown и не терять исключения
+# из фоновых задач создания ключей.
+_pending_key_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_key_task(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _pending_key_tasks.add(task)
+    task.add_done_callback(_pending_key_tasks.discard)
+    return task
+
+
+async def shutdown_pending_tasks(timeout: float = 5.0) -> None:
+    """Отменяет все фоновые задачи создания ключей. Вызывается из
+    run_all.on_shutdown()."""
+    if not _pending_key_tasks:
+        return
+    logger.info(f"Cancelling {len(_pending_key_tasks)} pending YooKassa tasks")
+    pending = list(_pending_key_tasks)
+    for task in pending:
+        if not task.done():
+            task.cancel()
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*pending, return_exceptions=True),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Some YooKassa tasks did not finish in time")
+    _pending_key_tasks.clear()
 
 
 class YookassaService:
@@ -116,8 +149,7 @@ class YookassaService:
     async def process_webhook(
         self, webhook_data: dict, session: AsyncSession, bot
     ) -> bool:
-        # ЛЕНИВЫЙ ИМПОРТ — обходит циклический импорт:
-        # handlers/__init__.py → handlers/payment.py → payment_yookassa.py
+        # ЛЕНИВЫЙ ИМПОРТ — обходит циклический импорт
         from handlers.ui import Texts
 
         start_time = datetime.now(timezone.utc)
@@ -136,9 +168,42 @@ class YookassaService:
             logger.warning("⏭️ Webhook: no payment_id (malformed payload)")
             return False
 
+        # === Обработка отмен и возвратов ===
+        if event in ("payment.canceled", "refund.succeeded"):
+            stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
+            db_payment = (await session.execute(stmt)).scalar_one_or_none()
+            if db_payment:
+                now = datetime.now(timezone.utc)
+                if event == "payment.canceled":
+                    if not db_payment.is_paid:
+                        db_payment.status = "canceled"
+                        db_payment.updated_at = now
+                        logger.info(
+                            f"✅ Webhook {payment_id}: status → canceled"
+                        )
+                elif event == "refund.succeeded":
+                    db_payment.status = "refunded"
+                    db_payment.updated_at = now
+                    if db_payment.is_paid:
+                        # Возврат по уже оплаченному платежу — критично.
+                        # Автоматически подписку НЕ отзываем (может быть
+                        # частичный возврат / договорённость с клиентом),
+                        # но админа уведомляем.
+                        logger.warning(
+                            f"⚠️ Webhook {payment_id}: refund for PAID payment"
+                        )
+                        await send_admin_alert(
+                            f"⚠️ Возврат по оплаченному платежу {payment_id}. "
+                            f"Подписка НЕ отозвана автоматически — "
+                            f"проверьте пользователя {db_payment.telegram_id} вручную."
+                        )
+                    else:
+                        logger.info(
+                            f"✅ Webhook {payment_id}: status → refunded"
+                        )
+            return True
+
         if event != "payment.succeeded":
-            # Возвращаем True, чтобы aiohttp-хендлер отдал 200.
-            # Иначе ЮKassa будет ретраить canceled/refunded вечно.
             logger.info(f"⏭️ Webhook {payment_id}: event={event} acknowledged")
             return True
 
@@ -168,11 +233,21 @@ class YookassaService:
         except Exception as e:
             logger.error(f"❌ Webhook {payment_id}: double-check failed: {e}")
             if bot and db_payment:
-                await bot.send_message(
-                    db_payment.telegram_id,
-                    "✅ Платёж получен, идёт проверка. Если через 10 минут ключ "
-                    "не придёт – напишите в поддержку.",
-                )
+                try:
+                    await bot.send_message(
+                        db_payment.telegram_id,
+                        "✅ Платёж получен, идёт проверка. Если через 10 минут ключ "
+                        "не придёт – напишите в поддержку.",
+                    )
+                except TelegramForbiddenError:
+                    logger.info(
+                        f"Webhook {payment_id}: user {db_payment.telegram_id} "
+                        f"blocked bot"
+                    )
+                except TelegramAPIError as send_err:
+                    logger.warning(
+                        f"Webhook {payment_id}: send failed: {send_err}"
+                    )
             return False
 
         if verified.status != "succeeded":
@@ -194,8 +269,6 @@ class YookassaService:
             return False
 
         # === 3. Метаданные ===
-        # webhook может не содержать metadata (или содержать подделку) —
-        # берём объединение, отдавая приоритет ответу API (verified).
         verified_metadata = getattr(verified, "metadata", None) or {}
         combined_metadata = {**metadata, **verified_metadata}
 
@@ -212,7 +285,6 @@ class YookassaService:
             await send_admin_alert(f"⚠️ Неполные метаданные в платеже {payment_id}")
             return False
 
-        # telegram_id в metadata может прийти как str или int — сравниваем строки
         if str(telegram_id) != str(metadata_telegram_id):
             logger.error(
                 f"❌ Webhook {payment_id}: telegram_id mismatch "
@@ -222,10 +294,6 @@ class YookassaService:
             return False
 
         # === 4. Продление подписки ===
-        # ВАЖНО: activate_subscription сам пометит BotPayment.is_paid=True
-        # (внутри одной транзакции, после успешной активации).
-        # Здесь НЕ ставим is_paid заранее — иначе при неудаче активации
-        # платёж останется помеченным оплаченным, а подписка — нет.
         stmt_user = (
             select(BotUser)
             .where(BotUser.telegram_id == telegram_id)
@@ -253,7 +321,19 @@ class YookassaService:
             days = settings.PERIOD_DAYS.get(period, 0)
             vpn_end = user.vpn_subscription_end if user else None
             msg = Texts.payment_success_with_date(vpn_end, days, None)
-            await bot.send_message(telegram_id, msg, parse_mode="Markdown")
+
+            # Отправка best-effort: пользователь мог заблокировать бота.
+            try:
+                await bot.send_message(telegram_id, msg, parse_mode="Markdown")
+            except TelegramForbiddenError:
+                logger.info(
+                    f"Webhook {payment_id}: user {telegram_id} blocked bot "
+                    f"(activation msg)"
+                )
+            except TelegramAPIError as e:
+                logger.warning(
+                    f"Webhook {payment_id}: send activation msg failed: {e}"
+                )
 
             async def _create_key_task():
                 try:
@@ -261,19 +341,38 @@ class YookassaService:
                     if vpn_manager:
                         link = await vpn_manager.get_or_create_link(telegram_id)
                         if link:
-                            await bot.send_message(
-                                telegram_id,
-                                f"🔗 Ваш ключ:\n`{link}`",
-                                parse_mode="Markdown",
-                            )
-                            logger.info(f"✅ Webhook {payment_id}: key sent")
+                            try:
+                                await bot.send_message(
+                                    telegram_id,
+                                    f"🔗 Ваш ключ:\n`{link}`",
+                                    parse_mode="Markdown",
+                                )
+                                logger.info(
+                                    f"✅ Webhook {payment_id}: key sent"
+                                )
+                            except TelegramForbiddenError:
+                                logger.info(
+                                    f"Webhook {payment_id}: user "
+                                    f"{telegram_id} blocked bot (key)"
+                                )
+                            except TelegramAPIError as e:
+                                logger.warning(
+                                    f"Webhook {payment_id}: send key failed: {e}"
+                                )
+                except asyncio.CancelledError:
+                    logger.info(
+                        f"Webhook {payment_id}: key task cancelled (shutdown)"
+                    )
+                    raise
                 except Exception as e:
-                    logger.error(f"❌ Webhook {payment_id}: key creation error: {e}")
+                    logger.error(
+                        f"❌ Webhook {payment_id}: key creation error: {e}"
+                    )
                     await send_admin_alert(
                         f"❌ Ошибка создания ключа для {telegram_id}: {e}"
                     )
 
-            asyncio.create_task(_create_key_task())
+            _schedule_key_task(_create_key_task())
 
         elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         logger.info(f"✅ Webhook {payment_id}: done in {elapsed:.2f}s")

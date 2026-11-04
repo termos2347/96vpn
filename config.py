@@ -16,31 +16,67 @@ logger = logging.getLogger(__name__)
 
 
 def clean_db_url(url: str) -> str:
-    """Готовит DATABASE_URL к использованию с asyncpg."""
+    """Готовит DATABASE_URL к использованию с asyncpg.
+
+    asyncpg не понимает `sslmode`/`ssl` как строковые параметры в URL —
+    их наличие приводит к ошибке `connect() got an unexpected keyword
+    argument 'sslmode'`. Поэтому полностью убираем SSL-параметры из URL,
+    полагаясь на asyncpg-дефолт ("prefer": сначала попытаться SSL,
+    затем fallback). Для строгого SSL задавайте его через connect_args
+    в db/base.py (ssl=True / ssl.SSLContext).
+    """
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
 
-    query_params.pop("channel_binding", None)
-
-    sslmode_values = query_params.pop("sslmode", None)
-    if sslmode_values:
-        mode = (
-            sslmode_values[0].lower()
-            if isinstance(sslmode_values, list)
-            else str(sslmode_values).lower()
-        )
-        mapping = {
-            "disable": "false",
-            "allow": "allow",
-            "prefer": "prefer",
-            "require": "require",
-            "verify-ca": "require",
-            "verify-full": "require",
-        }
-        query_params["ssl"] = [mapping.get(mode, "true")]
+    for key in list(query_params.keys()):
+        if key.lower() in ("sslmode", "ssl", "channel_binding"):
+            query_params.pop(key)
 
     new_query = urlencode(query_params, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
+
+
+def get_asyncpg_ssl(url: str):
+    """Возвращает SSL-конфигурацию для asyncpg.connect():
+
+    None         — использовать asyncpg-дефолт ("prefer").
+    False        — SSL отключён (sslmode=disable).
+    SSLContext   — явная проверка (require/verify-ca/verify-full).
+
+    Парсим sslmode из СЫРОГО DATABASE_URL (settings.DATABASE_URL),
+    а не из очищенного clean_db_url(), где sslmode уже удалён.
+    """
+    import ssl as ssl_module
+
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query)
+
+    sslmode: str | None = None
+    for key in query_params:
+        if key.lower() == "sslmode":
+            values = query_params[key]
+            if values:
+                sslmode = values[0].lower()
+            break
+
+    if sslmode is None:
+        return None
+    if sslmode == "disable":
+        return False
+
+    ctx = ssl_module.create_default_context()
+    if sslmode in ("require", "allow", "prefer"):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl_module.CERT_NONE
+    elif sslmode == "verify-ca":
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl_module.CERT_REQUIRED
+    elif sslmode == "verify-full":
+        pass  # дефолт: CERT_REQUIRED + check_hostname=True
+    else:
+        # Неизвестное значение — не рискуем, оставляем asyncpg-дефолт
+        return None
+    return ctx
 
 
 class Settings(BaseSettings):
@@ -77,6 +113,12 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str = "https://t.me/VPN_96_bot"
     YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3/"
     YOOKASSA_TRUSTED_IPS: list[str] = Field(..., min_length=1)
+
+    # ---------- Прокси, от которых принимаем X-Real-IP ----------
+    # Если nginx на другой машине — переопределите через .env (JSON-массив).
+    TRUSTED_PROXY_IPS: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1", "::1"]
+    )
 
     # ---------- 3x-UI Master Panel ----------
     XUI_MASTER_URL: str = Field(..., min_length=1)
@@ -128,14 +170,17 @@ class Settings(BaseSettings):
     INTERNAL_API_URL: str = "http://localhost:5001"
 
     # ---------- Валидаторы ----------
-    @field_validator("YOOKASSA_TRUSTED_IPS", mode="before")
+    @field_validator(
+        "YOOKASSA_TRUSTED_IPS", "TRUSTED_PROXY_IPS", mode="before"
+    )
     @classmethod
-    def parse_trusted_ips(cls, v):
+    def parse_ip_list(cls, v):
+        """Общий валидатор: строка JSON-массива или готовый list[str]."""
         if isinstance(v, list):
             if not v:
-                raise ValueError("YOOKASSA_TRUSTED_IPS must be a non-empty list")
+                raise ValueError("IP list must be a non-empty list")
             if not all(isinstance(item, str) for item in v):
-                raise ValueError("YOOKASSA_TRUSTED_IPS must contain only strings")
+                raise ValueError("IP list must contain only strings")
             return v
         elif isinstance(v, str):
             try:
@@ -148,7 +193,7 @@ class Settings(BaseSettings):
                     return parsed
             except json.JSONDecodeError:
                 pass
-        raise ValueError("YOOKASSA_TRUSTED_IPS must be a JSON array of IP/CIDR strings")
+        raise ValueError("IP list must be a JSON array of IP/CIDR strings")
 
     @field_validator("DATABASE_URL")
     @classmethod
@@ -261,7 +306,9 @@ INTERNAL_API_URL = settings.INTERNAL_API_URL
 
 DATABASE_URL = clean_db_url(settings.DATABASE_URL)
 
-IPS_FILE = Path("yookassa_ip.json")
+# Путь к файлу — от __file__, а не от CWD. Иначе при запуске через
+# systemd/другой рабочий каталог файл создастся/прочитается не там.
+IPS_FILE = Path(__file__).resolve().parent / "yookassa_ip.json"
 
 
 def load_trusted_ips() -> list[str] | None:
@@ -292,25 +339,22 @@ def save_trusted_ips(ips: list[str]) -> bool:
         return False
 
 
-if not IPS_FILE.exists():
-    initial_ips = settings.YOOKASSA_TRUSTED_IPS
-    if save_trusted_ips(initial_ips):
-        logger.info(
-            f"✅ Created yookassa_ip.json with initial IPs from .env ({len(initial_ips)} entries)"
-        )
-    else:
-        logger.warning("⚠️ Could not create yookassa_ip.json, will use .env value")
-
+# ВАЖНО: файл НЕ создаётся при импорте config — это делает on_startup
+# в run_all.py. Импорт модуля не должен иметь side-эффектов на FS.
 _loaded_ips = load_trusted_ips()
 if _loaded_ips is not None:
     if _loaded_ips:
         settings.YOOKASSA_TRUSTED_IPS = _loaded_ips
         logger.info(
-            f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json ({len(_loaded_ips)} entries)"
+            f"✅ YOOKASSA_TRUSTED_IPS overridden from yookassa_ip.json "
+            f"({len(_loaded_ips)} entries)"
         )
     else:
         logger.warning(
             "⚠️ yookassa_ip.json contains an empty list. Keeping value from .env."
         )
 else:
-    logger.info("ℹ️ Using YOOKASSA_TRUSTED_IPS from .env (file not found or invalid)")
+    logger.info(
+        "ℹ️ Using YOOKASSA_TRUSTED_IPS from .env "
+        "(yookassa_ip.json not found or invalid)"
+    )

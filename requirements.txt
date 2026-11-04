@@ -8,7 +8,6 @@ python-dotenv>=1.0.0
 SQLAlchemy[asyncio]>=2.0.0
 alembic>=1.13.0
 asyncpg>=0.29.0
-aiosqlite>=0.19.0  
 psycopg[binary]>=3.3.0
 redis[hiredis]>=5.0.0
 
@@ -23,12 +22,11 @@ yookassa>=3.3.0
 # ================== Безопасность ==================
 bcrypt>=4.0.1
 cryptography>=41.0.0
-python-jose[cryptography]>=3.5.0
 
 # ================== Утилиты ==================
 tenacity>=8.0
 pytest>=7.0.0
-pytest-asyncio>=0.21.0
+pytest-asyncio>=0.24.0
 pyfiglet>=1.0.0
 
 pytest-aiohttp

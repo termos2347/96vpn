@@ -54,6 +54,11 @@ async def activate_subscription(
         logger.error(f"Invalid period: {period}")
         return False
 
+    # Защита в глубину: bypass поддерживает только 1m/3m.
+    if product_type == "bypass" and period not in ("1m", "3m"):
+        logger.error(f"bypass does not support period={period}")
+        return False
+
     if user is None:
         user = await get_or_create_bot_user(session, telegram_id)
 
@@ -162,7 +167,7 @@ async def get_expired_users(session: AsyncSession) -> list[BotUser]:
         )
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
 async def get_active_users_without_client(session: AsyncSession) -> list[BotUser]:
@@ -174,10 +179,10 @@ async def get_active_users_without_client(session: AsyncSession) -> list[BotUser
         )
     )
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
-# ---- ДОБАВЛЕННЫЕ ФУНКЦИИ ДЛЯ СОВМЕСТИМОСТИ ----
+# ---- Функции продления подписки (FOR UPDATE защищает от гонок) ----
 
 
 async def update_vpn_subscription(
@@ -185,7 +190,12 @@ async def update_vpn_subscription(
     telegram_id: int,
     days: int,
 ) -> bool:
-    user = await get_user_by_telegram_id(session, telegram_id)
+    stmt = (
+        select(BotUser)
+        .where(BotUser.telegram_id == telegram_id)
+        .with_for_update()
+    )
+    user = (await session.execute(stmt)).scalar_one_or_none()
     if not user:
         logger.error(f"User {telegram_id} not found for VPN subscription update")
         return False
@@ -206,7 +216,12 @@ async def update_bypass_subscription(
     telegram_id: int,
     days: int,
 ) -> bool:
-    user = await get_user_by_telegram_id(session, telegram_id)
+    stmt = (
+        select(BotUser)
+        .where(BotUser.telegram_id == telegram_id)
+        .with_for_update()
+    )
+    user = (await session.execute(stmt)).scalar_one_or_none()
     if not user:
         logger.error(f"User {telegram_id} not found for Bypass subscription update")
         return False

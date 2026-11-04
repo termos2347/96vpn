@@ -34,7 +34,6 @@ class RedisService:
                     socket_connect_timeout=3,
                     socket_timeout=3,
                 )
-                # Маскируем пароль для лога
                 display_url = url.split("@")[-1] if "@" in url else url
             else:
                 self._client = redis.Redis(
@@ -109,9 +108,18 @@ class RedisService:
             logger.error(f"Redis delete_cache error: {e}")
             return False
 
-    async def rate_limit_check(self, key: str, max_per_minute: int, expire: int = 60):
+    async def rate_limit_check(
+        self, key: str, max_per_minute: int, expire: int = 60
+    ) -> tuple[bool, int]:
+        """Проверка лимита через Redis.
+
+        В отличие от кэш-методов, здесь мы НЕ возвращаем fail-open `(True, 0)`
+        при отключённом/упавшем Redis — а бросаем RuntimeError. Это позволяет
+        вызывающему коду (utils/decorators.py) отличить «Redis недоступен»
+        от «лимит не превышен» и применить in-memory fallback.
+        """
         if self._client is None:
-            return True, 0
+            raise RuntimeError("Redis not connected")
         try:
             count = await self.client.incr(key)
             if count == 1:
@@ -120,7 +128,7 @@ class RedisService:
             return current_count <= max_per_minute, current_count
         except Exception as e:
             logger.error(f"Redis rate_limit_check error: {e}")
-            return True, 0
+            raise RuntimeError(f"Redis rate_limit_check failed: {e}") from e
 
     async def clear_rate_limit(self, key: str) -> bool:
         if self._client is None:

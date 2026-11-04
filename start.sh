@@ -5,7 +5,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PORT=5001
 ENTRYPOINT="run_all.py"
 
 # 1. Проверяем .env
@@ -14,6 +13,13 @@ if [ ! -f ".env" ]; then
     echo "   Скопируйте шаблон:  cp .env.example .env" >&2
     echo "   И заполните SECRET_KEY и ADMIN_PASSWORD." >&2
     exit 1
+fi
+
+# 1b. Порт берём из .env (INTERNAL_API_PORT), fallback — 5001
+PORT=5001
+_env_port=$(grep -E '^INTERNAL_API_PORT=' .env 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d ' "\'" || true)
+if [ -n "${_env_port:-}" ]; then
+    PORT="$_env_port"
 fi
 
 # 2. Проверяем .venv

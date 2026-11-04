@@ -25,7 +25,10 @@ class Texts:
         """Главное меню с приветствием и статусом подписки."""
         if vpn_end and vpn_end > datetime.now(timezone.utc):
             days_left = (vpn_end - datetime.now(timezone.utc)).days
-            status = f"✅ активна до **{vpn_end.strftime('%d.%m.%Y')}** (осталось {days_left} дн.)"
+            status = (
+                f"✅ активна до **{vpn_end.strftime('%d.%m.%Y')}** "
+                f"(осталось {days_left} дн.)"
+            )
         else:
             status = "❌ не активна"
         return (
@@ -58,7 +61,10 @@ class Texts:
                 "2. Нажмите «Импорт из буфера» или вставьте ссылку вручную.\n"
                 "3. Подключитесь и наслаждайтесь!"
             )
-        return "❌ У вас нет активных ключей. Оформите подписку в разделе «🚀 Оплатить подписку»."
+        return (
+            "❌ У вас нет активных ключей. Оформите подписку в разделе "
+            "«🚀 Оплатить подписку»."
+        )
 
     @staticmethod
     def help_info() -> str:
@@ -85,7 +91,10 @@ class Texts:
 
     @staticmethod
     def no_active_subscription() -> str:
-        return "❌ У вас нет активной подписки. Оформите её в разделе «🚀 Оплатить подписку»."
+        return (
+            "❌ У вас нет активной подписки. Оформите её в разделе "
+            "«🚀 Оплатить подписку»."
+        )
 
     @staticmethod
     def payment_success_with_date(
@@ -96,20 +105,23 @@ class Texts:
         if vpn_end and vpn_end > now:
             date_str = vpn_end.strftime("%d.%m.%Y")
             msg = (
-                f"✅ Ваша подписка **продлена** до **{date_str}** (на {days} дней).\n\n"
+                f"✅ Ваша подписка **продлена** до **{date_str}** "
+                f"(на {days} дней).\n\n"
             )
         else:
             msg = f"✅ Ваша подписка активирована на {days} дней.\n\n"
         if link:
             msg += (
                 f"🔗 Ваша ссылка для подключения:\n`{link}`\n\n"
-                "Скопируйте её и вставьте в приложение (V2RayNG, Shadowrocket, Nekoray)."
+                "Скопируйте её и вставьте в приложение "
+                "(V2RayNG, Shadowrocket, Nekoray)."
             )
         else:
             msg += (
-                "🔑 Мы автоматически создаём ключ, это может занять несколько минут. "
-                "Как только ключ будет готов, мы пришлём его вам.\n\n"
-                "Если через 10 минут ничего не пришло – нажмите кнопку «Мои Ключи»."
+                "🔑 Мы автоматически создаём ключ, это может занять несколько "
+                "минут. Как только ключ будет готов, мы пришлём его вам.\n\n"
+                "Если через 10 минут ничего не пришло – нажмите кнопку "
+                "«Мои Ключи»."
             )
         return msg
 
@@ -151,7 +163,9 @@ class Keyboards:
         for period, price in prices.items():
             label = f"{period_to_text(period)} — {price:.0f} {currency.upper()}"
             callback = f"tariff_{period}_{currency}"
-            buttons.append([InlineKeyboardButton(text=label, callback_data=callback)])
+            buttons.append(
+                [InlineKeyboardButton(text=label, callback_data=callback)]
+            )
         buttons.append(
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]
         )

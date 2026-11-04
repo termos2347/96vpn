@@ -16,7 +16,6 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql+asyncpg://test:test@localhost/test_db"
 )
 
-# Webhook'и — в DEBUG-режиме допускается http://localhost
 os.environ.setdefault("WEBHOOK_URL", "http://localhost:5001/webhook")
 os.environ.setdefault("WEBHOOK_SECRET", "test_webhook_secret_0123456789")
 os.environ.setdefault("ADMIN_WEBHOOK_URL", "http://localhost:5001/webhook/admin")
@@ -24,27 +23,26 @@ os.environ.setdefault(
     "ADMIN_WEBHOOK_SECRET", "test_admin_webhook_secret_0123456789"
 )
 
-# Валидный Fernet-ключ (32 url-safe base64 байта). НЕ боевой!
 os.environ.setdefault(
     "ENCRYPTION_KEY", "dGVzdF9mZXJuZXRfa2V5X2Zvcl90ZXN0c19vbmx5Xz0="
 )
 os.environ.setdefault("INTERNAL_API_SECRET", "test_internal_api_secret")
 
-# ЮKassa — заглушки
 os.environ.setdefault("YOOKASSA_SHOP_ID", "123456")
 os.environ.setdefault("YOOKASSA_API_KEY", "test_" + "x" * 40)
 os.environ.setdefault("YOOKASSA_TRUSTED_IPS", '["127.0.0.1", "185.71.76.0/24"]')
 
-# 3x-UI — заглушки
+# Прокси по умолчанию — localhost (в тестах всё через TestServer)
+os.environ.setdefault("TRUSTED_PROXY_IPS", '["127.0.0.1", "::1"]')
+
 os.environ.setdefault("XUI_MASTER_URL", "http://localhost:2053")
 os.environ.setdefault("XUI_API_TOKEN", "test_xui_token_0123456789abcdef")
 os.environ.setdefault("XUI_INBOUND_ID", "1")
 os.environ.setdefault("XUI_SUB_PORT", "2096")
 
-# Отключаем Redis и проверку миграций в тестах
 os.environ.setdefault("REDIS_ENABLED", "false")
 os.environ.setdefault("SKIP_MIGRATION_CHECK", "true")
-os.environ.setdefault("DEBUG", "true")  # разрешает http://localhost для webhook
+os.environ.setdefault("DEBUG", "true")
 
 # --- Теперь безопасно импортировать проект ---
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -55,6 +53,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from db.models import Base
 from services.vpn_provider import XUIVPNProvider
+
+
+@pytest.fixture(autouse=True)
+def clear_memory_cache():
+    """Сбрасывает in-memory кэш и rate limit между тестами.
+
+    utils/cache.py хранит данные в глобальном словаре — без этой
+    фикстуры тесты могут «протекать» друг в друга (особенно
+    test_rate_limit_* и test_vpn_manager, где user_id пересекаются).
+    """
+    from utils.cache import clear_cache
+
+    clear_cache()
+    yield
+    clear_cache()
 
 
 @pytest.fixture(scope="function")

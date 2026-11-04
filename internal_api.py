@@ -15,16 +15,11 @@ from sqlalchemy import select
 from config import INTERNAL_API_SECRET, settings
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import activate_subscription
-from db.models import BotUser
+from db.models import BotPayment, BotUser
 from services.payment_yookassa import yookassa_service
 from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
-
-# Дефолтный набор прокси, от которых принимаем X-Real-IP.
-# Если nginx стоит на другой машине — переопределите через
-# settings.TRUSTED_PROXY_IPS (добавив поле в config.py).
-_DEFAULT_TRUSTED_PROXIES = ("127.0.0.1", "::1", "localhost")
 
 
 def get_client_ip(request: web.Request) -> str:
@@ -36,9 +31,7 @@ def get_client_ip(request: web.Request) -> str:
     remote = request.remote or ""
     real_ip = request.headers.get("X-Real-IP")
 
-    trusted = getattr(settings, "TRUSTED_PROXY_IPS", None) or _DEFAULT_TRUSTED_PROXIES
-
-    if real_ip and remote in trusted:
+    if real_ip and remote in settings.TRUSTED_PROXY_IPS:
         return real_ip
     return remote
 
@@ -117,6 +110,26 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                     )
                     user = (await session.execute(stmt_user)).scalar_one()
 
+                # Защита от двойной активации по одному payment_id —
+                # если платёж уже обработан, повторный /activate
+                # не должен продлевать подписку ещё раз.
+                if payment_id:
+                    stmt_payment = (
+                        select(BotPayment)
+                        .where(BotPayment.payment_id == payment_id)
+                        .with_for_update()
+                    )
+                    db_payment = (
+                        await session.execute(stmt_payment)
+                    ).scalar_one_or_none()
+                    if db_payment and db_payment.is_paid:
+                        logger.info(
+                            f"/activate: payment {payment_id} already processed"
+                        )
+                        return web.json_response(
+                            {"status": "already_activated"}, status=200
+                        )
+
                 success = await activate_subscription(
                     session,
                     telegram_id,
@@ -136,36 +149,53 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                             try:
                                 await main_bot.send_message(
                                     telegram_id,
-                                    f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней.",
+                                    f"🔗 Ваша ссылка: {link}\n\n"
+                                    f"Подписка активирована на {days} дней.",
                                 )
                             except TelegramForbiddenError:
                                 logger.info(
-                                    f"User {telegram_id} blocked bot, cannot send link from API"
+                                    f"User {telegram_id} blocked bot, "
+                                    f"cannot send link from API"
                                 )
                             except TelegramRetryAfter as e:
                                 logger.warning(
-                                    f"Flood limit for {telegram_id} (API), waiting {e.retry_after}s"
+                                    f"Flood limit for {telegram_id} (API), "
+                                    f"waiting {e.retry_after}s"
                                 )
                                 await asyncio.sleep(e.retry_after)
                                 try:
                                     await main_bot.send_message(
                                         telegram_id,
-                                        f"🔗 Ваша ссылка: {link}\n\nПодписка активирована на {days} дней.",
+                                        f"🔗 Ваша ссылка: {link}\n\n"
+                                        f"Подписка активирована на {days} дней.",
                                     )
                                 except TelegramAPIError as send_error:
                                     logger.error(
-                                        f"Failed to send link to {telegram_id} after retry: {send_error}"
+                                        f"Failed to send link to {telegram_id} "
+                                        f"after retry: {send_error}"
                                     )
                             except (TelegramNetworkError, ClientError) as e:
                                 logger.warning(
-                                    f"Network error sending link to {telegram_id} from API: {e}"
+                                    f"Network error sending link to "
+                                    f"{telegram_id} from API: {e}"
                                 )
                             except Exception as e:
                                 logger.error(
-                                    f"Unexpected error sending link to {telegram_id} from API: {e}"
+                                    f"Unexpected error sending link to "
+                                    f"{telegram_id} from API: {e}"
                                 )
                 return web.json_response({"status": "ok"})
-            return web.json_response({"status": "already_activated"}, status=200)
+
+            # activate_subscription вернул False, а аргументы уже
+            # провалидированы выше — значит это внутренняя ошибка
+            # (например, гонка при валидации). Отвечаем 400, а не
+            # вводим в заблуждение как "already_activated".
+            logger.error(
+                f"/activate: activate_subscription returned False for "
+                f"telegram_id={telegram_id}, product={product_type}, "
+                f"period={period}"
+            )
+            return web.json_response({"error": "activation failed"}, status=400)
         except Exception:
             logger.exception("Activation error")
             return web.json_response({"status": "error"}, status=500)
@@ -186,7 +216,9 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
 
             if main_bot is None:
                 logger.error("Main bot not set, cannot process yookassa webhook")
-                return web.json_response({"error": "main bot not ready"}, status=503)
+                return web.json_response(
+                    {"error": "main bot not ready"}, status=503
+                )
 
             async with AsyncSessionLocal() as session, session.begin():
                 success = await yookassa_service.process_webhook(

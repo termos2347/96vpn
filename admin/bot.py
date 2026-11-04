@@ -40,6 +40,15 @@ _broadcast_cancel_flags: dict[int, bool] = {}
 _router_attached = False
 
 
+# ========== Авторизация ==========
+def _is_admin(message: types.Message) -> bool:
+    """Проверяет, что автор сообщения — администратор."""
+    return (
+        message.from_user is not None
+        and str(message.from_user.id) == ADMIN_CHAT_ID
+    )
+
+
 # ========== Вспомогательные функции ==========
 def log_error(message: str, notify_admin: bool = False):
     logger.error(message)
@@ -138,11 +147,17 @@ async def shutdown():
 # ========== Базовые команды ==========
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
+    if not _is_admin(message):
+        await message.answer("❌ Нет доступа.")
+        return
     await message.answer("🛡️ Админ-бот 96VPN. Все команды: /menu")
 
 
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
+    if not _is_admin(message):
+        await message.answer("❌ Нет доступа.")
+        return
     text_msg = (
         "📋 Доступные команды:\n\n"
         "/start – Запустить бота\n"
@@ -163,6 +178,9 @@ async def cmd_menu(message: types.Message):
 
 @dp.message(Command("health"))
 async def cmd_health(message: types.Message):
+    if not _is_admin(message):
+        await message.answer("❌ Нет доступа.")
+        return
     status = "✅ Статус:\n"
     try:
         async with engine.connect() as conn:
@@ -189,6 +207,9 @@ async def cmd_health(message: types.Message):
 
 @dp.message(Command("errors"))
 async def cmd_errors(message: types.Message):
+    if not _is_admin(message):
+        await message.answer("❌ Нет доступа.")
+        return
     if not error_log:
         await message.answer("✅ Нет сохранённых ошибок.")
         return
@@ -199,7 +220,14 @@ async def cmd_errors(message: types.Message):
 
 
 # ========== Текстовая рассылка ==========
+@dp.message(Command("broadcast"))
 async def cmd_broadcast(message: Message):
+    if message.from_user is None:
+        return
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+
     try:
         text_parts = (message.text or "").split(maxsplit=1)
         if len(text_parts) < 2:
@@ -225,9 +253,6 @@ async def cmd_broadcast(message: Message):
 
         if not hasattr(cmd_broadcast, "pending_broadcasts"):
             cmd_broadcast.pending_broadcasts = {}
-
-        if message.from_user is None:
-            return
 
         admin_id = message.from_user.id
         cmd_broadcast.pending_broadcasts[admin_id] = {
@@ -340,20 +365,24 @@ async def cmd_broadcast_media(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("broadcast_confirm_"))
 async def broadcast_confirm_callback(callback: CallbackQuery):
     try:
-        await callback.answer()
-
+        # ВАЖНО: сначала проверяем наличие message, потом уже отвечаем
+        # на callback — иначе второй answer() не сработает.
         if not isinstance(callback.message, Message):
             await callback.answer("Сообщение устарело", show_alert=True)
             return
 
         if callback.from_user is None:
+            await callback.answer()
             return
 
         if callback.bot is None:
             await callback.answer("Бот недоступен", show_alert=True)
             return
-        bot = callback.bot
 
+        # Успешный "тихий" ответ на callback — один раз
+        await callback.answer()
+
+        bot = callback.bot
         admin_id = callback.from_user.id
         pending = getattr(cmd_broadcast, "pending_broadcasts", {}).get(admin_id)
 
@@ -748,7 +777,14 @@ async def cmd_userinfo(message: types.Message):
     await message.answer(text_msg, parse_mode="Markdown")
 
 
+@dp.message(Command("grant"))
 async def cmd_grant(message: Message):
+    if message.from_user is None:
+        return
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+
     try:
         args = (message.text or "").split()
         if len(args) != 3:
@@ -812,7 +848,14 @@ async def cmd_grant(message: Message):
         await message.answer("❌ Ошибка при выполнении команды.")
 
 
+@dp.message(Command("revoke"))
 async def cmd_revoke(message: Message):
+    if message.from_user is None:
+        return
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+
     try:
         args = (message.text or "").split()
         if len(args) != 2:
@@ -861,7 +904,14 @@ async def cmd_revoke(message: Message):
 
 
 # ========== Статистика ==========
+@dp.message(Command("stats"))
 async def cmd_stats(message: Message):
+    if message.from_user is None:
+        return
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Нет доступа.")
+        return
+
     try:
         async with AsyncSessionLocal() as session:
             now = datetime.now(timezone.utc)

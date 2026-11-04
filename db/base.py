@@ -4,13 +4,24 @@ from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import TypeVar
 
+from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from config import DATABASE_URL
+from config import DATABASE_URL, get_asyncpg_ssl, settings
 
 logger = logging.getLogger(__name__)
 
-# ---------- Движок ----------
+_ssl_config = get_asyncpg_ssl(settings.DATABASE_URL)
+
+_connect_args: dict = {
+    "server_settings": {
+        "statement_timeout": "30s",
+        "lock_timeout": "15s",
+    }
+}
+if _ssl_config is not None:
+    _connect_args["ssl"] = _ssl_config
+
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -18,24 +29,18 @@ engine = create_async_engine(
     max_overflow=10,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={
-        "server_settings": {
-            "statement_timeout": "30s",  # 30 секунд на выполнение запроса
-            "lock_timeout": "15s",  # 15 секунд на ожидание блокировки
-        }
-    },
+    connect_args=_connect_args,
 )
 
-# async_sessionmaker — официальный способ для async (SQLAlchemy 2.0+).
-# Pylance понимает тип корректно: AsyncSessionLocal() -> AsyncSession.
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )
 
-# ---------- Декоратор повторных попыток ----------
 T = TypeVar("T")
+
+_RETRYABLE_DB_ERRORS = (OperationalError, InterfaceError)
 
 
 def retry_db_operation(max_retries=3, delay=1, backoff=2):
@@ -46,9 +51,7 @@ def retry_db_operation(max_retries=3, delay=1, backoff=2):
             for attempt in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
-                except Exception as e:
-                    # Здесь мы намеренно перехватываем все исключения,
-                    # чтобы повторить операцию – это стандартный паттерн.
+                except _RETRYABLE_DB_ERRORS as e:
                     last_exception = e
                     logger.warning(
                         f"DB operation {func.__name__} failed "
@@ -60,8 +63,7 @@ def retry_db_operation(max_retries=3, delay=1, backoff=2):
             if last_exception is not None:
                 raise last_exception
             raise RuntimeError(
-                f"{func.__name__} failed with max_retries={max_retries} "
-                "but no exception was captured"
+                f"{func.__name__} failed with max_retries={max_retries}"
             )
 
         return wrapper

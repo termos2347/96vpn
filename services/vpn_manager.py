@@ -2,43 +2,119 @@
 import asyncio
 import logging
 import uuid
+import weakref
 from datetime import datetime, timedelta, timezone
 
+from config import settings
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import get_or_create_bot_user, update_vpn_subscription
 from services.redis_service import redis_service
 from services.vpn_provider import XUIVPNProvider
+from utils.cache import clear_cache as local_clear_cache
+from utils.cache import get_cache as local_get_cache
+from utils.cache import set_cache as local_set_cache
 
 logger = logging.getLogger(__name__)
+
+_user_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _get_user_lock(user_id: int) -> asyncio.Lock:
+    lock = _user_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_locks[user_id] = lock
+    return lock
 
 
 class VPNManager:
     def __init__(self, provider: XUIVPNProvider):
         self.provider = provider
 
-    # ---- Вспомогательные методы для Redis ----
+    # ---- Кэш ссылок: Redis + in-memory fallback ----
     async def _get_cached_link(self, user_id: int) -> str | None:
-        return await redis_service.get_cache(f"vpn_link:{user_id}")
+        key = f"vpn_link:{user_id}"
+        redis_link = await redis_service.get_cache(key)
+        if redis_link:
+            return redis_link
+        return local_get_cache(key)
 
     async def _set_cached_link(self, user_id: int, link: str) -> None:
-        await redis_service.set_cache(f"vpn_link:{user_id}", link)
+        key = f"vpn_link:{user_id}"
+        ok = await redis_service.set_cache(key, link)
+        if not ok:
+            local_set_cache(
+                key, link, ttl_seconds=settings.REDIS_CACHE_TTL
+            )
 
     async def _invalidate_cache(self, user_id: int) -> None:
-        await redis_service.delete_cache(f"vpn_link:{user_id}")
+        key = f"vpn_link:{user_id}"
+        await redis_service.delete_cache(key)
+        local_clear_cache(key)
         logger.debug(f"Cache invalidated for user {user_id}")
 
-    # ---- Создание ключа (НЕ трогает дату окончания подписки!) ----
-    @retry_db_operation(max_retries=3)
-    async def create_vpn_key(self, user_id: int, session=None) -> str | None:
-        """Создаёт клиента на VPN-панели и сохраняет vpn_client_id.
+    # ---- Поиск существующего клиента на панели ----
+    async def _find_existing_client(
+        self, user_id: int, vpn_client_id: str | None
+    ) -> dict | None:
+        if not vpn_client_id:
+            return None
 
-        ВАЖНО: не изменяет vpn_subscription_end. Продление подписки —
-        ответственность activate_subscription / update_vpn_subscription.
-        """
+        email = f"tg_{user_id}_{vpn_client_id[:8]}"
+        try:
+            client = await asyncio.wait_for(
+                self.provider.get_client_by_email(email), timeout=5.0
+            )
+        except Exception:
+            client = None
+        if client and client.get("subId"):
+            return client
+
+        try:
+            client = await asyncio.wait_for(
+                self.provider.get_client_by_sub_id(vpn_client_id[:16]), timeout=5.0
+            )
+        except Exception:
+            client = None
+        if client and client.get("subId"):
+            return client
+
+        return None
+
+    # ---- Сохранение client_id (retry только на БД-часть) ----
+    @retry_db_operation(max_retries=3)
+    async def _save_client_id(self, user_id: int, client_uuid: str) -> None:
+        async with AsyncSessionLocal() as sess, sess.begin():
+            user = await get_or_create_bot_user(sess, user_id)
+            user.vpn_client_id = client_uuid
+
+    # ---- Идемпотентное создание ключа (с per-user lock) ----
+    async def create_vpn_key(self, user_id: int) -> str | None:
+        async with _get_user_lock(user_id):
+            return await self._create_vpn_key_locked(user_id)
+
+    async def _create_vpn_key_locked(self, user_id: int) -> str | None:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                user = await get_or_create_bot_user(session, user_id)
+                existing_client_id = user.vpn_client_id
+
+        existing = await self._find_existing_client(user_id, existing_client_id)
+        if existing:
+            link = self.provider.get_subscription_link(existing["subId"])
+            logger.info(
+                f"create_vpn_key: reusing existing key for user {user_id}"
+            )
+            return link
+
         client_uuid = str(uuid.uuid4())
         email = f"tg_{user_id}_{client_uuid[:8]}"
         sub_id = client_uuid[:16]
-        logger.info(f"Creating key: user={user_id}, email={email}, sub_id={sub_id}")
+        logger.info(
+            f"Creating key: user={user_id}, email={email}, sub_id={sub_id}"
+        )
 
         try:
             client_data = await asyncio.wait_for(
@@ -67,29 +143,32 @@ class VPNManager:
         real_sub_id = client_data.get("subId", sub_id)
         link = self.provider.get_subscription_link(real_sub_id)
 
-        if session is None:
-            async with AsyncSessionLocal() as sess, sess.begin():
-                user = await get_or_create_bot_user(sess, user_id)
-                user.vpn_client_id = client_uuid
-        else:
-            user = await get_or_create_bot_user(session, user_id)
-            user.vpn_client_id = client_uuid
+        try:
+            await self._save_client_id(user_id, client_uuid)
+        except Exception as e:
+            logger.exception(
+                f"Failed to save client_id for user {user_id}: {e}"
+            )
+            await self._notify_admin_and_user(
+                user_id, f"ключ создан, но client_id не сохранён в БД: {e}"
+            )
+            return link
 
         logger.info(f"Key created for user {user_id}: client_id={client_uuid}")
         return link
 
-    # ---- Выдача подписки админом: продлить + создать ключ ----
-    @retry_db_operation(max_retries=3)
+    # ---- Выдача подписки админом ----
     async def grant_subscription(self, user_id: int, days: int) -> str | None:
-        """Продлевает подписку на `days` и создаёт ключ. Для /grant."""
         async with AsyncSessionLocal() as session, session.begin():
-            await get_or_create_bot_user(session, user_id)  # создаём если нет
+            await get_or_create_bot_user(session, user_id)
             ok = await update_vpn_subscription(session, user_id, days)
         if not ok:
-            logger.error(f"grant_subscription: could not update subscription for {user_id}")
+            logger.error(
+                f"grant_subscription: could not update subscription for {user_id}"
+            )
             return None
 
-        return await self.create_vpn_key(user_id)
+        return await self.get_or_create_link(user_id)
 
     # ---- Получение или создание ссылки ----
     @retry_db_operation(max_retries=3)
@@ -100,76 +179,37 @@ class VPNManager:
             return cached_link
 
         logger.info(f"get_or_create_link called for user {user_id}")
+
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 user = await get_or_create_bot_user(session, user_id)
-                now = datetime.now(timezone.utc)
+                vpn_client_id = user.vpn_client_id
+                vpn_end = user.vpn_subscription_end
 
-                if (
-                    user.vpn_subscription_end is None
-                    or user.vpn_subscription_end <= now
-                ):
-                    logger.info(f"User {user_id} has no active subscription")
-                    return None
+        if vpn_end is None or vpn_end <= datetime.now(timezone.utc):
+            logger.info(f"User {user_id} has no active subscription")
+            return None
 
-                email = None
-                if user.vpn_client_id:
-                    email = f"tg_{user_id}_{user.vpn_client_id[:8]}"
+        existing = await self._find_existing_client(user_id, vpn_client_id)
+        if existing:
+            link = self.provider.get_subscription_link(existing["subId"])
+            logger.info(f"Existing key for user {user_id}: {link}")
+            await self._set_cached_link(user_id, link)
+            return link
 
-                client = None
+        if vpn_client_id:
+            logger.warning(
+                f"Stored client_id {vpn_client_id} not found on panel, will recreate"
+            )
+            await self._invalidate_cache(user_id)
 
-                if email:
-                    try:
-                        logger.debug(f"Checking client by email: {email}")
-                        client = await asyncio.wait_for(
-                            self.provider.get_client_by_email(email), timeout=5.0
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            f"Timeout getting client by email for user {user_id}"
-                        )
-                    except Exception as e:
-                        logger.exception(
-                            f"Error getting client by email for user {user_id}: {e}"
-                        )
+        new_link = await self.create_vpn_key(user_id)
+        if new_link:
+            await self._set_cached_link(user_id, new_link)
+            return new_link
 
-                if not client and user.vpn_client_id:
-                    sub_id_to_search = user.vpn_client_id[:16]
-                    try:
-                        logger.debug(
-                            f"Trying to find client by subId: {sub_id_to_search}"
-                        )
-                        client = await asyncio.wait_for(
-                            self.provider.get_client_by_sub_id(sub_id_to_search),
-                            timeout=5.0,
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            f"Timeout getting client by subId for user {user_id}"
-                        )
-                    except Exception as e:
-                        logger.warning(f"Error getting client by subId: {e}")
-
-                if client and client.get("subId"):
-                    link = self.provider.get_subscription_link(client["subId"])
-                    logger.info(f"Existing key for user {user_id}: {link}")
-                    await self._set_cached_link(user_id, link)
-                    return link
-
-                if user.vpn_client_id:
-                    logger.warning(
-                        f"Stored client_id {user.vpn_client_id} not found on panel, will recreate"
-                    )
-                    await self._invalidate_cache(user_id)
-
-                # ВАЖНО: дни не передаём, подписку не продлеваем
-                new_link = await self.create_vpn_key(user_id, session=session)
-                if new_link:
-                    await self._set_cached_link(user_id, new_link)
-                    return new_link
-
-                logger.error(f"Failed to create new key for user {user_id}")
-                return None
+        logger.error(f"Failed to create new key for user {user_id}")
+        return None
 
     # ---- Отзыв ключа ----
     @retry_db_operation(max_retries=3)
@@ -198,7 +238,8 @@ class VPNManager:
 
                 if client is None:
                     logger.info(
-                        f"Client {client_uuid} not found on panel, assuming already revoked"
+                        f"Client {client_uuid} not found on panel, "
+                        f"assuming already revoked"
                     )
                 else:
                     logger.error(
@@ -209,7 +250,9 @@ class VPNManager:
                     )
                     return False
         except asyncio.TimeoutError:
-            logger.error(f"Timeout revoking client {client_uuid} for user {user_id}")
+            logger.error(
+                f"Timeout revoking client {client_uuid} for user {user_id}"
+            )
             await self._notify_admin_and_user(
                 user_id, f"таймаут при отзыве ключа {client_uuid}"
             )
@@ -218,7 +261,9 @@ class VPNManager:
             logger.exception(
                 f"Error revoking client {client_uuid} for user {user_id}: {e}"
             )
-            await self._notify_admin_and_user(user_id, f"ошибка при отзыве ключа: {e}")
+            await self._notify_admin_and_user(
+                user_id, f"ошибка при отзыве ключа: {e}"
+            )
             return False
 
         async with AsyncSessionLocal() as session, session.begin():
@@ -234,19 +279,37 @@ class VPNManager:
         await send_admin_alert(
             f"⚠️ Ошибка при работе с VPN для пользователя {user_id}: {error_msg}"
         )
+
         try:
+            from admin import bot as admin_module
+
+            bot = getattr(admin_module, "main_bot", None)
+            if bot is not None:
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "Сервер временно перегружен, мы уже выдаем вам ключ, "
+                        "администратор уведомлен.",
+                    )
+                except Exception as e:
+                    logger.warning(f"Error sending user notification: {e}")
+                return
+
             from aiogram import Bot
 
             from config import TOKEN
 
-            bot = Bot(token=TOKEN)
-            await bot.send_message(
-                user_id,
-                "Сервер временно перегружен, мы уже выдаем вам ключ, администратор уведомлен.",
-            )
-            await bot.session.close()
+            temp_bot = Bot(token=TOKEN)
+            try:
+                await temp_bot.send_message(
+                    user_id,
+                    "Сервер временно перегружен, мы уже выдаем вам ключ, "
+                    "администратор уведомлен.",
+                )
+            finally:
+                await temp_bot.session.close()
         except Exception as e:
-            logger.warning(f"Error closing temporary bot session: {e}")
+            logger.warning(f"Error notifying user {user_id}: {e}")
 
 
 _vpn_manager: VPNManager | None = None

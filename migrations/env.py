@@ -31,31 +31,59 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL not set in environment")
 
 
-def clean_db_url_for_psycopg2(url: str) -> str:
-    """
-    Преобразует DATABASE_URL для синхронного драйвера psycopg2.
-    Удаляет несовместимые параметры, такие как 'ssl', 'sslmode'.
+def prepare_sync_db_url(url: str) -> tuple[str, dict]:
+    """Преобразует DATABASE_URL для синхронного драйвера psycopg (v3).
+
+    Возвращает (url, connect_args). SSL-параметры (sslmode/ssl) вынимаются
+    из URL и передаются в connect_args — psycopg v3 понимает их как
+    обычные kwargs connect(). Это работает и при sslmode=require.
+
+    Если оставить sslmode в URL — psycopg v3 тоже справится, но при
+    наличии спецсимволов в пароле URL-парсинг может испортить строку,
+    поэтому безопаснее передавать ssl через kwargs.
     """
     parsed = urlparse(url)
 
-    # Если это asyncpg URL, меняем схему на стандартную
-    if parsed.scheme in ("postgresql+asyncpg", "postgresql+psycopg"):
-        parsed = parsed._replace(scheme="postgresql")
+    # asyncpg / голый postgresql → psycopg v3 (sync)
+    if parsed.scheme in ("postgresql+asyncpg", "postgresql"):
+        parsed = parsed._replace(scheme="postgresql+psycopg")
 
-    # Извлекаем параметры запроса
     query_params = parse_qs(parsed.query)
-    # Удаляем 'ssl' и 'sslmode', если они есть
-    query_params.pop("ssl", None)
-    query_params.pop("sslmode", None)
 
-    # Собираем URL заново
+    connect_args: dict = {}
+    sslmode: str | None = None
+
+    for key in list(query_params.keys()):
+        lower = key.lower()
+        if lower == "sslmode":
+            values = query_params.pop(key)
+            if values:
+                sslmode = values[0].lower()
+        elif lower == "ssl":
+            values = query_params.pop(key)
+            if values:
+                v = values[0].lower()
+                mapping = {
+                    "true": "require",
+                    "false": "disable",
+                    "allow": "allow",
+                    "prefer": "prefer",
+                    "require": "require",
+                    "verify-ca": "verify-ca",
+                    "verify-full": "verify-full",
+                }
+                sslmode = mapping.get(v)
+        elif lower == "channel_binding":
+            query_params.pop(key)
+
+    if sslmode:
+        connect_args["sslmode"] = sslmode
+
     new_query = urlencode(query_params, doseq=True)
-    clean_url = urlunparse(parsed._replace(query=new_query))
-    return clean_url
+    return urlunparse(parsed._replace(query=new_query)), connect_args
 
 
-# Получаем очищенный URL для синхронного драйвера
-SYNC_DATABASE_URL = clean_db_url_for_psycopg2(DATABASE_URL)
+SYNC_DATABASE_URL, SYNC_CONNECT_ARGS = prepare_sync_db_url(DATABASE_URL)
 config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL)
 
 
@@ -78,6 +106,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=SYNC_CONNECT_ARGS,
     )
     with connectable.connect() as connection:
         context.configure(

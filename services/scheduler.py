@@ -1,3 +1,4 @@
+# services/scheduler.py
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -28,12 +29,14 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
         except Exception as e:
             logger.error(f"Task {task_name} crashed")
             await send_admin_alert(
-                f"❌ Фоновая задача {task_name} упала: {e}. Будет перезапущена через {restart_delay}с."
+                f"❌ Фоновая задача {task_name} упала: {e}. "
+                f"Будет перезапущена через {restart_delay}с."
             )
             await asyncio.sleep(restart_delay)
         else:
             logger.warning(
-                f"Task {task_name} finished unexpectedly, restarting in {restart_delay}s"
+                f"Task {task_name} finished unexpectedly, "
+                f"restarting in {restart_delay}s"
             )
             await asyncio.sleep(restart_delay)
 
@@ -64,6 +67,9 @@ async def check_expired_subscriptions(bot):
         telegram_id = user.telegram_id
         client_uuid = user.vpn_client_id
 
+        if client_uuid is None:
+            continue
+
         try:
             revoked = await vpn_manager.revoke_key(telegram_id)
             if revoked:
@@ -71,7 +77,8 @@ async def check_expired_subscriptions(bot):
                 try:
                     await bot.send_message(
                         telegram_id,
-                        "❌ Ваша подписка истекла. Для продления перейдите в раздел оплаты.",
+                        "❌ Ваша подписка истекла. "
+                        "Для продления перейдите в раздел оплаты.",
                     )
                 except Exception as e:
                     logger.warning(f"Could not notify user {telegram_id}: {e}")
@@ -102,7 +109,11 @@ async def send_expiry_reminders(bot):
 
     today = now.date()
     for user in users:
-        days_left = (user.vpn_subscription_end - now).days
+        vpn_end = user.vpn_subscription_end
+        if vpn_end is None:
+            continue
+
+        days_left = (vpn_end - now).days
         if days_left not in (7, 3, 1):
             continue
 
@@ -117,8 +128,10 @@ async def send_expiry_reminders(bot):
                 await bot.send_message(
                     user.telegram_id,
                     f"⏰ Ваша подписка истекает через {day_word}.\n"
-                    f"Дата окончания: {user.vpn_subscription_end.strftime('%d.%m.%Y')}\n"
-                    f"Продлите её в разделе 💳 Оплатить , чтобы не остаться без доступа.",
+                    f"Дата окончания: "
+                    f"{vpn_end.strftime('%d.%m.%Y')}\n"
+                    f"Продлите её в разделе 💳 Оплатить , "
+                    f"чтобы не остаться без доступа.",
                 )
                 message_sent = True
                 break
@@ -137,7 +150,8 @@ async def send_expiry_reminders(bot):
                     break
             except (TelegramNetworkError, ClientError) as e:
                 logger.warning(
-                    f"Network error sending reminder to {user.telegram_id}, attempt {attempt + 1}: {e}"
+                    f"Network error sending reminder to {user.telegram_id}, "
+                    f"attempt {attempt + 1}: {e}"
                 )
                 if attempt < 2:
                     await asyncio.sleep(2**attempt)
@@ -148,7 +162,6 @@ async def send_expiry_reminders(bot):
                 break
 
         if message_sent:
-            # Обновляем last_reminder_sent внутри транзакции с блокировкой
             async with AsyncSessionLocal() as session_upd:
                 async with session_upd.begin():
                     stmt_lock = (
@@ -167,19 +180,23 @@ async def send_expiry_reminders(bot):
                     ):
                         continue
                     db_user.last_reminder_sent = now
-                    # commit автоматически при выходе из begin()
             logger.info(
-                f"Отправлено напоминание за {days_left} дн. пользователю {user.telegram_id}"
+                f"Отправлено напоминание за {days_left} дн. "
+                f"пользователю {user.telegram_id}"
             )
         else:
             logger.error(
-                f"Не удалось отправить напоминание пользователю {user.telegram_id} после 3 попыток"
+                f"Не удалось отправить напоминание пользователю "
+                f"{user.telegram_id} после 3 попыток"
             )
 
 
 @retry_db_operation(max_retries=3)
 async def retry_missing_keys(bot):
-    """Создаёт ключи для пользователей с активной подпиской, но без vpn_client_id."""
+    """Создаёт ключи для пользователей с активной подпиской, но без vpn_client_id.
+
+    Блокировка строки БД НЕ удерживается во время сетевых вызовов.
+    """
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
         stmt = select(BotUser).where(
@@ -192,7 +209,9 @@ async def retry_missing_keys(bot):
         logger.debug("Нет пользователей с активной подпиской и без ключа")
         return
 
-    logger.info(f"Найдено {len(users)} пользователей с активной подпиской и без ключа")
+    logger.info(
+        f"Найдено {len(users)} пользователей с активной подпиской и без ключа"
+    )
 
     vpn_manager = get_vpn_manager()
     if not vpn_manager:
@@ -201,50 +220,48 @@ async def retry_missing_keys(bot):
 
     for user in users:
         async with AsyncSessionLocal() as sess:
-            async with sess.begin():
-                stmt_lock = (
-                    select(BotUser)
-                    .where(BotUser.id == user.id)
-                    .with_for_update(skip_locked=True)
-                )
-                db_user = (await sess.execute(stmt_lock)).scalar_one_or_none()
-                if not db_user:
-                    continue
-                if db_user.vpn_client_id is not None:
-                    continue
-                if db_user.vpn_subscription_end <= now:
-                    continue
+            db_user = await sess.get(BotUser, user.id)
+            if db_user is None:
+                continue
+            db_end = db_user.vpn_subscription_end
+            if db_end is None or db_end <= now:
+                continue
+            if db_user.vpn_client_id is not None:
+                continue
+            telegram_id = db_user.telegram_id
 
+        try:
+            link = await vpn_manager.get_or_create_link(telegram_id)
+            if link:
                 try:
-                    link = await vpn_manager.get_or_create_link(db_user.telegram_id)
-                    if link:
-                        try:
-                            await bot.send_message(
-                                db_user.telegram_id,
-                                f"🔗 Ваш ключ готов:\n`{link}`\n\nСкопируйте ссылку и вставьте в приложение.",
-                                parse_mode="Markdown",
-                            )
-                            logger.info(
-                                f"Ключ успешно создан для {db_user.telegram_id} через фоновую задачу"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Could not send key to {db_user.telegram_id}: {e}"
-                            )
-                    else:
-                        logger.warning(
-                            f"Не удалось создать ключ для {db_user.telegram_id} в фоновой задаче"
-                        )
-                except Exception as e:
-                    logger.exception(
-                        f"Ошибка создания ключа для {db_user.telegram_id} в фоновой задаче: {e}"
+                    await bot.send_message(
+                        telegram_id,
+                        f"🔗 Ваш ключ готов:\n`{link}`\n\n"
+                        f"Скопируйте ссылку и вставьте в приложение.",
+                        parse_mode="Markdown",
                     )
+                    logger.info(
+                        f"Ключ успешно создан для {telegram_id} "
+                        f"через фоновую задачу"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not send key to {telegram_id}: {e}")
+            else:
+                logger.warning(
+                    f"Не удалось создать ключ для {telegram_id} "
+                    f"в фоновой задаче"
+                )
+        except Exception as e:
+            logger.exception(
+                f"Ошибка создания ключа для {telegram_id} "
+                f"в фоновой задаче: {e}"
+            )
 
 
 async def start_scheduler(bot):
-    INTERVAL_CHECK_EXPIRED = 3600  # 1 час
-    INTERVAL_REMINDERS = 3600  # 1 час
-    INTERVAL_RETRY_KEYS = 300  # 5 минут
+    INTERVAL_CHECK_EXPIRED = 3600
+    INTERVAL_REMINDERS = 3600
+    INTERVAL_RETRY_KEYS = 300
 
     async def run_check_expired():
         while True:

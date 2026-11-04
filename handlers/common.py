@@ -26,7 +26,8 @@ async def cmd_start(message: Message):
 
     async with AsyncSessionLocal() as session:
         db_user = await get_or_create_bot_user(session, user_id)
-        if not db_user.username:
+        # Обновляем username, если юзер сменил его (или он появился позже).
+        if db_user.username != user.username:
             db_user.username = user.username
             await session.commit()
         vpn_end = db_user.vpn_subscription_end

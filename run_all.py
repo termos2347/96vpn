@@ -3,6 +3,7 @@ import asyncio
 import logging
 import signal
 import sys
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiohttp import web
@@ -47,11 +48,11 @@ def handle_asyncio_exception(loop, context):
 setup_logger()
 logger = logging.getLogger(__name__)
 
-main_bot = None
-main_dp = None
-internal_runner = None
+main_bot: Bot | None = None
+main_dp: Dispatcher | None = None
+internal_runner: web.AppRunner | None = None
 _shutting_down = False
-_background_tasks = []
+_background_tasks: list[asyncio.Task] = []
 
 
 async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
@@ -75,7 +76,12 @@ async def check_migrations() -> None:
     if getattr(settings, "SKIP_MIGRATION_CHECK", False):
         logger.warning("⚠️ Skipping migration check (SKIP_MIGRATION_CHECK=true)")
         return
-    alembic_cfg = Config("alembic.ini")
+
+    # Не зависим от CWD: пути строим от расположения run_all.py
+    project_root = Path(__file__).resolve().parent
+    alembic_cfg = Config(str(project_root / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
+
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
     if head_rev is None:
@@ -87,7 +93,8 @@ async def check_migrations() -> None:
         result = await conn.execute(text("SELECT to_regclass('alembic_version')"))
         if result.scalar() is None:
             logger.error(
-                "❌ Table 'alembic_version' does not exist. Database not initialized with migrations."
+                "❌ Table 'alembic_version' does not exist. "
+                "Database not initialized with migrations."
             )
             raise RuntimeError("Database not migrated. Run 'alembic upgrade head'.")
         result = await conn.execute(text("SELECT version_num FROM alembic_version"))
@@ -98,7 +105,8 @@ async def check_migrations() -> None:
         current_rev = row[0]
     if current_rev != head_rev:
         logger.error(
-            f"❌ Database revision mismatch! Current: {current_rev}, Expected (head): {head_rev}."
+            f"❌ Database revision mismatch! Current: {current_rev}, "
+            f"Expected (head): {head_rev}."
         )
         raise RuntimeError("Migration mismatch")
     logger.info(" ✅ Migrations up-to-date")
@@ -131,6 +139,22 @@ async def on_startup():
     logger.info("=" * 50)
     logger.info("🚀 Starting VPN bot...")
     logger.info("=" * 50)
+
+    # 0. Инициализация файла доверенных IP (идемпотентно)
+    try:
+        from config import IPS_FILE, save_trusted_ips
+        if not IPS_FILE.exists():
+            if save_trusted_ips(settings.YOOKASSA_TRUSTED_IPS):
+                logger.info(
+                    f" ✅ Created {IPS_FILE} "
+                    f"({len(settings.YOOKASSA_TRUSTED_IPS)} entries)"
+                )
+            else:
+                logger.warning(
+                    f" ⚠️ Could not create {IPS_FILE}, using .env value"
+                )
+    except Exception as e:
+        logger.warning(f" ⚠️ Could not init yookassa_ip.json: {e}")
 
     # 1. Redis
     if settings.REDIS_ENABLED:
@@ -188,6 +212,9 @@ async def on_startup():
 
     # 6. Internal API
     try:
+        # Pylance: main_bot типизирован как Bot | None, но шаг 5 гарантирует,
+        # что он инициализирован. assert делает это явным для линтера.
+        assert main_bot is not None, "main_bot must be initialized before API"
         internal_app = create_internal_app(
             main_bot=main_bot,
             main_dp=main_dp,
@@ -204,7 +231,8 @@ async def on_startup():
         )
         await site.start()
         logger.info(
-            f" ✅ Internal API ready (http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT})"
+            f" ✅ Internal API ready "
+            f"(http://{settings.INTERNAL_API_HOST}:{settings.INTERNAL_API_PORT})"
         )
     except Exception as e:
         logger.error(f" ❌ Internal API error: {e}")
@@ -212,15 +240,23 @@ async def on_startup():
 
     # 7. Webhooks
     try:
+        # Pylance: main_bot / admin_bot типизированы как Optional.
+        # Шаги 4 и 5 прошли без исключения — оба точно инициализированы.
+        assert main_bot is not None, "main_bot must be initialized before webhooks"
+        current_admin_bot = admin.bot.admin_bot
+        assert current_admin_bot is not None, (
+            "admin_bot must be initialized before webhooks"
+        )
+
         await main_bot.delete_webhook()
-        await admin.bot.admin_bot.delete_webhook()
+        await current_admin_bot.delete_webhook()
 
         if not await set_webhook_with_retry(
             main_bot, settings.WEBHOOK_URL, settings.WEBHOOK_SECRET
         ):
             raise RuntimeError("Main webhook setup failed")
         if not await set_webhook_with_retry(
-            admin.bot.admin_bot,
+            current_admin_bot,
             settings.ADMIN_WEBHOOK_URL,
             settings.ADMIN_WEBHOOK_SECRET,
         ):
@@ -232,6 +268,7 @@ async def on_startup():
 
     # 8. Scheduler
     try:
+        assert main_bot is not None, "main_bot must be initialized before scheduler"
         _background_tasks = await start_scheduler(main_bot)
         logger.info(" ✅ Scheduler started")
     except Exception as e:
@@ -257,11 +294,20 @@ async def on_startup():
 
 
 async def on_shutdown():
-    global _shutting_down  # _background_tasks не присваивается, убрали
+    global _shutting_down
     if _shutting_down:
         return
     _shutting_down = True
     logger.info("Shutting down...")
+
+    # 0. Отменяем fire-and-forget задачи из payment_yookassa —
+    #    они могут держать VPN provider / bot и работать параллельно
+    #    с отзывом ключей планировщика.
+    try:
+        from services.payment_yookassa import shutdown_pending_tasks
+        await shutdown_pending_tasks(timeout=5.0)
+    except Exception as e:
+        logger.warning(f"Error shutting down pending YooKassa tasks: {e}")
 
     if _background_tasks:
         logger.info("Cancelling background tasks...")
@@ -270,7 +316,8 @@ async def on_shutdown():
                 task.cancel()
         try:
             await asyncio.wait_for(
-                asyncio.gather(*_background_tasks, return_exceptions=True), timeout=5.0
+                asyncio.gather(*_background_tasks, return_exceptions=True),
+                timeout=5.0,
             )
         except asyncio.TimeoutError:
             logger.warning("Background tasks did not finish within timeout")
@@ -330,7 +377,7 @@ async def shutdown_with_timeout():
     except asyncio.TimeoutError:
         logger.error("Shutdown timed out, forcing exit")
     except Exception:
-        logger.exception("Unexpected error during shutdown")  # убрали {e}
+        logger.exception("Unexpected error during shutdown")
 
 
 async def main():
