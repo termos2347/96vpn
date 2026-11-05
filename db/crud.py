@@ -15,8 +15,11 @@ async def get_or_create_bot_user(
     telegram_id: int,
     username: str | None = None,
     email: str | None = None,
+    for_update: bool = False,
 ) -> BotUser:
     stmt = select(BotUser).where(BotUser.telegram_id == telegram_id)
+    if for_update:
+        stmt = stmt.with_for_update()
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
 

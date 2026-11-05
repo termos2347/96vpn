@@ -59,6 +59,63 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
     app = web.Application()
 
     @retry_db_operation(max_retries=3)
+    async def _activate_subscription_db(
+        telegram_id: int,
+        product_type: str,
+        period: str,
+        payment_id: str | None,
+    ) -> str:
+        """DB-часть активации. Возвращает:
+        'ok' | 'already_activated' | 'failed'.
+
+        Обёрнута в @retry_db_operation — ретраи работают, потому что
+        здесь НЕТ широкого try/except, который проглотил бы
+        OperationalError/InterfaceError.
+        """
+        async with AsyncSessionLocal() as session, session.begin():
+            stmt_user = (
+                select(BotUser)
+                .where(BotUser.telegram_id == telegram_id)
+                .with_for_update()
+            )
+            user = (await session.execute(stmt_user)).scalar_one_or_none()
+            if not user:
+                user = BotUser(telegram_id=telegram_id)
+                session.add(user)
+                await session.flush()
+                stmt_user = (
+                    select(BotUser)
+                    .where(BotUser.telegram_id == telegram_id)
+                    .with_for_update()
+                )
+                user = (await session.execute(stmt_user)).scalar_one()
+
+            # Защита от двойной активации по одному payment_id.
+            if payment_id:
+                stmt_payment = (
+                    select(BotPayment)
+                    .where(BotPayment.payment_id == payment_id)
+                    .with_for_update()
+                )
+                db_payment = (
+                    await session.execute(stmt_payment)
+                ).scalar_one_or_none()
+                if db_payment and db_payment.is_paid:
+                    logger.info(
+                        f"/activate: payment {payment_id} already processed"
+                    )
+                    return "already_activated"
+
+            success = await activate_subscription(
+                session,
+                telegram_id,
+                product_type,
+                period,
+                payment_id,
+                user=user,
+            )
+            return "ok" if success else "failed"
+
     async def handle_activation(request):
         auth = request.headers.get("Authorization")
         if not auth or auth != f"Bearer {INTERNAL_API_SECRET}":
@@ -90,108 +147,72 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
         if period not in settings.PERIOD_DAYS:
             return web.json_response({"error": "invalid period"}, status=400)
 
+        # --- DB-часть (ретраи работают) ---
         try:
-            async with AsyncSessionLocal() as session, session.begin():
-                stmt_user = (
-                    select(BotUser)
-                    .where(BotUser.telegram_id == telegram_id)
-                    .with_for_update()
-                )
-                user = (await session.execute(stmt_user)).scalar_one_or_none()
-                if not user:
-                    user = BotUser(telegram_id=telegram_id)
-                    session.add(user)
-                    await session.flush()
-                    stmt_user = (
-                        select(BotUser)
-                        .where(BotUser.telegram_id == telegram_id)
-                        .with_for_update()
-                    )
-                    user = (await session.execute(stmt_user)).scalar_one()
+            result = await _activate_subscription_db(
+                telegram_id, product_type, period, payment_id
+            )
+        except Exception:
+            logger.exception("Activation DB error")
+            return web.json_response({"status": "error"}, status=500)
 
-                # Защита от двойной активации по одному payment_id.
-                if payment_id:
-                    stmt_payment = (
-                        select(BotPayment)
-                        .where(BotPayment.payment_id == payment_id)
-                        .with_for_update()
-                    )
-                    db_payment = (
-                        await session.execute(stmt_payment)
-                    ).scalar_one_or_none()
-                    if db_payment and db_payment.is_paid:
-                        logger.info(
-                            f"/activate: payment {payment_id} already processed"
-                        )
-                        return web.json_response(
-                            {"status": "already_activated"}, status=200
-                        )
-
-                success = await activate_subscription(
-                    session,
-                    telegram_id,
-                    product_type,
-                    period,
-                    payment_id,
-                    user=user,
-                )
-
-            if success:
-                # Только VPN — создаём ключ и отправляем ссылку
-                vpn_manager = get_vpn_manager()
-                if vpn_manager:
-                    days = settings.PERIOD_DAYS[period]
-                    link = await vpn_manager.create_vpn_key(telegram_id)
-                    if link and main_bot:
-                        try:
-                            await main_bot.send_message(
-                                telegram_id,
-                                f"🔗 Ваша ссылка: {link}\n\n"
-                                f"Подписка активирована на {days} дней.",
-                            )
-                        except TelegramForbiddenError:
-                            logger.info(
-                                f"User {telegram_id} blocked bot, "
-                                f"cannot send link from API"
-                            )
-                        except TelegramRetryAfter as e:
-                            logger.warning(
-                                f"Flood limit for {telegram_id} (API), "
-                                f"waiting {e.retry_after}s"
-                            )
-                            await asyncio.sleep(e.retry_after)
-                            try:
-                                await main_bot.send_message(
-                                    telegram_id,
-                                    f"🔗 Ваша ссылка: {link}\n\n"
-                                    f"Подписка активирована на {days} дней.",
-                                )
-                            except TelegramAPIError as send_error:
-                                logger.error(
-                                    f"Failed to send link to {telegram_id} "
-                                    f"after retry: {send_error}"
-                                )
-                        except (TelegramNetworkError, ClientError) as e:
-                            logger.warning(
-                                f"Network error sending link to "
-                                f"{telegram_id} from API: {e}"
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"Unexpected error sending link to "
-                                f"{telegram_id} from API: {e}"
-                            )
-                return web.json_response({"status": "ok"})
-
+        if result == "already_activated":
+            return web.json_response(
+                {"status": "already_activated"}, status=200
+            )
+        if result == "failed":
             logger.error(
                 f"/activate: activate_subscription returned False for "
                 f"telegram_id={telegram_id}, product={product_type}, "
                 f"period={period}"
             )
             return web.json_response({"error": "activation failed"}, status=400)
-        except Exception:
-            logger.exception("Activation error")
-            return web.json_response({"status": "error"}, status=500)
+
+        # --- VPN-часть: best-effort, вне транзакции ---
+        vpn_manager = get_vpn_manager()
+        if vpn_manager:
+            days = settings.PERIOD_DAYS[period]
+            link = await vpn_manager.create_vpn_key(telegram_id)
+            if link and main_bot:
+                try:
+                    await main_bot.send_message(
+                        telegram_id,
+                        f"🔗 Ваша ссылка: {link}\n\n"
+                        f"Подписка активирована на {days} дней.",
+                    )
+                except TelegramForbiddenError:
+                    logger.info(
+                        f"User {telegram_id} blocked bot, "
+                        f"cannot send link from API"
+                    )
+                except TelegramRetryAfter as e:
+                    logger.warning(
+                        f"Flood limit for {telegram_id} (API), "
+                        f"waiting {e.retry_after}s"
+                    )
+                    await asyncio.sleep(e.retry_after)
+                    try:
+                        await main_bot.send_message(
+                            telegram_id,
+                            f"🔗 Ваша ссылка: {link}\n\n"
+                            f"Подписка активирована на {days} дней.",
+                        )
+                    except TelegramAPIError as send_error:
+                        logger.error(
+                            f"Failed to send link to {telegram_id} "
+                            f"after retry: {send_error}"
+                        )
+                except (TelegramNetworkError, ClientError) as e:
+                    logger.warning(
+                        f"Network error sending link to "
+                        f"{telegram_id} from API: {e}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error sending link to "
+                        f"{telegram_id} from API: {e}"
+                    )
+        return web.json_response({"status": "ok"})
 
     async def yookassa_webhook(request):
         client_ip = get_client_ip(request)

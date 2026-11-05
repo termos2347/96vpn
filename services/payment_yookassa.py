@@ -32,8 +32,6 @@ from services.vpn_manager import get_vpn_manager
 logger = logging.getLogger(__name__)
 
 # --- Трекинг fire-and-forget задач ---
-# Позволяет корректно отменять их при shutdown и не терять исключения
-# из фоновых задач создания ключей.
 _pending_key_tasks: set[asyncio.Task] = set()
 
 
@@ -76,6 +74,7 @@ class YookassaService:
         retry=retry_if_exception_type(
             (ApiError, aiohttp.ClientError, asyncio.TimeoutError)
         ),
+        retry_error_callback=lambda _: None,
     )
     async def create_payment(
         self, amount: float, description: str, metadata: dict
@@ -84,15 +83,16 @@ class YookassaService:
             f"💳 Создание платежа: amount={amount}, "
             f"description={description}, metadata={metadata}"
         )
+
+        return_url = settings.YOOKASSA_RETURN_URL
+        if not return_url:
+            logger.error("❌ YOOKASSA_RETURN_URL не задан в .env")
+            return None
+
+        idempotency_key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+
         try:
-            return_url = settings.YOOKASSA_RETURN_URL
-            if not return_url:
-                logger.error("❌ YOOKASSA_RETURN_URL не задан в .env")
-                return None
-
-            idempotency_key = str(uuid.uuid4())
-
-            loop = asyncio.get_running_loop()
             payment = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
@@ -112,38 +112,39 @@ class YookassaService:
                 ),
                 timeout=10.0,
             )
-
-            confirmation_url = (
-                payment.confirmation.confirmation_url
-                if payment.confirmation
-                else None
+        except (ApiError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+            # retryable — пробрасываем наверх, Tenacity повторит
+            logger.warning(
+                f"⚠️ ЮKassa: ошибка создания платежа "
+                f"({type(e).__name__}: {e}), повтор..."
             )
-            if not confirmation_url:
-                logger.error("❌ ЮKassa не вернула confirmation_url")
-                return None
-
-            amount_value = (
-                payment.amount.value if payment.amount else f"{amount:.2f}"
-            )
-
-            logger.info(
-                f"✅ Платёж создан: id={payment.id}, status={payment.status}, "
-                f"confirmation_url={confirmation_url}"
-            )
-
-            return {
-                "payment_id": payment.id,
-                "status": payment.status,
-                "confirmation_url": confirmation_url,
-                "amount": amount_value,
-            }
-
-        except asyncio.TimeoutError:
-            logger.error("❌ Таймаут при создании платежа в ЮKassa (10s)")
-            return None
+            raise
         except Exception:
-            logger.error("❌ Ошибка создания платежа")
+            logger.exception("❌ Ошибка создания платежа")
             return None
+
+        confirmation_url = (
+            payment.confirmation.confirmation_url
+            if payment.confirmation
+            else None
+        )
+        if not confirmation_url:
+            logger.error("❌ ЮKassa не вернула confirmation_url")
+            return None
+
+        amount_value = (
+            payment.amount.value if payment.amount else f"{amount:.2f}"
+        )
+        logger.info(
+            f"✅ Платёж создан: id={payment.id}, status={payment.status}, "
+            f"confirmation_url={confirmation_url}"
+        )
+        return {
+            "payment_id": payment.id,
+            "status": payment.status,
+            "confirmation_url": confirmation_url,
+            "amount": amount_value,
+        }
 
     @retry_db_operation(max_retries=3)
     async def process_webhook(
@@ -185,10 +186,6 @@ class YookassaService:
                     db_payment.status = "refunded"
                     db_payment.updated_at = now
                     if db_payment.is_paid:
-                        # Возврат по уже оплаченному платежу — критично.
-                        # Автоматически подписку НЕ отзываем (может быть
-                        # частичный возврат / договорённость с клиентом),
-                        # но админа уведомляем.
                         logger.warning(
                             f"⚠️ Webhook {payment_id}: refund for PAID payment"
                         )

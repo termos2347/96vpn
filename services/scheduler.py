@@ -43,52 +43,67 @@ async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
 
 @retry_db_operation(max_retries=3)
 async def check_expired_subscriptions(bot):
-    """Отзывает ключи у пользователей с истекшей подпиской."""
+    """Отзывает ключи у пользователей с истекшей подпиской.
+
+    Защита от гонки: если между выборкой и отзывом подписку успели
+    продлить (через /grant или оплату), revoke_key(require_expired=True)
+    вернёт None и ключ НЕ будет отозван.
+    """
     async with AsyncSessionLocal() as session:
         now = datetime.now(timezone.utc)
-        stmt = select(BotUser).where(
-            BotUser.vpn_subscription_end < now, BotUser.vpn_client_id.isnot(None)
+        stmt = select(BotUser.telegram_id).where(
+            BotUser.vpn_subscription_end < now,
+            BotUser.vpn_client_id.isnot(None),
         )
         result = await session.execute(stmt)
-        expired_users = result.scalars().all()
+        telegram_ids = result.scalars().all()
 
-    if not expired_users:
+    if not telegram_ids:
         logger.debug("Нет истёкших подписок для отзыва")
         return
 
-    logger.info(f"Найдено {len(expired_users)} истёкших подписок для обработки")
+    logger.info(
+        f"Найдено {len(telegram_ids)} истёкших подписок для обработки"
+    )
 
     vpn_manager = get_vpn_manager()
     if not vpn_manager:
         logger.error("VPNManager не инициализирован, пропускаем отзыв ключей")
         return
 
-    for user in expired_users:
-        telegram_id = user.telegram_id
-        client_uuid = user.vpn_client_id
-
-        if client_uuid is None:
+    for telegram_id in telegram_ids:
+        try:
+            revoked = await vpn_manager.revoke_key(
+                telegram_id, require_expired=True
+            )
+        except Exception as e:
+            logger.exception(
+                f"Error revoking key for user {telegram_id}: {e}"
+            )
             continue
 
-        try:
-            revoked = await vpn_manager.revoke_key(telegram_id)
-            if revoked:
-                logger.info(f"Key {client_uuid} revoked for user {telegram_id}")
-                try:
-                    await bot.send_message(
-                        telegram_id,
-                        "❌ Ваша подписка истекла. "
-                        "Для продления перейдите в раздел оплаты.",
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not notify user {telegram_id}: {e}")
-            else:
-                logger.error(f"Failed to revoke key for user {telegram_id}")
-                await send_admin_alert(
-                    f"Не удалось отозвать ключ {client_uuid} для user_id={telegram_id}"
+        if revoked is None:
+            # Подписку успели продлить между выборкой и отзывом — пропуск
+            logger.info(
+                f"User {telegram_id} subscription renewed, skipping revoke"
+            )
+            continue
+
+        if revoked:
+            logger.info(f"Key revoked for user {telegram_id}")
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    "❌ Ваша подписка истекла. "
+                    "Для продления перейдите в раздел оплаты.",
                 )
-        except Exception as e:
-            logger.exception(f"Error revoking key for user {telegram_id}: {e}")
+            except Exception as e:
+                logger.warning(f"Could not notify user {telegram_id}: {e}")
+        else:
+            logger.error(f"Failed to revoke key for user {telegram_id}")
+            await send_admin_alert(
+                f"Не удалось отозвать ключ для user_id={telegram_id}"
+            )
 
 
 @retry_db_operation(max_retries=3)

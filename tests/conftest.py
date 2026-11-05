@@ -70,6 +70,22 @@ def clear_memory_cache():
     clear_cache()
 
 
+@pytest.fixture(autouse=True)
+def clean_pending_key_tasks():
+    """Чистка fire-and-forget задач между тестами (глобальный set в
+    services.payment_yookassa). Раньше фикстура была в test_core.py и
+    не покрывала test_payment.py — отсюда flaky.
+    """
+    from services import payment_yookassa as yk
+
+    yield
+
+    for task in list(yk._pending_key_tasks):
+        if not task.done():
+            task.cancel()
+    yk._pending_key_tasks.clear()
+
+
 @pytest.fixture(scope="function")
 async def test_engine():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)

@@ -51,23 +51,28 @@ if pgrep -f "$ENTRYPOINT" >/dev/null 2>&1; then
 fi
 
 # 5. Освобождаем порт
-if lsof -ti:"$PORT" >/dev/null 2>&1; then
-    pids=$(lsof -ti:"$PORT" 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "🔌 Освобождаем порт $PORT (PID: $pids)..."
-        if ! echo "$pids" | xargs -r kill -9 2>/dev/null; then
-            echo "❌ Не удалось освободить порт $PORT (нужны права root)." >&2
-            echo "   Выполните вручную: sudo kill -9 $pids" >&2
-            exit 1
+if command -v lsof >/dev/null 2>&1; then
+    if lsof -ti:"$PORT" >/dev/null 2>&1; then
+        pids=$(lsof -ti:"$PORT" 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo "🔌 Освобождаем порт $PORT (PID: $pids)..."
+            if ! echo "$pids" | xargs -r kill -9 2>/dev/null; then
+                echo "❌ Не удалось освободить порт $PORT (нужны права root)." >&2
+                echo "   Выполните вручную: sudo kill -9 $pids" >&2
+                exit 1
+            fi
+            sleep 1
         fi
-        sleep 1
     fi
-fi
 
-if lsof -ti:"$PORT" >/dev/null 2>&1; then
-    echo "❌ Порт $PORT всё ещё занят. Освободите его вручную:" >&2
-    lsof -i:"$PORT" >&2 || true
-    exit 1
+    if lsof -ti:"$PORT" >/dev/null 2>&1; then
+        echo "❌ Порт $PORT всё ещё занят. Освободите его вручную:" >&2
+        lsof -i:"$PORT" >&2 || true
+        exit 1
+    fi
+else
+    echo "⚠️  Утилита lsof не найдена — пропускаю проверку порта $PORT." >&2
+    echo "   Если порт занят, бот упадёт на bind(). Установите lsof: apt install lsof" >&2
 fi
 
 # 6. Активируем venv

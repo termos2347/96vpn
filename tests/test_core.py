@@ -139,20 +139,16 @@ async def test_check_expired_subscriptions(test_engine, mock_bot):
 
         await check_expired_subscriptions(mock_bot)
 
-        mock_manager.revoke_key.assert_called_once_with(user_id)
+        # require_expired=True — шедулер защищается от гонки с продлением
+        mock_manager.revoke_key.assert_called_once_with(
+            user_id, require_expired=True
+        )
         mock_bot.send_message.assert_called_once()
 
 
 # ============================================================
 # Shutdown — трекинг и отмена fire-and-forget задач
 # ============================================================
-
-
-@pytest.fixture(autouse=True)
-def clean_tasks():
-    yk._pending_key_tasks.clear()
-    yield
-    yk._pending_key_tasks.clear()
 
 
 @pytest.mark.asyncio

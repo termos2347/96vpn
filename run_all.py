@@ -8,7 +8,8 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiohttp import web
 
-# Проверка миграций
+# Миграции
+from alembic import command as alembic_command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
@@ -72,44 +73,82 @@ async def check_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> bool:
     return False
 
 
-async def check_migrations() -> None:
+async def run_migrations() -> None:
+    """Применяет миграции Alembic до head.
+
+    Заменяет старую check_migrations(): теперь миграции не просто
+    проверяются, а автоматически применяются при старте.
+
+    - SKIP_MIGRATION_CHECK=true → пропускаем всё (ручной контроль схемы).
+    - Alembic синхронный → запускаем в executor, не блокируя event loop.
+    - После upgrade проверяем, что в alembic_version действительно head.
+    """
     if getattr(settings, "SKIP_MIGRATION_CHECK", False):
-        logger.warning("⚠️ Skipping migration check (SKIP_MIGRATION_CHECK=true)")
+        logger.warning(
+            "⚠️ Миграции пропущены (SKIP_MIGRATION_CHECK=true). "
+            "Убедитесь, что схема БД актуальна — иначе бот упадёт "
+            "на несовместимой схеме."
+        )
         return
 
     # Не зависим от CWD: пути строим от расположения run_all.py
     project_root = Path(__file__).resolve().parent
     alembic_cfg = Config(str(project_root / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(project_root / "migrations"))
+    alembic_cfg.set_main_option(
+        "script_location", str(project_root / "migrations")
+    )
 
+    # Проверяем, что ревизии вообще есть
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
     if head_rev is None:
         logger.error(
-            "❌ No migration revisions found. Please run 'alembic upgrade head'."
+            "❌ В migrations/versions нет ни одной ревизии. "
+            "Создайте миграцию: alembic revision --autogenerate -m '...'"
         )
-        raise RuntimeError("No Alembic revisions")
+        raise RuntimeError("No Alembic revisions found")
+
+    # Отключаем переконфигурацию logging в env.py — иначе Alembic
+    # перезапишет наши хендлеры из utils/logger.py (root logger станет
+    # WARNING + свой консольный handler).
+    alembic_cfg.attributes["configure_logger"] = False
+
+    logger.info(f"🔄 Применяем миграции до {head_rev[:8]}...")
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: alembic_command.upgrade(alembic_cfg, "head"),
+        )
+    except Exception as e:
+        logger.error(f"❌ Ошибка применения миграций: {e}")
+        raise
+
+    # Belt & suspenders: проверяем, что действительно на head
     async with engine.connect() as conn:
-        result = await conn.execute(text("SELECT to_regclass('alembic_version')"))
+        result = await conn.execute(
+            text("SELECT to_regclass('alembic_version')")
+        )
         if result.scalar() is None:
             logger.error(
-                "❌ Table 'alembic_version' does not exist. "
-                "Database not initialized with migrations."
+                "❌ После upgrade нет таблицы alembic_version — "
+                "миграции не применились."
             )
-            raise RuntimeError("Database not migrated. Run 'alembic upgrade head'.")
-        result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+            raise RuntimeError("alembic_version table missing after upgrade")
+        result = await conn.execute(
+            text("SELECT version_num FROM alembic_version")
+        )
         row = result.fetchone()
-        if row is None:
-            logger.error("❌ alembic_version table is empty.")
-            raise RuntimeError("Alembic version missing")
-        current_rev = row[0]
+        current_rev = row[0] if row else None
+
     if current_rev != head_rev:
         logger.error(
-            f"❌ Database revision mismatch! Current: {current_rev}, "
-            f"Expected (head): {head_rev}."
+            f"❌ После upgrade ревизия не совпадает: "
+            f"current={current_rev}, expected={head_rev}"
         )
-        raise RuntimeError("Migration mismatch")
-    logger.info(" ✅ Migrations up-to-date")
+        raise RuntimeError("Migration verification failed")
+
+    logger.info(f" ✅ Миграции применены (head={head_rev[:8]})")
 
 
 async def set_webhook_with_retry(
@@ -167,10 +206,10 @@ async def on_startup():
         except Exception as e:
             logger.warning(f" ⚠️ Redis connection failed: {e}")
 
-    # 2. Database
+    # 2. Database + миграции
     try:
         await check_db_with_retry()
-        await check_migrations()
+        await run_migrations()
     except Exception as e:
         logger.error(f" ❌ Database error: {e}")
         raise
@@ -212,9 +251,9 @@ async def on_startup():
 
     # 6. Internal API
     try:
-        # Pylance: main_bot типизирован как Bot | None, но шаг 5 гарантирует,
-        # что он инициализирован. assert делает это явным для линтера.
-        assert main_bot is not None, "main_bot must be initialized before API"
+        # Проверка вместо assert — под `python -O` assert отключается.
+        if main_bot is None:
+            raise RuntimeError("main_bot must be initialized before API")
         internal_app = create_internal_app(
             main_bot=main_bot,
             main_dp=main_dp,
@@ -240,13 +279,13 @@ async def on_startup():
 
     # 7. Webhooks
     try:
-        # Pylance: main_bot / admin_bot типизированы как Optional.
-        # Шаги 4 и 5 прошли без исключения — оба точно инициализированы.
-        assert main_bot is not None, "main_bot must be initialized before webhooks"
+        if main_bot is None:
+            raise RuntimeError("main_bot must be initialized before webhooks")
         current_admin_bot = admin.bot.admin_bot
-        assert current_admin_bot is not None, (
-            "admin_bot must be initialized before webhooks"
-        )
+        if current_admin_bot is None:
+            raise RuntimeError(
+                "admin_bot must be initialized before webhooks"
+            )
 
         await main_bot.delete_webhook()
         await current_admin_bot.delete_webhook()
@@ -268,7 +307,8 @@ async def on_startup():
 
     # 8. Scheduler
     try:
-        assert main_bot is not None, "main_bot must be initialized before scheduler"
+        if main_bot is None:
+            raise RuntimeError("main_bot must be initialized before scheduler")
         _background_tasks = await start_scheduler(main_bot)
         logger.info(" ✅ Scheduler started")
     except Exception as e:
@@ -300,9 +340,6 @@ async def on_shutdown():
     _shutting_down = True
     logger.info("Shutting down...")
 
-    # 0. Отменяем fire-and-forget задачи из payment_yookassa —
-    #    они могут держать VPN provider / bot и работать параллельно
-    #    с отзывом ключей планировщика.
     try:
         from services.payment_yookassa import shutdown_pending_tasks
         await shutdown_pending_tasks(timeout=5.0)

@@ -20,7 +20,12 @@ from db.models import Base
 # --- Конфигурация Alembic ---
 config = context.config
 
-if config.config_file_name is not None:
+# Позволяет вызывающему коду отключить переконфигурацию logging.
+# run_all.py::run_migrations() ставит configure_logger=False,
+# чтобы Alembic не перезаписывал наши хендлеры из utils/logger.py.
+if config.config_file_name is not None and config.attributes.get(
+    "configure_logger", True
+):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

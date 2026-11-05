@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from db.models import BotPayment, BotUser
 from handlers.payment import tariff_chosen
+from services import payment_yookassa as yk
 from services.payment_yookassa import YookassaService
 
 
@@ -28,6 +29,7 @@ async def test_create_payment_success():
         mock_payment.status = "pending"
         mock_payment.confirmation = MagicMock()
         mock_payment.confirmation.confirmation_url = "https://yookassa.ru/confirm"
+        mock_payment.amount = MagicMock(value="100.00", currency="RUB")
         mock_create.return_value = mock_payment
 
         service = YookassaService()
@@ -220,7 +222,12 @@ async def test_webhook_success(test_session, mock_bot, mock_yookassa_payment):
         assert user.vpn_subscription_end is not None
         assert user.vpn_subscription_end > datetime.now(timezone.utc)
 
-        await asyncio.sleep(0)
+        # Дожидаемся фоновой задачи создания ключа.
+        # Раньше здесь был await asyncio.sleep(0), который НЕ гарантирует
+        # запуск task — на медленном CI тест был flaky.
+        if yk._pending_key_tasks:
+            await asyncio.gather(*yk._pending_key_tasks, return_exceptions=True)
+
         assert mock_bot.send_message.call_count == 2
 
         activation_call = mock_bot.send_message.call_args_list[0]

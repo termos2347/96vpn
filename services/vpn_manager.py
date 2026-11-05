@@ -213,15 +213,44 @@ class VPNManager:
 
     # ---- Отзыв ключа ----
     @retry_db_operation(max_retries=3)
-    async def revoke_key(self, user_id: int) -> bool:
+    async def revoke_key(
+        self, user_id: int, require_expired: bool = False
+    ) -> bool | None:
+        """Отзывает ключ пользователя.
+
+        require_expired=False (по умолчанию) — принудительный отзыв
+            (админ-команда). Не проверяет статус подписки.
+        require_expired=True — используется шедулером: блокирует строку
+            и отзывает ключ только если подписка ДЕЙСТВИТЕЛЬНО истекла.
+            Если подписку успели продлить между выборкой шедулера и
+            вызовом revoke_key — возвращает None (пропуск), ключ не
+            трогается.
+
+        Возвращает:
+            True  — ключ отозван (или его не было).
+            False — ошибка отзыва.
+            None  — пропущено, т.к. подписка ещё активна (только при
+                    require_expired=True).
+        """
         await self._invalidate_cache(user_id)
 
         async with AsyncSessionLocal() as session, session.begin():
-            user = await get_or_create_bot_user(session, user_id)
+            user = await get_or_create_bot_user(
+                session, user_id, for_update=True
+            )
             client_uuid = user.vpn_client_id
             if not client_uuid:
                 logger.info(f"User {user_id} has no active key to revoke")
                 return True
+
+            if require_expired:
+                end = user.vpn_subscription_end
+                if end is None or end > datetime.now(timezone.utc):
+                    logger.info(
+                        f"revoke_key: user {user_id} subscription renewed, "
+                        f"skipping revoke"
+                    )
+                    return None
 
         try:
             success = await asyncio.wait_for(

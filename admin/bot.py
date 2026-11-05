@@ -18,6 +18,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
+from aiohttp import ClientError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -26,7 +27,7 @@ from db.base import AsyncSessionLocal, engine
 from db.crud import get_user_full_data
 from db.models import BotPayment, BotUser
 from services.vpn_manager import get_vpn_manager
-from utils.validators import validate_user_id
+from utils.validators import ValidationError, validate_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ async def send_admin_alert(message: str):
                 text=f"⚠️ Административное уведомление:\n\n{message}",
                 parse_mode=None,
             )
-    except TelegramAPIError as e:
+    except (TelegramAPIError, ClientError) as e:
         logger.error(f"Не удалось отправить уведомление админу: {e}")
 
 
@@ -261,12 +262,13 @@ async def cmd_broadcast(message: Message):
             "original_message": message,
         }
 
+        # parse_mode=None — иначе ``` в тексте сломает Markdown-превью.
         await message.answer(
             f"⚠️ Вы собираетесь отправить сообщение **всем "
             f"{'активным ' if only_active else ''}пользователям**.\n\n"
-            f"Сообщение:\n```\n{broadcast_text}\n```\n\n"
+            f"Текст сообщения:\n\n{broadcast_text}\n\n"
             f"Подтвердите действие:",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_confirm_keyboard(),
         )
 
@@ -379,7 +381,6 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             await callback.answer("Бот недоступен", show_alert=True)
             return
 
-        # Успешный "тихий" ответ на callback — один раз
         await callback.answer()
 
         bot = callback.bot
@@ -416,23 +417,61 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             cmd_broadcast.pending_broadcasts.pop(admin_id, None)
             return
 
+        cancel_key = callback.message.chat.id
+        _broadcast_cancel_flags[cancel_key] = False
+        cancel_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🛑 Остановить рассылку",
+                        callback_data=f"stop_broadcast_{cancel_key}",
+                    )
+                ]
+            ]
+        )
+
+        total = len(user_ids)
+        status_msg = await callback.message.answer(
+            f"📡 Начинаю рассылку {total} пользователям... (0/{total})",
+            reply_markup=cancel_kb,
+        )
+
         success_count = 0
         fail_count = 0
-        for uid in user_ids:
+        for idx, uid in enumerate(user_ids, start=1):
+            if _broadcast_cancel_flags.get(cancel_key, False):
+                await status_msg.edit_text(
+                    f"🛑 Рассылка остановлена. "
+                    f"Отправлено: {success_count}, ошибок: {fail_count}"
+                )
+                _broadcast_cancel_flags.pop(cancel_key, None)
+                cmd_broadcast.pending_broadcasts.pop(admin_id, None)
+                return
+
             try:
                 await bot.send_message(uid, broadcast_text)
                 success_count += 1
-                await asyncio.sleep(0.05)
             except TelegramAPIError as e:
                 fail_count += 1
                 logger.warning(f"Broadcast failed for user {uid}: {e}")
+            await asyncio.sleep(0.05)
 
-        await callback.message.edit_text(
+            if idx % 50 == 0 or idx == total:
+                try:
+                    await status_msg.edit_text(
+                        f"📡 Рассылка: {idx}/{total} "
+                        f"(✅ {success_count}, ❌ {fail_count})",
+                        reply_markup=cancel_kb,
+                    )
+                except TelegramAPIError as e:
+                    logger.debug(f"Failed to update broadcast status: {e}")
+
+        _broadcast_cancel_flags.pop(cancel_key, None)
+        await status_msg.edit_text(
             f"✅ Рассылка завершена.\n"
             f"Отправлено: {success_count}\n"
             f"Не удалось: {fail_count}"
         )
-
         cmd_broadcast.pending_broadcasts.pop(admin_id, None)
 
     except Exception:
@@ -889,6 +928,8 @@ async def cmd_revoke(message: Message):
                 parse_mode="Markdown",
             )
 
+    except ValidationError as e:
+        await message.answer(f"❌ Ошибка: {e}")
     except ValueError as e:
         await message.answer(f"❌ Ошибка: {e}")
     except Exception:
