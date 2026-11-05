@@ -4,7 +4,7 @@
 Содержит все тексты сообщений и функции генерации клавиатур.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from aiogram.types import (
     InlineKeyboardButton,
@@ -23,8 +23,8 @@ class Texts:
     @staticmethod
     def main_menu(user_name: str, vpn_end: datetime | None) -> str:
         """Главное меню с приветствием и статусом подписки."""
-        if vpn_end and vpn_end > datetime.now(timezone.utc):
-            days_left = (vpn_end - datetime.now(timezone.utc)).days
+        if vpn_end and vpn_end > datetime.now(UTC):
+            days_left = (vpn_end - datetime.now(UTC)).days
             status = (
                 f"✅ активна до **{vpn_end.strftime('%d.%m.%Y')}** "
                 f"(осталось {days_left} дн.)"
@@ -101,7 +101,7 @@ class Texts:
         vpn_end: datetime | None, days: int, link: str | None = None
     ) -> str:
         """Сообщение об успешной оплате с указанием даты окончания."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if vpn_end and vpn_end > now:
             date_str = vpn_end.strftime("%d.%m.%Y")
             msg = (

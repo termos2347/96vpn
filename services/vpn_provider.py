@@ -129,7 +129,7 @@ class XUIVPNProvider:
 
     async def _retry_request(
         self, method: str, url: str, **kwargs
-    ) -> dict[str, Any] | None | _NotFoundType:
+    ) -> dict[str, Any] | _NotFoundType | None:
         attempt = 0
         while attempt < self.MAX_RETRIES:
             try:
@@ -172,7 +172,7 @@ class XUIVPNProvider:
                             f"(client error, no retry)"
                         )
                         return None
-            except (asyncio.TimeoutError, aiohttp.ClientError) as net_err:
+            except (TimeoutError, aiohttp.ClientError) as net_err:
                 logger.warning(
                     f"Network error on {url} (attempt {attempt + 1}): "
                     f"{type(net_err).__name__}"

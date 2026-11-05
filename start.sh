@@ -36,22 +36,27 @@ fi
 
 # 1b. Порт берём из .env (INTERNAL_API_PORT), fallback — 5001
 PORT=5001
-_env_port=$(grep -E '^INTERNAL_API_PORT=' .env 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d ' "\'" || true)
+_env_port=$(grep -E '^INTERNAL_API_PORT=' .env 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d ' "\r\n' || true)
 if [ -n "${_env_port:-}" ]; then
     PORT="$_env_port"
 fi
 
 # 1c. PRE-FLIGHT: конфигурация YooKassa IP-фильтра и прокси.
-_debug_val=$(grep -E '^DEBUG=' .env 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d ' "\'" || true)
+_debug_val=$(grep -E '^DEBUG=' .env 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d ' "\r\n' | tr '[:upper:]' '[:lower:]' || true)
+_debug_lc="${_debug_val:-false}"
+
 _proxy_val=$(grep -E '^TRUSTED_PROXY_IPS=' .env 2>/dev/null | head -n1 | cut -d'=' -f2- || true)
+_proxy_trim=$(printf '%s' "${_proxy_val:-}" | tr -d ' \t\r\n')
 
-_debug_lc=$(printf '%s' "${_debug_val:-false}" | tr '[:upper:]' '[:lower:]')
-_proxy_trim=$(printf '%s' "${_proxy_val:-}" | tr -d ' "\r\n')
+# _proxy_is_empty=true, если значение пустое или "[]".
+_proxy_is_empty=false
+if [ -z "$_proxy_trim" ]; then
+    _proxy_is_empty=true
+elif [ "$_proxy_trim" = "[]" ]; then
+    _proxy_is_empty=true
+fi
 
-# 1c-i. TRUSTED_PROXY_IPS при DEBUG=false.
-#     Если бот за nginx и TRUSTED_PROXY_IPS пуст — X-Real-IP игнорируется,
-#     и все вебхуки ЮKassa получают 403. Это самый частый прод-misconfig.
-if [ "$_debug_lc" != "true" ] && { [ -z "$_proxy_trim" ] || [ "$_proxy_trim" = "[]" ]; }; then
+if [ "$_debug_lc" != "true" ] && [ "$_proxy_is_empty" = "true" ]; then
     echo "⚠️  ВНИМАНИЕ: TRUSTED_PROXY_IPS пуст при DEBUG=false." >&2
     echo "   Если перед ботом стоит reverse proxy (nginx/caddy) —" >&2
     echo "   X-Real-IP приниматься НЕ будет, и ВСЕ вебхуки ЮKassa" >&2
@@ -60,13 +65,12 @@ if [ "$_debug_lc" != "true" ] && { [ -z "$_proxy_trim" ] || [ "$_proxy_trim" = "
     echo "" >&2
 fi
 
-# 1c-ii. loopback в yookassa_ip.json при пустом TRUSTED_PROXY_IPS.
-if [ "$_debug_lc" != "true" ] && { [ -z "$_proxy_trim" ] || [ "$_proxy_trim" = "[]" ]; }; then
-    if [ -f "yookassa_ip.json" ] && grep -qE '(^|[^0-9])127\.|::1' yookassa_ip.json 2>/dev/null; then
+if [ "$_debug_lc" != "true" ] && [ "$_proxy_is_empty" = "true" ]; then
+    if [ -f "yookassa_ip.json" ] && grep -qE '"(::1|127\.[0-9]+\.[0-9]+\.[0-9]+)"' yookassa_ip.json 2>/dev/null; then
         echo "⚠️  ВНИМАНИЕ: yookassa_ip.json содержит loopback (127.0.0.1 / ::1)," >&2
         echo "   а TRUSTED_PROXY_IPS пуст при DEBUG=false." >&2
         echo "" >&2
-        echo "   config.py автоматически УДАЛИТ loopback из доверенных IP." >&2
+        echo "   config.py при старте отфильтрует loopback из YOOKASSA_TRUSTED_IPS." >&2
         echo "   Если loopback — единственный IP в файле, бот НЕ СТАРТУЕТ." >&2
         echo "" >&2
         echo "   Варианты:" >&2
@@ -95,7 +99,7 @@ PROC_PATTERN="python[0-9.]* .*${ENTRYPOINT}"
 if pgrep -f "$PROC_PATTERN" >/dev/null 2>&1; then
     echo "⏹  Останавливаем старый процесс ($ENTRYPOINT)..."
     pkill -f "$PROC_PATTERN" 2>/dev/null || true
-    for _ in {1..10}; do
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
         pgrep -f "$PROC_PATTERN" >/dev/null 2>&1 || break
         sleep 0.5
     done

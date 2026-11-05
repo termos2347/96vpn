@@ -359,7 +359,7 @@ async def on_shutdown():
                 asyncio.gather(*_background_tasks, return_exceptions=True),
                 timeout=5.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Background tasks did not finish within timeout")
         _background_tasks.clear()
 
@@ -409,7 +409,7 @@ async def on_shutdown():
 async def shutdown_with_timeout():
     try:
         await asyncio.wait_for(on_shutdown(), timeout=10.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Shutdown timed out, forcing exit")
     except Exception:
         logger.exception("Unexpected error during shutdown")

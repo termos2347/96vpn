@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
@@ -67,7 +67,7 @@ async def shutdown_pending_tasks(timeout: float = 5.0) -> None:
             asyncio.gather(*pending, return_exceptions=True),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Some YooKassa tasks did not finish in time")
     _pending_key_tasks.clear()
 
@@ -83,7 +83,6 @@ def _log_create_payment_failure(retry_state) -> None:
         f"❌ ЮKassa create_payment failed after "
         f"{retry_state.attempt_number} attempts: {exc}"
     )
-    return None
 
 
 class YookassaService:
@@ -154,7 +153,7 @@ class YookassaService:
                 ),
                 timeout=10.0,
             )
-        except (ApiError, aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, ApiError, aiohttp.ClientError) as e:
             # retryable — пробрасываем наверх, Tenacity повторит
             logger.warning(
                 f"⚠️ ЮKassa: ошибка создания платежа "
@@ -209,7 +208,7 @@ class YookassaService:
         # ЛЕНИВЫЙ ИМПОРТ — обходит циклический импорт
         from handlers.ui import Texts
 
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         obj = webhook_data.get("object", {})
         payment_id = obj.get("id")
@@ -230,7 +229,7 @@ class YookassaService:
             stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
             db_payment = (await session.execute(stmt)).scalar_one_or_none()
             if db_payment:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if event == "payment.canceled":
                     if not db_payment.is_paid:
                         db_payment.status = "canceled"
@@ -450,7 +449,7 @@ class YookassaService:
 
             _schedule_key_task(_create_key_task())
 
-        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+        elapsed = (datetime.now(UTC) - start_time).total_seconds()
         logger.info(f"✅ Webhook {payment_id}: done in {elapsed:.2f}s")
         return True
 

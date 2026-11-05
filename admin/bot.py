@@ -4,7 +4,7 @@ import ipaddress
 import json
 import logging
 import uuid as _uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 
 from aiogram import Bot, Dispatcher, F, types
@@ -428,7 +428,7 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             stmt = select(BotUser.telegram_id)
             if only_active:
                 stmt = stmt.where(
-                    BotUser.vpn_subscription_end > datetime.now(timezone.utc)
+                    BotUser.vpn_subscription_end > datetime.now(UTC)
                 )
             result = await session.execute(stmt)
             user_ids = result.scalars().all()
@@ -804,7 +804,7 @@ async def cmd_userinfo(message: types.Message):
         await message.answer(f"❌ Пользователь с ID {tid} не найден.")
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     vpn_end = data["vpn_subscription_end"]
 
     vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
@@ -996,7 +996,7 @@ async def cmd_stats(message: Message):
 
     try:
         async with AsyncSessionLocal() as session:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
             total_users = await session.scalar(
@@ -1018,7 +1018,7 @@ async def cmd_stats(message: Message):
             total_payments = await session.scalar(
                 select(func.count())
                 .select_from(BotPayment)
-                .where(BotPayment.is_paid == True)  # noqa: E712
+                .where(BotPayment.is_paid)
             )
 
             stats_text = (
@@ -1084,7 +1084,7 @@ async def cmd_set_yookassa_ips(message: types.Message):
             try:
                 ipaddress.ip_network(item, strict=False)
             except ValueError as e:
-                raise ValueError(f"Некорректный IP/CIDR {item!r}: {e}")
+                raise ValueError(f"Некорректный IP/CIDR {item!r}: {e}") from e
 
         if not save_trusted_ips(new_ips):
             await message.answer(

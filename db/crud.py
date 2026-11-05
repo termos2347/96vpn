@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
@@ -85,7 +85,7 @@ async def activate_subscription(
         logger.error(f"Invalid period: {period}")
         return False
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if payment_id:
         stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
@@ -138,7 +138,7 @@ async def create_payment_record(
     amount: float,
     currency: str = "RUB",
 ) -> BotPayment:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payment = BotPayment(
         payment_id=payment_id,
         telegram_id=telegram_id,
@@ -196,7 +196,7 @@ async def clear_user_vpn_client(session: AsyncSession, telegram_id: int) -> bool
 
 
 async def get_expired_users(session: AsyncSession) -> list[BotUser]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stmt = select(BotUser).where(
         and_(
             BotUser.vpn_subscription_end < now,
@@ -208,7 +208,7 @@ async def get_expired_users(session: AsyncSession) -> list[BotUser]:
 
 
 async def get_active_users_without_client(session: AsyncSession) -> list[BotUser]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stmt = select(BotUser).where(
         and_(
             BotUser.vpn_subscription_end > now,
@@ -237,7 +237,7 @@ async def update_vpn_subscription(
         logger.error(f"User {telegram_id} not found for VPN subscription update")
         return False
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if user.vpn_subscription_end and user.vpn_subscription_end > now:
         new_end = user.vpn_subscription_end + timedelta(days=days)
     else:

@@ -22,7 +22,6 @@ from utils.validators import (
     validate_uuid,
 )
 
-
 # ============================================================
 # Internal API — /activate
 # ============================================================
@@ -60,7 +59,9 @@ async def test_activate_success(client, mock_bot, patched_session_local):
 
     with patch(
         "internal_api.activate_subscription", new=AsyncMock(return_value=True)
-    ) as mock_activate, patch("internal_api.get_vpn_manager") as mock_get_manager:
+    ) as mock_activate, patch(
+        "internal_api.get_vpn_manager"
+    ) as mock_get_manager:
         mock_manager = AsyncMock()
         mock_manager.create_vpn_key = AsyncMock(
             return_value="https://test.com/sub/xyz"
@@ -119,16 +120,15 @@ async def test_check_expired_subscriptions(test_engine, mock_bot):
     user_id = 123
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
 
-    async with session_maker() as s:
-        async with s.begin():
-            s.add(
-                BotUser(
-                    telegram_id=user_id,
-                    vpn_subscription_end=datetime.now(timezone.utc)
-                    - timedelta(days=1),
-                    vpn_client_id="test-uuid",
-                )
+    async with session_maker() as s, s.begin():
+        s.add(
+            BotUser(
+                telegram_id=user_id,
+                vpn_subscription_end=datetime.now(timezone.utc)
+                - timedelta(days=1),
+                vpn_client_id="test-uuid",
             )
+        )
 
     with patch("services.scheduler.AsyncSessionLocal", session_maker), patch(
         "services.scheduler.get_vpn_manager"
@@ -139,7 +139,6 @@ async def test_check_expired_subscriptions(test_engine, mock_bot):
 
         await check_expired_subscriptions(mock_bot)
 
-        # require_expired=True — шедулер защищается от гонки с продлением
         mock_manager.revoke_key.assert_called_once_with(
             user_id, require_expired=True
         )

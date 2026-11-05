@@ -1,7 +1,7 @@
 # tests/test_vpn.py
 """Тесты VPN-провайдера и VPNManager."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,7 +9,6 @@ import pytest
 from db.models import BotUser
 from services.vpn_manager import VPNManager
 from services.vpn_provider import XUIVPNProvider
-
 
 # ============================================================
 # XUIVPNProvider
@@ -128,7 +127,7 @@ async def test_create_vpn_key_idempotent(manager, mock_provider):
 
 @pytest.mark.asyncio
 async def test_create_vpn_key_does_not_touch_subscription(manager, mock_provider):
-    original_end = datetime.now(timezone.utc) + timedelta(days=10)
+    original_end = datetime.now(UTC) + timedelta(days=10)
     user = _fake_user(telegram_id=42, vpn_end=original_end)
     ctx, _ = _mock_session_ctx()
 
@@ -147,7 +146,7 @@ async def test_create_vpn_key_does_not_touch_subscription(manager, mock_provider
 async def test_grant_subscription(manager, mock_provider):
     user = _fake_user(
         telegram_id=456,
-        vpn_end=datetime.now(timezone.utc) + timedelta(days=30),
+        vpn_end=datetime.now(UTC) + timedelta(days=30),
     )
     ctx, _ = _mock_session_ctx()
 
@@ -222,7 +221,7 @@ async def test_revoke_key_with_client(manager, mock_provider):
 async def test_get_or_create_link_expired(manager, mock_provider):
     user = _fake_user(
         telegram_id=999,
-        vpn_end=datetime.now(timezone.utc) - timedelta(days=1),
+        vpn_end=datetime.now(UTC) - timedelta(days=1),
     )
     ctx, _ = _mock_session_ctx()
 
@@ -255,7 +254,7 @@ async def test_get_or_create_link_no_subscription(manager, mock_provider):
 async def test_get_or_create_link_active(manager, mock_provider):
     user = _fake_user(
         telegram_id=555,
-        vpn_end=datetime.now(timezone.utc) + timedelta(days=30),
+        vpn_end=datetime.now(UTC) + timedelta(days=30),
     )
     ctx, _ = _mock_session_ctx()
 

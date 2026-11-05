@@ -2,7 +2,7 @@
 """Тесты платежей: создание, выбор тарифа, вебхуки ЮKassa."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,7 +14,6 @@ from db.models import BotPayment, BotUser
 from handlers.payment import tariff_chosen
 from services import payment_yookassa as yk
 from services.payment_yookassa import YookassaService
-
 
 # ============================================================
 # create_payment
@@ -220,7 +219,7 @@ async def test_webhook_success(test_session, mock_bot, mock_yookassa_payment):
         stmt_user = select(BotUser).where(BotUser.telegram_id == telegram_id)
         user = (await test_session.execute(stmt_user)).scalar_one()
         assert user.vpn_subscription_end is not None
-        assert user.vpn_subscription_end > datetime.now(timezone.utc)
+        assert user.vpn_subscription_end > datetime.now(UTC)
 
         # Дожидаемся фоновой задачи создания ключа.
         # Раньше здесь был await asyncio.sleep(0), который НЕ гарантирует

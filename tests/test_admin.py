@@ -11,7 +11,6 @@ from admin import bot as admin_module
 from admin.bot import cmd_grant, cmd_revoke, dp
 from config import settings
 
-
 # ============================================================
 # Регистрация команд (бывший test_admin_handlers.py)
 # ============================================================

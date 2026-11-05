@@ -22,4 +22,5 @@ __pycache__/
 .vscode/
 .idea/
 
-
+ruff.toml
+pyproject.toml

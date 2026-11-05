@@ -1,7 +1,7 @@
 # services/scheduler.py
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from aiogram.exceptions import (
     TelegramForbiddenError,
@@ -35,7 +35,7 @@ async def check_expired_subscriptions(bot):
     вернёт None и ключ НЕ будет отозван.
     """
     async with AsyncSessionLocal() as session:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(BotUser.telegram_id).where(
             BotUser.vpn_subscription_end < now,
             BotUser.vpn_client_id.isnot(None),
@@ -94,7 +94,7 @@ async def check_expired_subscriptions(bot):
 async def send_expiry_reminders(bot):
     """Отправляет напоминания об истечении подписки."""
     async with AsyncSessionLocal() as session:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await session.execute(
             select(BotUser).where(
                 BotUser.vpn_subscription_end > now, BotUser.vpn_client_id.isnot(None)
@@ -205,7 +205,7 @@ async def retry_missing_keys(bot):
     Блокировка строки БД НЕ удерживается во время сетевых вызовов.
     """
     async with AsyncSessionLocal() as session:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(BotUser).where(
             BotUser.vpn_subscription_end > now, BotUser.vpn_client_id.is_(None)
         )

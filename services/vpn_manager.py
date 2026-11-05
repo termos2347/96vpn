@@ -3,7 +3,7 @@ import asyncio
 import logging
 import uuid
 import weakref
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from config import settings
 from db.base import AsyncSessionLocal, retry_db_operation
@@ -129,10 +129,9 @@ class VPNManager:
             return await self._create_vpn_key_locked(user_id)
 
     async def _create_vpn_key_locked(self, user_id: int) -> str | None:
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                user = await get_or_create_bot_user(session, user_id)
-                existing_client_id = user.vpn_client_id
+        async with AsyncSessionLocal() as session, session.begin():
+            user = await get_or_create_bot_user(session, user_id)
+            existing_client_id = user.vpn_client_id
 
         existing = await self._find_existing_client(user_id, existing_client_id)
         if existing:
@@ -153,7 +152,7 @@ class VPNManager:
             client_data = await asyncio.wait_for(
                 self.provider.create_client(email, sub_id), timeout=15.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"Timeout creating client for user {user_id}")
             await self._notify_admin_and_user(
                 user_id, "таймаут при создании клиента на панели"
@@ -213,13 +212,12 @@ class VPNManager:
 
         logger.info(f"get_or_create_link called for user {user_id}")
 
-        async with AsyncSessionLocal() as session:
-            async with session.begin():
-                user = await get_or_create_bot_user(session, user_id)
-                vpn_client_id = user.vpn_client_id
-                vpn_end = user.vpn_subscription_end
+        async with AsyncSessionLocal() as session, session.begin():
+            user = await get_or_create_bot_user(session, user_id)
+            vpn_client_id = user.vpn_client_id
+            vpn_end = user.vpn_subscription_end
 
-        if vpn_end is None or vpn_end <= datetime.now(timezone.utc):
+        if vpn_end is None or vpn_end <= datetime.now(UTC):
             logger.info(f"User {user_id} has no active subscription")
             return None
 
@@ -276,7 +274,7 @@ class VPNManager:
 
             if require_expired:
                 end = user.vpn_subscription_end
-                if end is None or end > datetime.now(timezone.utc):
+                if end is None or end > datetime.now(UTC):
                     logger.info(
                         f"revoke_key: user {user_id} subscription renewed, "
                         f"skipping revoke"
@@ -287,7 +285,7 @@ class VPNManager:
                 logger.info(f"User {user_id} has no active key to revoke")
                 if not require_expired:
                     user.vpn_subscription_end = (
-                        datetime.now(timezone.utc) - timedelta(days=1)
+                        datetime.now(UTC) - timedelta(days=1)
                     )
                     logger.info(
                         f"revoke_key: subscription reset for user {user_id} "
@@ -299,7 +297,7 @@ class VPNManager:
             result = await asyncio.wait_for(
                 self.provider.revoke_client(client_uuid), timeout=15.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 f"Timeout revoking client {client_uuid} for user {user_id}"
             )
@@ -334,7 +332,7 @@ class VPNManager:
             user = await get_or_create_bot_user(session, user_id)
             user.vpn_client_id = None
             user.vpn_subscription_end = (
-                datetime.now(timezone.utc) - timedelta(days=1)
+                datetime.now(UTC) - timedelta(days=1)
             )
         logger.info(f"Key revoked for user {user_id}")
         return True

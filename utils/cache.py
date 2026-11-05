@@ -15,7 +15,7 @@ BUGFIX: rate-limit вынесен в отдельный словарь _rl_cache
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def _rl_cleanup_expired(now: datetime) -> None:
 
 def set_cache(key: str, value: Any, ttl_seconds: int = 300) -> None:
     """Сохранить значение в кэш на указанное количество секунд."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if len(_cache) >= _MAX_CACHE_SIZE:
         _cleanup_expired(now)
         if len(_cache) >= _MAX_CACHE_SIZE:
@@ -58,7 +58,7 @@ def get_cache(key: str) -> Any | None:
     entry = _cache.get(key)
     if entry:
         value, expires = entry
-        if datetime.now(timezone.utc) < expires:
+        if datetime.now(UTC) < expires:
             return value
         del _cache[key]
     return None
@@ -88,7 +88,7 @@ def rate_limit_check_memory(
     но не безопасна при многопроцессном запуске — для горизонтального
     масштабирования обязателен Redis.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entry = _rl_cache.get(key)
     if entry:
         count, expires = entry

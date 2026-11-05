@@ -14,7 +14,6 @@ from utils.cache import get_cache, rate_limit_check_memory, set_cache
 from utils.decorators import rate_limit
 from utils.encryption import decrypt_password, encrypt_password, is_encrypted
 
-
 # ============================================================
 # Шифрование
 # ============================================================
