@@ -1,7 +1,9 @@
 # admin/bot.py
 import asyncio
+import ipaddress
 import json
 import logging
+import uuid as _uuid
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -37,11 +39,9 @@ dp = Dispatcher()
 main_bot: Bot | None = None
 
 error_log: list[str] = []
-_broadcast_cancel_flags: dict[int, bool] = {}
+_broadcast_cancel_flags: dict[str, bool] = {}
 _router_attached = False
 
-# BUGFIX: трекаем fire-and-forget задачи алертов, чтобы не терять их
-# при завершении процесса и не получать "Task was destroyed but pending".
 _alert_tasks: set[asyncio.Task] = set()
 
 
@@ -54,6 +54,16 @@ def _is_admin(message: types.Message) -> bool:
     )
 
 
+# BUGFIX: пользователь, который стартовал ОСНОВНОГО бота, «незнаком»
+# админ-боту (другой токен → другое chat_id-пространство). Поэтому
+# уведомления обычным юзерам нужно слать через main_bot. Раньше
+# cmd_grant/cmd_revoke использовали message.bot (== админ-бот) и всегда
+# получали TelegramForbiddenError.
+def _get_user_notify_bot() -> Bot | None:
+    """Бот для уведомлений пользователей (не админ-бот)."""
+    return main_bot
+
+
 # ========== Вспомогательные функции ==========
 def log_error(message: str, notify_admin: bool = False):
     logger.error(message)
@@ -61,10 +71,6 @@ def log_error(message: str, notify_admin: bool = False):
     if len(error_log) > 100:
         error_log.pop(0)
     if notify_admin:
-        # BUGFIX: трекаем задачу. Раньше был fire-and-forget без ссылки,
-        # при shutdown задача могла быть уничтожена сборщиком мусора
-        # ("Task was destroyed but it is pending"). Также безопасно
-        # работаем без запущенного event loop.
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -84,6 +90,9 @@ async def send_admin_alert(message: str):
             )
     except (TelegramAPIError, ClientError) as e:
         logger.error(f"Не удалось отправить уведомление админу: {e}")
+        error_log.append(f"Admin alert delivery failed: {e}")
+        if len(error_log) > 100:
+            error_log.pop(0)
 
 
 # ========== FSM для рассылки ==========
@@ -207,10 +216,7 @@ async def cmd_health(message: types.Message):
 
     vpn_manager = get_vpn_manager()
     if vpn_manager and hasattr(vpn_manager, "provider"):
-        if (
-            hasattr(vpn_manager.provider, "api_token")
-            and vpn_manager.provider.api_token
-        ):
+        if vpn_manager.provider.api_token:
             status += "• VPN-панель: токен установлен\n"
         else:
             status += "• VPN-панель: токен не найден\n"
@@ -276,10 +282,9 @@ async def cmd_broadcast(message: Message):
             "original_message": message,
         }
 
-        # parse_mode=None — иначе ``` в тексте сломает Markdown-превью.
         await message.answer(
-            f"⚠️ Вы собираетесь отправить сообщение **всем "
-            f"{'активным ' if only_active else ''}пользователям**.\n\n"
+            f"⚠️ Вы собираетесь отправить сообщение всем "
+            f"{'активным ' if only_active else ''}пользователям.\n\n"
             f"Текст сообщения:\n\n{broadcast_text}\n\n"
             f"Подтвердите действие:",
             parse_mode=None,
@@ -371,9 +376,9 @@ async def cmd_broadcast_media(message: Message, state: FSMContext):
         ]
     )
     await message.answer(
-        "⚠️ Вы собираетесь разослать это сообщение **всем пользователям**.\n\n"
+        "⚠️ Вы собираетесь разослать это сообщение всем пользователям.\n\n"
         "Подтвердите действие:",
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=confirm_kb,
     )
 
@@ -381,8 +386,6 @@ async def cmd_broadcast_media(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("broadcast_confirm_"))
 async def broadcast_confirm_callback(callback: CallbackQuery):
     try:
-        # ВАЖНО: сначала проверяем наличие message, потом уже отвечаем
-        # на callback — иначе второй answer() не сработает.
         if not isinstance(callback.message, Message):
             await callback.answer("Сообщение устарело", show_alert=True)
             return
@@ -391,9 +394,6 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             await callback.answer()
             return
 
-        # BUGFIX: проверка админа отсутствовала. Раньше защита строилась
-        # только на том, что pending_broadcasts ключуется по admin_id
-        # (defense-by-obscurity). Явная проверка — как в остальных хендлерах.
         if str(callback.from_user.id) != ADMIN_CHAT_ID:
             await callback.answer("Нет доступа", show_alert=True)
             return
@@ -438,7 +438,7 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
             cmd_broadcast.pending_broadcasts.pop(admin_id, None)
             return
 
-        cancel_key = callback.message.chat.id
+        cancel_key = _uuid.uuid4().hex
         _broadcast_cancel_flags[cancel_key] = False
         cancel_kb = InlineKeyboardMarkup(
             inline_keyboard=[
@@ -646,7 +646,7 @@ async def broadcast_confirm(callback: types.CallbackQuery, state: FSMContext):
         return
 
     total = len(user_ids)
-    cancel_flag_key = callback.message.chat.id
+    cancel_flag_key = _uuid.uuid4().hex
     _broadcast_cancel_flags[cancel_flag_key] = False
 
     cancel_kb = InlineKeyboardMarkup(
@@ -771,7 +771,7 @@ async def stop_broadcast(callback: types.CallbackQuery):
         await callback.answer("Сообщение устарело", show_alert=True)
         return
 
-    key = int(callback.data.split("_")[2])
+    key = callback.data[len("stop_broadcast_") :]
     _broadcast_cancel_flags[key] = True
     await callback.answer("⏳ Останавливаю рассылку...")
     await callback.message.edit_reply_markup(reply_markup=None)
@@ -867,23 +867,39 @@ async def cmd_grant(message: Message):
         link = await vpn_manager.grant_subscription(telegram_id, days)
 
         if link:
-            await message.answer(
-                f"✅ VPN-подписка выдана пользователю `{telegram_id}` "
-                f"на **{days}** дней.\n"
-                f"🔗 Ссылка: `{link}`",
-                parse_mode="Markdown",
-            )
-            try:
-                if message.bot is not None:
-                    await message.bot.send_message(
+            # BUGFIX: используем ОСНОВНОЙ бот (main_bot), а не message.bot.
+            # message.bot — это админ-бот (другой токен), он не может
+            # писать обычным пользователям основного бота. Раньше здесь
+            # всегда был TelegramForbiddenError, и юзер не получал ссылку.
+            user_bot = _get_user_notify_bot()
+            delivery = "✅ Уведомление отправлено"
+            if user_bot is None:
+                delivery = (
+                    "⚠️ Уведомление не отправлено "
+                    "(main_bot не инициализирован)"
+                )
+            else:
+                try:
+                    await user_bot.send_message(
                         telegram_id,
                         f"🎉 Администратор выдал вам VPN-подписку на {days} дней.\n"
                         f"🔗 Ссылка для подключения: `{link}`\n\n"
                         f"Скопируйте ссылку и вставьте в VPN-приложение.",
                         parse_mode="Markdown",
                     )
-            except TelegramAPIError as e:
-                logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
+                except TelegramAPIError as e:
+                    logger.warning(
+                        f"Не удалось уведомить пользователя {telegram_id}: {e}"
+                    )
+                    delivery = f"⚠️ Не удалось уведомить юзера: {e}"
+
+            await message.answer(
+                f"✅ VPN-подписка выдана пользователю `{telegram_id}` "
+                f"на **{days}** дней.\n"
+                f"🔗 Ссылка: `{link}`\n"
+                f"{delivery}",
+                parse_mode="Markdown",
+            )
         else:
             await message.answer(
                 f"❌ Не удалось создать VPN-ключ для пользователя `{telegram_id}`.\n"
@@ -935,13 +951,24 @@ async def cmd_revoke(message: Message):
                 f"✅ VPN-ключ для пользователя `{telegram_id}` отозван.",
                 parse_mode="Markdown",
             )
-            try:
-                if message.bot is not None:
-                    await message.bot.send_message(
-                        telegram_id, "❌ Ваш VPN-ключ был отозван администратором."
+            # BUGFIX: то же самое — уведомляем через main_bot, а не
+            # через админ-бот (message.bot).
+            user_bot = _get_user_notify_bot()
+            if user_bot is not None:
+                try:
+                    await user_bot.send_message(
+                        telegram_id,
+                        "❌ Ваш VPN-ключ был отозван администратором.",
                     )
-            except TelegramAPIError as e:
-                logger.warning(f"Не удалось уведомить пользователя {telegram_id}: {e}")
+                except TelegramAPIError as e:
+                    logger.warning(
+                        f"Не удалось уведомить пользователя {telegram_id}: {e}"
+                    )
+            else:
+                logger.warning(
+                    f"main_bot не инициализирован — не могу уведомить "
+                    f"пользователя {telegram_id} об отзыве ключа"
+                )
         else:
             await message.answer(
                 f"❌ Не удалось отозвать ключ для пользователя `{telegram_id}`.\n"
@@ -998,7 +1025,7 @@ async def cmd_stats(message: Message):
                 "📊 **Статистика бота**\n\n"
                 f"👥 Всего пользователей: **{total_users}**\n"
                 f"🟢 Активных VPN: **{active_vpn}**\n"
-                f"💰 Платежей сегодня: **{payments_today}**\n"
+                f"💰 Платежей сегодня (UTC): **{payments_today}**\n"
                 f"💳 Всего успешных платежей: **{total_payments}**\n"
             )
 
@@ -1052,6 +1079,12 @@ async def cmd_set_yookassa_ips(message: types.Message):
             raise ValueError("Список должен быть непустым массивом строк.")
         if not all(isinstance(item, str) for item in new_ips):
             raise ValueError("Все элементы должны быть строками (IP или CIDR).")
+
+        for item in new_ips:
+            try:
+                ipaddress.ip_network(item, strict=False)
+            except ValueError as e:
+                raise ValueError(f"Некорректный IP/CIDR {item!r}: {e}")
 
         if not save_trusted_ips(new_ips):
             await message.answer(

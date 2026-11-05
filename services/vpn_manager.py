@@ -45,9 +45,7 @@ class VPNManager:
         key = f"vpn_link:{user_id}"
         ok = await redis_service.set_cache(key, link)
         if not ok:
-            local_set_cache(
-                key, link, ttl_seconds=settings.REDIS_CACHE_TTL
-            )
+            local_set_cache(key, link, ttl_seconds=settings.REDIS_CACHE_TTL)
 
     async def _invalidate_cache(self, user_id: int) -> None:
         key = f"vpn_link:{user_id}"
@@ -59,27 +57,62 @@ class VPNManager:
     async def _find_existing_client(
         self, user_id: int, vpn_client_id: str | None
     ) -> dict | None:
-        if not vpn_client_id:
-            return None
+        """Ищет клиента на панели 3X-UI.
 
-        email = f"tg_{user_id}_{vpn_client_id[:8]}"
+        BUGFIX: раньше при vpn_client_id=None сразу возвращал None, из-за
+        чего любой сбой _save_client_id (или сбой getSub → не-JSON) приводил
+        к созданию нового клиента при следующем вызове — дубликаты на
+        панели, лишние лицензии, «осиротевшие» ключи.
+
+        Теперь:
+        1) если client_id есть — ищем по email + по sub_id;
+        2) всегда есть fallback — get_all_clients() + фильтр по префиксу
+           tg_{user_id}_.
+        """
+        if vpn_client_id:
+            email = f"tg_{user_id}_{vpn_client_id[:8]}"
+            try:
+                client = await asyncio.wait_for(
+                    self.provider.get_client_by_email(email), timeout=5.0
+                )
+            except Exception:
+                client = None
+            if client and client.get("subId"):
+                return client
+
+            try:
+                client = await asyncio.wait_for(
+                    self.provider.get_client_by_sub_id(vpn_client_id[:16]),
+                    timeout=5.0,
+                )
+            except Exception:
+                client = None
+            if client and client.get("subId"):
+                return client
+
+        # Fallback: ищем среди всех клиентов по префиксу email
         try:
-            client = await asyncio.wait_for(
-                self.provider.get_client_by_email(email), timeout=5.0
+            all_clients = await asyncio.wait_for(
+                self.provider.get_all_clients(), timeout=10.0
             )
         except Exception:
-            client = None
-        if client and client.get("subId"):
-            return client
+            all_clients = []
 
-        try:
-            client = await asyncio.wait_for(
-                self.provider.get_client_by_sub_id(vpn_client_id[:16]), timeout=5.0
+        prefix = f"tg_{user_id}_"
+        for c in all_clients or []:
+            email = c.get("email") or ""
+            if not email.startswith(prefix):
+                continue
+            sub_id = (
+                c.get("subId") or c.get("subid") or c.get("sub_id")
             )
-        except Exception:
-            client = None
-        if client and client.get("subId"):
-            return client
+            if sub_id:
+                return {
+                    "uuid": c.get("id") or c.get("uuid"),
+                    "subId": sub_id,
+                    "email": email,
+                    "enable": c.get("enable"),
+                }
 
         return None
 
@@ -222,15 +255,16 @@ class VPNManager:
             (админ-команда). Не проверяет статус подписки.
         require_expired=True — используется шедулером: блокирует строку
             и отзывает ключ только если подписка ДЕЙСТВИТЕЛЬНО истекла.
-            Если подписку успели продлить между выборкой шедулера и
-            вызовом revoke_key — возвращает None (пропуск), ключ не
-            трогается.
 
         Возвращает:
-            True  — ключ отозван (или его не было).
+            True  — ключ отозван (или его не было — подписка сброшена).
             False — ошибка отзыва.
             None  — пропущено, т.к. подписка ещё активна (только при
                     require_expired=True).
+
+        BUGFIX: если ключа нет, при require_expired=False сбрасываем и
+        vpn_subscription_end — иначе следующий get_or_create_link /
+        retry_missing_keys создаст новый ключ и «вернёт» подписку.
         """
         await self._invalidate_cache(user_id)
 
@@ -239,9 +273,6 @@ class VPNManager:
                 session, user_id, for_update=True
             )
             client_uuid = user.vpn_client_id
-            if not client_uuid:
-                logger.info(f"User {user_id} has no active key to revoke")
-                return True
 
             if require_expired:
                 end = user.vpn_subscription_end
@@ -252,32 +283,22 @@ class VPNManager:
                     )
                     return None
 
+            if not client_uuid:
+                logger.info(f"User {user_id} has no active key to revoke")
+                if not require_expired:
+                    user.vpn_subscription_end = (
+                        datetime.now(timezone.utc) - timedelta(days=1)
+                    )
+                    logger.info(
+                        f"revoke_key: subscription reset for user {user_id} "
+                        f"(no key on panel)"
+                    )
+                return True
+
         try:
-            success = await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self.provider.revoke_client(client_uuid), timeout=15.0
             )
-            if not success:
-                email = f"tg_{user_id}_{client_uuid[:8]}"
-                try:
-                    client = await asyncio.wait_for(
-                        self.provider.get_client_by_email(email), timeout=10.0
-                    )
-                except Exception:
-                    client = None
-
-                if client is None:
-                    logger.info(
-                        f"Client {client_uuid} not found on panel, "
-                        f"assuming already revoked"
-                    )
-                else:
-                    logger.error(
-                        f"Failed to revoke client {client_uuid} for user {user_id}"
-                    )
-                    await self._notify_admin_and_user(
-                        user_id, f"не удалось отозвать ключ {client_uuid}"
-                    )
-                    return False
         except asyncio.TimeoutError:
             logger.error(
                 f"Timeout revoking client {client_uuid} for user {user_id}"
@@ -295,10 +316,26 @@ class VPNManager:
             )
             return False
 
+        if result is None:
+            logger.info(
+                f"Client {client_uuid} not found on panel (404), "
+                f"assuming already revoked"
+            )
+        elif not result:
+            logger.error(
+                f"Failed to revoke client {client_uuid} for user {user_id}"
+            )
+            await self._notify_admin_and_user(
+                user_id, f"не удалось отозвать ключ {client_uuid}"
+            )
+            return False
+
         async with AsyncSessionLocal() as session, session.begin():
             user = await get_or_create_bot_user(session, user_id)
             user.vpn_client_id = None
-            user.vpn_subscription_end = datetime.now(timezone.utc) - timedelta(days=1)
+            user.vpn_subscription_end = (
+                datetime.now(timezone.utc) - timedelta(days=1)
+            )
         logger.info(f"Key revoked for user {user_id}")
         return True
 
@@ -313,6 +350,9 @@ class VPNManager:
             from admin import bot as admin_module
 
             bot = getattr(admin_module, "main_bot", None)
+            if bot is None:
+                bot = getattr(admin_module, "admin_bot", None)
+
             if bot is not None:
                 try:
                     await bot.send_message(

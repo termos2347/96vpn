@@ -34,8 +34,6 @@ except ImportError:
     HAS_PYFIGLET = False
 
 
-# BUGFIX: дедупликация алертов по asyncio-исключениям — не спамим админа
-# одинаковыми ошибками чаще раза в минуту.
 _last_asyncio_alert: dict[str, float] = {}
 
 
@@ -45,8 +43,6 @@ def handle_asyncio_exception(loop, context):
     message = context.get("message", "")
 
     if exception is None:
-        # BUGFIX: cleanup-сообщения (напр. "Task was destroyed but it is
-        # pending") — это НЕ исключения. Не алертим админа, только лог.
         logger.warning(f"Asyncio event: {message}")
         return
 
@@ -107,14 +103,12 @@ async def run_migrations() -> None:
         )
         return
 
-    # Не зависим от CWD: пути строим от расположения run_all.py
     project_root = Path(__file__).resolve().parent
     alembic_cfg = Config(str(project_root / "alembic.ini"))
     alembic_cfg.set_main_option(
         "script_location", str(project_root / "migrations")
     )
 
-    # Проверяем, что ревизии вообще есть
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
     if head_rev is None:
@@ -124,9 +118,6 @@ async def run_migrations() -> None:
         )
         raise RuntimeError("No Alembic revisions found")
 
-    # Отключаем переконфигурацию logging в env.py — иначе Alembic
-    # перезапишет наши хендлеры из utils/logger.py (root logger станет
-    # WARNING + свой консольный handler).
     alembic_cfg.attributes["configure_logger"] = False
 
     logger.info(f"🔄 Применяем миграции до {head_rev[:8]}...")
@@ -140,7 +131,6 @@ async def run_migrations() -> None:
         logger.error(f"❌ Ошибка применения миграций: {e}")
         raise
 
-    # Belt & suspenders: проверяем, что действительно на head
     async with engine.connect() as conn:
         result = await conn.execute(
             text("SELECT to_regclass('alembic_version')")
@@ -195,7 +185,6 @@ async def on_startup():
     logger.info("🚀 Starting VPN bot...")
     logger.info("=" * 50)
 
-    # 0. Инициализация файла доверенных IP (идемпотентно)
     try:
         from config import IPS_FILE, save_trusted_ips
         if not IPS_FILE.exists():
@@ -330,7 +319,6 @@ async def on_startup():
         logger.error(f" ❌ Scheduler error: {e}")
         raise
 
-    # === ИТОГ ===
     logger.info(" " + "=" * 49)
     logger.info(" 🎉 ALL SERVICES STARTED SUCCESSFULLY! 🎉")
     logger.info(" " + "=" * 49)
@@ -382,6 +370,13 @@ async def on_shutdown():
         except Exception as e:
             logger.warning(f"Error closing VPN provider: {e}")
 
+    # BUGFIX: сначала admin.bot (может использовать main_bot в _alert_tasks
+    # и send_admin_alert), только потом закрываем main_bot.session.
+    # Раньше порядок был обратный — при добавлении зависимости admin.bot
+    # от main_bot получили бы RuntimeError «session is closed».
+    await admin.bot.shutdown()
+    admin.bot.main_bot = None
+
     if main_bot:
         try:
             await main_bot.delete_webhook()
@@ -391,11 +386,6 @@ async def on_shutdown():
             await main_bot.session.close()
         except Exception as e:
             logger.warning(f"Error closing main bot session: {e}")
-
-    # BUGFIX: убран дублирующий ручной cleanup admin_bot — admin.bot.shutdown()
-    # сам делает delete_webhook + session.close(). Раньше было двойное
-    # закрытие, маскировавшее ошибки в try/except.
-    await admin.bot.shutdown()
 
     if internal_runner:
         try:

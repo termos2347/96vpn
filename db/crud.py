@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -23,22 +24,40 @@ async def get_or_create_bot_user(
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
 
-    if not user:
-        user = BotUser(
-            telegram_id=telegram_id,
-            username=username,
-            email=email,
-        )
-        session.add(user)
-        await session.flush()
-        logger.info(f"Created new user with telegram_id={telegram_id}")
-    else:
+    if user:
         if username is not None and user.username != username:
             user.username = username
         if email is not None and user.email != email:
             user.email = email
+        return user
 
-    return user
+    # BUGFIX: гонка двух одновременных /start (или /activate + /grant):
+    # второй INSERT падал с IntegrityError и отравлял внешнюю транзакцию.
+    # Ловим через SAVEPOINT и перечитываем строку, созданную параллельно.
+    try:
+        async with session.begin_nested():
+            user = BotUser(
+                telegram_id=telegram_id,
+                username=username,
+                email=email,
+            )
+            session.add(user)
+            await session.flush()
+        logger.info(f"Created new user with telegram_id={telegram_id}")
+        return user
+    except IntegrityError:
+        logger.info(
+            f"Race on creating user {telegram_id}, re-selecting existing row"
+        )
+        stmt = select(BotUser).where(BotUser.telegram_id == telegram_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        user = (await session.execute(stmt)).scalar_one()
+        if username is not None and user.username != username:
+            user.username = username
+        if email is not None and user.email != email:
+            user.email = email
+        return user
 
 
 async def activate_subscription(
@@ -52,6 +71,11 @@ async def activate_subscription(
     """Активирует/продлевает VPN-подписку.
 
     Bypass-режим не реализован — принимается только product_type="vpn".
+
+    BUGFIX: при наличии payment_id проверяем, что платёж существует,
+    не помечен оплаченным и имеет положительную сумму. Раньше слепо
+    ставили is_paid=True — внутренний /activate с утёкшим Bearer-токеном
+    мог активировать подписку по произвольному payment_id.
     """
     if product_type != "vpn":
         logger.error(f"Unsupported product_type: {product_type}")
@@ -61,12 +85,33 @@ async def activate_subscription(
         logger.error(f"Invalid period: {period}")
         return False
 
+    now = datetime.now(timezone.utc)
+
+    if payment_id:
+        stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
+        payment = (await session.execute(stmt)).scalar_one_or_none()
+        if not payment:
+            logger.error(
+                f"activate_subscription: payment {payment_id} not found"
+            )
+            return False
+        if payment.is_paid:
+            logger.warning(
+                f"activate_subscription: payment {payment_id} already paid, "
+                f"skipping duplicate activation"
+            )
+            return False
+        if payment.amount is None or float(payment.amount) <= 0:
+            logger.error(
+                f"activate_subscription: invalid amount for payment "
+                f"{payment_id}: {payment.amount!r}"
+            )
+            return False
+
     if user is None:
         user = await get_or_create_bot_user(session, telegram_id)
 
     days = settings.PERIOD_DAYS[period]
-    now = datetime.now(timezone.utc)
-
     if user.vpn_subscription_end and user.vpn_subscription_end > now:
         new_end = user.vpn_subscription_end + timedelta(days=days)
     else:
@@ -76,8 +121,7 @@ async def activate_subscription(
 
     if payment_id:
         stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
-        result = await session.execute(stmt)
-        payment = result.scalar_one_or_none()
+        payment = (await session.execute(stmt)).scalar_one_or_none()
         if payment:
             payment.is_paid = True
             payment.status = "succeeded"

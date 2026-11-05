@@ -18,27 +18,12 @@ from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
-
-async def run_with_restart(coro, task_name: str, restart_delay: int = 5):
-    while True:
-        try:
-            await coro()
-        except asyncio.CancelledError:
-            logger.info(f"Task {task_name} cancelled")
-            raise
-        except Exception as e:
-            logger.error(f"Task {task_name} crashed")
-            await send_admin_alert(
-                f"❌ Фоновая задача {task_name} упала: {e}. "
-                f"Будет перезапущена через {restart_delay}с."
-            )
-            await asyncio.sleep(restart_delay)
-        else:
-            logger.warning(
-                f"Task {task_name} finished unexpectedly, "
-                f"restarting in {restart_delay}s"
-            )
-            await asyncio.sleep(restart_delay)
+# Окно, в течение которого повторное напоминание не отправляется.
+# BUGFIX: раньше сравнивали `last_reminder_sent.date() == today` (UTC).
+# Если шедулер прогонялся в 23:00 UTC и снова в 01:00 UTC — даты разные,
+# и пользователь получал ВТОРОЕ напоминание через 2 часа. Окно 20 часов
+# исключает такие дубли и не привязано к UTC-полуночи.
+_REMINDER_COOLDOWN_SECONDS = 20 * 3600
 
 
 @retry_db_operation(max_retries=3)
@@ -83,7 +68,6 @@ async def check_expired_subscriptions(bot):
             continue
 
         if revoked is None:
-            # Подписку успели продлить между выборкой и отзывом — пропуск
             logger.info(
                 f"User {telegram_id} subscription renewed, skipping revoke"
             )
@@ -122,18 +106,23 @@ async def send_expiry_reminders(bot):
         logger.debug("Нет активных подписок для напоминаний")
         return
 
-    today = now.date()
     for user in users:
         vpn_end = user.vpn_subscription_end
         if vpn_end is None:
             continue
 
-        days_left = (vpn_end - now).days
+        # BUGFIX: timedelta.days — floor, поэтому напоминание "за 7 дней"
+        # могло не отправиться (если осталось 6д 23ч → days=6).
+        # Округление делает окно [6.5, 7.5) → 7, [2.5, 3.5) → 3, [0.5, 1.5) → 1.
+        days_left = round((vpn_end - now).total_seconds() / 86400)
         if days_left not in (7, 3, 1):
             continue
 
-        if user.last_reminder_sent and user.last_reminder_sent.date() == today:
-            continue
+        # BUGFIX: окно 20 часов вместо сравнения UTC-дат.
+        if user.last_reminder_sent:
+            delta = (now - user.last_reminder_sent).total_seconds()
+            if delta < _REMINDER_COOLDOWN_SECONDS:
+                continue
 
         day_word = {7: "7 дней", 3: "3 дня", 1: "1 день"}[days_left]
         message_sent = False
@@ -189,11 +178,14 @@ async def send_expiry_reminders(bot):
                     ).scalar_one_or_none()
                     if not db_user:
                         continue
-                    if (
-                        db_user.last_reminder_sent
-                        and db_user.last_reminder_sent.date() == today
-                    ):
-                        continue
+                    # Повторная проверка окна под блокировкой —
+                    # на случай параллельного прогона.
+                    if db_user.last_reminder_sent:
+                        delta = (
+                            now - db_user.last_reminder_sent
+                        ).total_seconds()
+                        if delta < _REMINDER_COOLDOWN_SECONDS:
+                            continue
                     db_user.last_reminder_sent = now
             logger.info(
                 f"Отправлено напоминание за {days_left} дн. "
@@ -312,9 +304,9 @@ async def start_scheduler(bot):
             await asyncio.sleep(INTERVAL_RETRY_KEYS)
 
     tasks = [
-        asyncio.create_task(run_with_restart(run_check_expired, "check_expired")),
-        asyncio.create_task(run_with_restart(run_reminders, "reminders")),
-        asyncio.create_task(run_with_restart(run_retry_keys, "retry_keys")),
+        asyncio.create_task(run_check_expired(), name="check_expired"),
+        asyncio.create_task(run_reminders(), name="reminders"),
+        asyncio.create_task(run_retry_keys(), name="retry_keys"),
     ]
-    logger.info("Фоновые задачи запущены с автоматическим перезапуском")
+    logger.info("Фоновые задачи запущены")
     return tasks

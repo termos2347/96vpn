@@ -100,7 +100,7 @@ class Settings(BaseSettings):
 
     # ---------- Безопасность ----------
     ENCRYPTION_KEY: str = Field(..., min_length=1)
-    INTERNAL_API_SECRET: str = Field(..., min_length=1)
+    INTERNAL_API_SECRET: str = Field(..., min_length=32)
     VERIFY_SSL: bool = True
 
     # ---------- Yookassa ----------
@@ -111,9 +111,9 @@ class Settings(BaseSettings):
     YOOKASSA_TRUSTED_IPS: list[str] = Field(..., min_length=1)
 
     # ---------- Прокси, от которых принимаем X-Real-IP ----------
-    TRUSTED_PROXY_IPS: list[str] = Field(
-        default_factory=lambda: ["127.0.0.1", "::1"]
-    )
+    # Дефолт — пустой список. Если перед ботом стоит nginx —
+    # оператор должен явно добавить его IP/CIDR.
+    TRUSTED_PROXY_IPS: list[str] = Field(default_factory=list)
 
     # ---------- 3x-UI Master Panel ----------
     XUI_MASTER_URL: str = Field(..., min_length=1)
@@ -159,9 +159,11 @@ class Settings(BaseSettings):
 
     INTERNAL_API_HOST: str = "127.0.0.1"
     INTERNAL_API_PORT: int = 5001
-    # BUGFIX: по умолчанию пусто, заполняется в model_post_init из host+port,
-    # чтобы значение не рассинхронизировалось при смене порта в .env.
-    INTERNAL_API_URL: str = ""
+
+    @property
+    def INTERNAL_API_URL(self) -> str:
+        """Computed-свойство: не может рассинхронизироваться с host+port."""
+        return f"http://{self.INTERNAL_API_HOST}:{self.INTERNAL_API_PORT}"
 
     # ---------- Валидаторы ----------
     @field_validator(
@@ -171,18 +173,14 @@ class Settings(BaseSettings):
     def parse_ip_list(cls, v):
         """Общий валидатор: строка JSON-массива или готовый list[str]."""
         if isinstance(v, list):
-            if not v:
-                raise ValueError("IP list must be a non-empty list")
             if not all(isinstance(item, str) for item in v):
                 raise ValueError("IP list must contain only strings")
             return v
         elif isinstance(v, str):
             try:
                 parsed = json.loads(v)
-                if (
-                    isinstance(parsed, list)
-                    and parsed
-                    and all(isinstance(item, str) for item in parsed)
+                if isinstance(parsed, list) and all(
+                    isinstance(item, str) for item in parsed
                 ):
                     return parsed
             except json.JSONDecodeError:
@@ -192,11 +190,7 @@ class Settings(BaseSettings):
     @field_validator("TRUSTED_PROXY_IPS")
     @classmethod
     def validate_proxy_ips(cls, v: list[str]) -> list[str]:
-        """BUGFIX: проверяем, что каждый элемент — валидный IP/CIDR.
-
-        Раньше опечатка в TRUSTED_PROXY_IPS молча ломала проверку
-        X-Real-IP (все прокси становились «недоверенными»).
-        """
+        """Проверяем, что каждый элемент — валидный IP/CIDR."""
         for item in v:
             try:
                 ipaddress.ip_network(item, strict=False)
@@ -269,17 +263,6 @@ class Settings(BaseSettings):
             raise ValueError("XUI_MASTER_URL must start with http:// or https://")
         return v
 
-    def model_post_init(self, __context) -> None:
-        """BUGFIX: если INTERNAL_API_URL не задан в .env — вычисляем из
-        host+port, чтобы значение не рассинхронизировалось при смене
-        INTERNAL_API_PORT."""
-        if not self.INTERNAL_API_URL:
-            object.__setattr__(
-                self,
-                "INTERNAL_API_URL",
-                f"http://{self.INTERNAL_API_HOST}:{self.INTERNAL_API_PORT}",
-            )
-
     @property
     def VPN_PRICES(self) -> dict:
         return {
@@ -323,13 +306,7 @@ IPS_FILE = Path(__file__).resolve().parent / "yookassa_ip.json"
 
 
 def load_trusted_ips() -> list[str] | None:
-    """Загружает yookassa_ip.json с валидацией каждого элемента.
-
-    BUGFIX: раньше мусор в файле (опечатки, не-CIDR строки) молча
-    попадал в settings.YOOKASSA_TRUSTED_IPS. Теперь невалидные
-    элементы пропускаются с warning, а если валидных нет — возвращаем
-    None и оставляем значение из .env.
-    """
+    """Загружает yookassa_ip.json с валидацией каждого элемента."""
     if not IPS_FILE.exists():
         return None
     try:
@@ -390,3 +367,142 @@ else:
         "ℹ️ Using YOOKASSA_TRUSTED_IPS from .env "
         "(yookassa_ip.json not found or invalid)"
     )
+
+
+# BUGFIX: раньше здесь был set из строк и сравнение через `in`. Это не
+# ловило `127.0.0.2`, `127.0.0.1/32` и т.п. — guardrail проскакивал
+# небезопасную конфигурацию. Теперь используем ipaddress и проверяем,
+# что CIDR целиком лежит в loopback-пространстве.
+_LOOPBACK_NETWORKS: tuple[
+    ipaddress.IPv4Network | ipaddress.IPv6Network, ...
+] = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
+
+
+def _is_loopback_network(cidr: str) -> bool:
+    """True, если cidr целиком лежит в loopback-пространстве."""
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+    except ValueError:
+        return False
+    for lo in _LOOPBACK_NETWORKS:
+        if net.version != lo.version:
+            continue
+        # Pylance не умеет связывать `net.version != lo.version`
+        # с типами IPv4Network / IPv6Network (typeshed: subnet_of —
+        # self-тип). Явный isinstance-narrowing делает проверку
+        # типов корректной и одновременно гарантирует, что
+        # subnet_of вызывается только на совпадающих версиях.
+        if isinstance(net, ipaddress.IPv4Network) and isinstance(
+            lo, ipaddress.IPv4Network
+        ):
+            if net.subnet_of(lo) or net == lo:
+                return True
+        elif isinstance(net, ipaddress.IPv6Network) and isinstance(
+            lo, ipaddress.IPv6Network
+        ):
+            if net.subnet_of(lo) or net == lo:
+                return True
+    return False
+
+
+def _check_proxy_safety() -> None:
+    """Проверяет безопасность конфигурации прокси и IP-фильтра.
+
+    SECURITY (fail-safe вместо fail-closed):
+    Раньше бот кидал RuntimeError и не запускался, если в
+    YOOKASSA_TRUSTED_IPS был loopback при пустом TRUSTED_PROXY_IPS и
+    DEBUG=false. Это ломало СВЕЖУЮ установку из репозитория (в
+    yookassa_ip.json лежит 127.0.0.1) — бот падал на импорте config.
+
+    Теперь:
+      * loopback-записи АВТОМАТИЧЕСКИ УДАЛЯЮТСЯ из
+        YOOKASSA_TRUSTED_IPS (с громким предупреждением) — подделать
+        вебхук через localhost нельзя;
+      * если после фильтрации список опустел — бот не стартует
+        (иначе все вебхуки YooKassa будут отклонены, что тоже
+        неприемлемо, но уже молча);
+      * в DEBUG-режиме loopback разрешён (localtunnel, локальные
+        тесты) — фильтрация не применяется.
+    """
+
+    # BUGFIX: раньше проверка срабатывала только при INTERNAL_API_HOST
+    # НЕ loopback — т.е. ПРОПУСКАЛА самый частый прод-сценарий:
+    # "nginx на той же машине, бот слушает 127.0.0.1, TRUSTED_PROXY_IPS пуст".
+    # В этом случае get_client_ip() возвращает 127.0.0.1, X-Real-IP
+    # игнорируется, и ВСЕ вебхуки ЮKassa получают 403 (оплаты "висят").
+    # Теперь предупреждаем в обоих случаях.
+    if not settings.DEBUG and not settings.TRUSTED_PROXY_IPS:
+        if settings.INTERNAL_API_HOST in ("127.0.0.1", "::1", "localhost"):
+            logger.warning(
+                "⚠️ INTERNAL_API_HOST=%r (loopback) + TRUSTED_PROXY_IPS "
+                "пуст при DEBUG=false. Если снаружи стоит reverse proxy "
+                "(nginx/caddy) — X-Real-IP приниматься НЕ будет, и ВСЕ "
+                "вебхуки ЮKassa получат 403. Добавьте CIDR прокси в "
+                "TRUSTED_PROXY_IPS (например, ['127.0.0.1/32']).",
+                settings.INTERNAL_API_HOST,
+            )
+        else:
+            logger.warning(
+                "⚠️ INTERNAL_API_HOST=%r + TRUSTED_PROXY_IPS пуст. "
+                "Бот принимает подключения напрямую. Если перед ним "
+                "reverse proxy — добавьте его CIDR в TRUSTED_PROXY_IPS.",
+                settings.INTERNAL_API_HOST,
+            )
+
+    loopback = [
+        ip for ip in settings.YOOKASSA_TRUSTED_IPS if _is_loopback_network(ip)
+    ]
+    if not loopback:
+        return
+
+    if settings.DEBUG:
+        # В DEBUG loopback допустим (localtunnel, локальные тесты).
+        return
+
+    filtered = [
+        ip
+        for ip in settings.YOOKASSA_TRUSTED_IPS
+        if not _is_loopback_network(ip)
+    ]
+
+    if not settings.TRUSTED_PROXY_IPS:
+        logger.error(
+            "🚨 КРИТИЧНО: DEBUG=false, TRUSTED_PROXY_IPS пуст, а "
+            "YOOKASSA_TRUSTED_IPS содержит loopback: %s. "
+            "Loopback будет УДАЛЁН из доверенных IP — иначе любой клиент "
+            "мог бы подделать вебхук YooKassa. "
+            "Чтобы вернуть loopback: (1) задайте TRUSTED_PROXY_IPS (CIDR "
+            "nginx); (2) или для localtunnel-отладки выставьте DEBUG=true.",
+            loopback,
+        )
+    else:
+        logger.warning(
+            "⚠️ YOOKASSA_TRUSTED_IPS содержит loopback (%s) при DEBUG=false. "
+            "Loopback будет удалён из доверенных IP (безопасность). "
+            "Если loopback был нужен — используйте TRUSTED_PROXY_IPS + "
+            "X-Real-IP вместо прямого loopback.",
+            loopback,
+        )
+
+    if not filtered:
+        # Все доверенные IP были loopback'ом. В проде это гарантированно
+        # означает, что все вебхуки YooKassa будут отклонены. Не стартуем
+        # и громко объясняем оператору, что делать.
+        raise RuntimeError(
+            f"YOOKASSA_TRUSTED_IPS состоял только из loopback ({loopback}). "
+            f"После фильтрации список пуст — все вебхуки ЮKassa были бы "
+            f"отклонены. Настройте реальные IP ЮKassa в yookassa_ip.json "
+            f"или в переменной YOOKASSA_TRUSTED_IPS в .env."
+        )
+
+    settings.YOOKASSA_TRUSTED_IPS = filtered
+    logger.info(
+        f"YOOKASSA_TRUSTED_IPS: удалено {len(loopback)} loopback-записей, "
+        f"осталось {len(filtered)}."
+    )
+
+
+_check_proxy_safety()

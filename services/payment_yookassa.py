@@ -20,7 +20,6 @@ from yookassa.domain.exceptions import ApiError
 
 from admin import send_admin_alert
 from config import settings
-from db.base import retry_db_operation
 from db.crud import activate_subscription
 from db.models import BotPayment, BotUser
 from services.vpn_manager import get_vpn_manager
@@ -73,6 +72,20 @@ async def shutdown_pending_tasks(timeout: float = 5.0) -> None:
     _pending_key_tasks.clear()
 
 
+def _log_create_payment_failure(retry_state) -> None:
+    """BUGFIX: retry_error_callback вместо lambda _: None.
+
+    Раньше причина окончательного провала (например, Invalid shop_id)
+    полностью терялась — в логах были только warning'и внутри попыток.
+    """
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.error(
+        f"❌ ЮKassa create_payment failed after "
+        f"{retry_state.attempt_number} attempts: {exc}"
+    )
+    return None
+
+
 class YookassaService:
     def __init__(self):
         Configuration.account_id = settings.YOOKASSA_SHOP_ID
@@ -100,7 +113,7 @@ class YookassaService:
         retry=retry_if_exception_type(
             (ApiError, aiohttp.ClientError, asyncio.TimeoutError)
         ),
-        retry_error_callback=lambda _: None,
+        retry_error_callback=_log_create_payment_failure,
     )
     async def _create_payment_with_retry(
         self,
@@ -175,10 +188,24 @@ class YookassaService:
             "amount": amount_value,
         }
 
-    @retry_db_operation(max_retries=3)
     async def process_webhook(
         self, webhook_data: dict, session: AsyncSession, bot
     ) -> bool:
+        """Обрабатывает вебхук ЮKassa.
+
+        BUGFIX #1: снят @retry_db_operation — он переиспользовал ту же
+        сессию после OperationalError, и повтор падал с
+        PendingRollbackError. Ретраи теперь на уровне HTTP-обработчика
+        (internal_api.yookassa_webhook), где на попытку создаётся
+        свежая сессия.
+
+        BUGFIX #2: SELECT ... FOR UPDATE на bot_payments больше не
+        удерживается во время синхронного вызова Payment.find_one
+        (до 15 сек). Сначала быстрая проверка без блокировки, потом
+        API, потом повторная блокировка с повторной проверкой is_paid.
+        Это убирает long-held lock и риск lock_timeout при массовых
+        вебхуках.
+        """
         # ЛЕНИВЫЙ ИМПОРТ — обходит циклический импорт
         from handlers.ui import Texts
 
@@ -233,28 +260,27 @@ class YookassaService:
             logger.info(f"⏭️ Webhook {payment_id}: event={event} acknowledged")
             return True
 
-        # === 1. Проверка в БД с блокировкой строки ===
-        stmt = (
-            select(BotPayment)
-            .where(BotPayment.payment_id == payment_id)
-            .with_for_update()
-        )
+        # === 1. Быстрая проверка без блокировки ===
+        stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
         db_payment = (await session.execute(stmt)).scalar_one_or_none()
         if not db_payment:
+            # BUGFIX: раньше здесь был `return False` → internal_api отдавал
+            # 400 → ЮKassa считала вебхук доставленным и НЕ повторяла.
+            # Теперь: 500 → ЮKassa повторяет.
             logger.error(f"❌ Webhook {payment_id}: not found in DB")
-            await send_admin_alert(f"⚠️ Платёж {payment_id} не найден в БД")
-            return False
+            await send_admin_alert(
+                f"⚠️ Платёж {payment_id} не найден в БД. "
+                f"Вебхук будет повторён автоматически."
+            )
+            raise YookassaTransientError(
+                f"Payment {payment_id} not found in DB"
+            )
 
         if db_payment.is_paid:
             logger.info(f"ℹ️ Webhook {payment_id}: already processed")
             return True
 
-        # === 2. Double-check через API ЮKassa ===
-        # BUGFIX: timeout увеличен с 3.0 до 15.0 с. При 3с синхронный SDK
-        # через executor часто не укладывается — вебхук отбивался с 400, а
-        # ЮKassa не ретраит 4xx → платёж «зависал», подписка не активировалась.
-        # Теперь при таймауте/сетевой ошибке бросаем YookassaTransientError
-        # → handler вернёт 500 → ЮKassa повторит.
+        # === 2. Double-check через API ЮKassa (без FOR UPDATE) ===
         loop = asyncio.get_running_loop()
         try:
             verified = await asyncio.wait_for(
@@ -288,13 +314,36 @@ class YookassaService:
             )
             return False
 
-        if abs(float(db_payment.amount) - float(verified.amount.value)) > 0.01:
+        verified_amount = float(verified.amount.value)
+        verified_metadata = getattr(verified, "metadata", None) or {}
+
+        # === 3. Повторная блокировка и повторная проверка is_paid ===
+        stmt = (
+            select(BotPayment)
+            .where(BotPayment.payment_id == payment_id)
+            .with_for_update()
+        )
+        db_payment = (await session.execute(stmt)).scalar_one_or_none()
+        if not db_payment:
+            logger.error(
+                f"❌ Webhook {payment_id}: disappeared between checks"
+            )
+            raise YookassaTransientError(
+                f"Payment {payment_id} disappeared between checks"
+            )
+        if db_payment.is_paid:
+            logger.info(
+                f"ℹ️ Webhook {payment_id}: processed by concurrent handler"
+            )
+            return True
+
+        # === 4. Сверка суммы ===
+        if abs(float(db_payment.amount) - verified_amount) > 0.01:
             logger.critical(f"🚨 Webhook {payment_id}: amount mismatch!")
             await send_admin_alert(f"🚨 Несовпадение суммы для платежа {payment_id}")
             return False
 
-        # === 3. Метаданные ===
-        verified_metadata = getattr(verified, "metadata", None) or {}
+        # === 5. Метаданные ===
         combined_metadata = {**metadata, **verified_metadata}
 
         telegram_id = db_payment.telegram_id
@@ -318,11 +367,14 @@ class YookassaService:
             await send_admin_alert("⚠️ Подозрительный платёж: ID не совпадает")
             return False
 
-        # === 4. Продление подписки ===
+        # === 6. Продление подписки ===
+        # BUGFIX: убран skip_locked=True — иначе при параллельной
+        # транзакции (/grant) SELECT возвращал None, и activate_subscription
+        # обновлял строку без блокировки, теряя одно из продлений.
         stmt_user = (
             select(BotUser)
             .where(BotUser.telegram_id == telegram_id)
-            .with_for_update(skip_locked=True)
+            .with_for_update()
         )
         user = (await session.execute(stmt_user)).scalar_one_or_none()
 
@@ -341,13 +393,12 @@ class YookassaService:
             f"✅ Webhook {payment_id}: subscription activated for {telegram_id}"
         )
 
-        # === 5. Сообщение + фоновое создание ключа ===
+        # === 7. Сообщение + фоновое создание ключа ===
         if product_type == "vpn" and bot:
             days = settings.PERIOD_DAYS.get(period, 0)
             vpn_end = user.vpn_subscription_end if user else None
             msg = Texts.payment_success_with_date(vpn_end, days, None)
 
-            # Отправка best-effort: пользователь мог заблокировать бота.
             try:
                 await bot.send_message(telegram_id, msg, parse_mode="Markdown")
             except TelegramForbiddenError:

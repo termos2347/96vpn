@@ -26,7 +26,12 @@ os.environ.setdefault(
 os.environ.setdefault(
     "ENCRYPTION_KEY", "dGVzdF9mZXJuZXRfa2V5X2Zvcl90ZXN0c19vbmx5Xz0="
 )
-os.environ.setdefault("INTERNAL_API_SECRET", "test_internal_api_secret")
+# BUGFIX: config.py требует min_length=32 для INTERNAL_API_SECRET.
+# Раньше здесь был "test_internal_api_secret" (24 символа) — тесты
+# падали бы с ValidationError на импорте config (sys.exit(1)).
+os.environ.setdefault(
+    "INTERNAL_API_SECRET", "test_internal_api_secret_0123456789abcdef"
+)
 
 os.environ.setdefault("YOOKASSA_SHOP_ID", "123456")
 os.environ.setdefault("YOOKASSA_API_KEY", "test_" + "x" * 40)

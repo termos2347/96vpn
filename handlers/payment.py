@@ -64,9 +64,12 @@ async def tariff_chosen(callback: CallbackQuery):
         price = settings.VPN_PRICES[currency][period]
         user_id = callback.from_user.id
 
+        # BUGFIX: ЮKassa требует строковые значения в metadata.
+        # Раньше передавали int — SDK либо падал, либо молча приводил
+        # к строке (не полагаемся на это). Приводим явно.
         metadata = {
             "source": "bot",
-            "telegram_id": user_id,
+            "telegram_id": str(user_id),
             "product_type": "vpn",
             "period": period,
             "currency": currency.upper(),

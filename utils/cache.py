@@ -5,6 +5,10 @@
 или временная ошибка соединения). Всё хранится в памяти процесса и
 сбрасывается при перезапуске бота.
 
+BUGFIX: rate-limit вынесен в отдельный словарь _rl_cache, чтобы
+переполнение основного кэша (ссылок/прочего) не выкидывало счётчики
+лимитов и не «разрешало» лишние вызовы.
+
 Операции атомарны в пределах одного asyncio event loop, пока между
 чтением и записью нет `await`. Для многопроцессного режима нужен
 настоящий Redis.
@@ -16,19 +20,21 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# BUGFIX: ограничение размера in-memory кэша. Раньше просроченные ключи
-# удалялись только при повторном обращении — при редком использовании
-# большого числа ключей была утечка. Теперь при превышении лимита
-# принудительно чистим просроченные и (при необходимости) самые старые.
 _MAX_CACHE_SIZE = 10_000
+_RL_MAX_SIZE = 10_000
 
 _cache: dict[str, tuple[Any, datetime]] = {}
+_rl_cache: dict[str, tuple[int, datetime]] = {}
 
 
 def _cleanup_expired(now: datetime) -> None:
-    expired = [k for k, (_, exp) in _cache.items() if now >= exp]
-    for k in expired:
+    for k in [k for k, (_, exp) in _cache.items() if now >= exp]:
         _cache.pop(k, None)
+
+
+def _rl_cleanup_expired(now: datetime) -> None:
+    for k in [k for k, (_, exp) in _rl_cache.items() if now >= exp]:
+        _rl_cache.pop(k, None)
 
 
 def set_cache(key: str, value: Any, ttl_seconds: int = 300) -> None:
@@ -54,17 +60,17 @@ def get_cache(key: str) -> Any | None:
         value, expires = entry
         if datetime.now(timezone.utc) < expires:
             return value
-        # Удаляем просроченную запись
         del _cache[key]
     return None
 
 
 def clear_cache(key: str | None = None) -> None:
-    """Очистить весь кэш или конкретный ключ."""
+    """Очистить весь кэш (и rate-limit) или конкретный ключ основного кэша."""
     if key:
         _cache.pop(key, None)
     else:
         _cache.clear()
+        _rl_cache.clear()
 
 
 def rate_limit_check_memory(
@@ -72,26 +78,34 @@ def rate_limit_check_memory(
 ) -> tuple[bool, int]:
     """In-memory rate limiting — fallback, когда Redis недоступен.
 
-    Использует тот же формат ключа, что RedisService.rate_limit_check
-    (incr + expire). Возвращает (allowed, current_count).
+    Префикс `rl:` уже содержится в ключе (см. utils/decorators.py),
+    повторно его НЕ добавляем — иначе ключи в Redis и в памяти
+    расходятся (был баг `rl:rl:`).
+
+    Возвращает (allowed, current_count).
 
     Операция атомарна в asyncio (нет `await` между get и set),
     но не безопасна при многопроцессном запуске — для горизонтального
     масштабирования обязателен Redis.
     """
     now = datetime.now(timezone.utc)
-    full_key = f"rl:{key}"
-    entry = _cache.get(full_key)
+    entry = _rl_cache.get(key)
     if entry:
         count, expires = entry
         if now < expires:
             count += 1
-            _cache[full_key] = (count, expires)
+            _rl_cache[key] = (count, expires)
             return count <= max_per_minute, count
-    _cache[full_key] = (1, now + timedelta(seconds=expire))
+    if len(_rl_cache) >= _RL_MAX_SIZE:
+        _rl_cleanup_expired(now)
+        if len(_rl_cache) >= _RL_MAX_SIZE:
+            drop = max(1, _RL_MAX_SIZE // 10)
+            for k in list(_rl_cache.keys())[:drop]:
+                _rl_cache.pop(k, None)
+    _rl_cache[key] = (1, now + timedelta(seconds=expire))
     return 1 <= max_per_minute, 1
 
 
 def clear_rate_limit_memory(key: str) -> None:
     """Сбросить счётчик rate limiting по ключу."""
-    _cache.pop(f"rl:{key}", None)
+    _rl_cache.pop(key, None)

@@ -15,11 +15,10 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# 1a. BUGFIX: проверяем, что ключевые переменные заданы. Раньше проверяли
-# только наличие файла — бот падал с невнятной ошибкой на пустом .env.
+# 1a. Проверяем, что ключевые переменные заданы.
 _missing=()
 for var in \
-    BOT_TOKEN ADMIN_BOT_TOKEN \
+    BOT_TOKEN ADMIN_BOT_TOKEN ADMIN_CHAT_ID \
     ENCRYPTION_KEY INTERNAL_API_SECRET \
     DATABASE_URL \
     WEBHOOK_URL WEBHOOK_SECRET ADMIN_WEBHOOK_URL ADMIN_WEBHOOK_SECRET \
@@ -42,6 +41,42 @@ if [ -n "${_env_port:-}" ]; then
     PORT="$_env_port"
 fi
 
+# 1c. PRE-FLIGHT: конфигурация YooKassa IP-фильтра и прокси.
+_debug_val=$(grep -E '^DEBUG=' .env 2>/dev/null | head -n1 | cut -d'=' -f2 | tr -d ' "\'" || true)
+_proxy_val=$(grep -E '^TRUSTED_PROXY_IPS=' .env 2>/dev/null | head -n1 | cut -d'=' -f2- || true)
+
+_debug_lc=$(printf '%s' "${_debug_val:-false}" | tr '[:upper:]' '[:lower:]')
+_proxy_trim=$(printf '%s' "${_proxy_val:-}" | tr -d ' "\r\n')
+
+# 1c-i. TRUSTED_PROXY_IPS при DEBUG=false.
+#     Если бот за nginx и TRUSTED_PROXY_IPS пуст — X-Real-IP игнорируется,
+#     и все вебхуки ЮKassa получают 403. Это самый частый прод-misconfig.
+if [ "$_debug_lc" != "true" ] && { [ -z "$_proxy_trim" ] || [ "$_proxy_trim" = "[]" ]; }; then
+    echo "⚠️  ВНИМАНИЕ: TRUSTED_PROXY_IPS пуст при DEBUG=false." >&2
+    echo "   Если перед ботом стоит reverse proxy (nginx/caddy) —" >&2
+    echo "   X-Real-IP приниматься НЕ будет, и ВСЕ вебхуки ЮKassa" >&2
+    echo "   получат 403. Добавьте CIDR прокси в TRUSTED_PROXY_IPS (.env)," >&2
+    echo "   например:  TRUSTED_PROXY_IPS=[\"127.0.0.1/32\"]" >&2
+    echo "" >&2
+fi
+
+# 1c-ii. loopback в yookassa_ip.json при пустом TRUSTED_PROXY_IPS.
+if [ "$_debug_lc" != "true" ] && { [ -z "$_proxy_trim" ] || [ "$_proxy_trim" = "[]" ]; }; then
+    if [ -f "yookassa_ip.json" ] && grep -qE '(^|[^0-9])127\.|::1' yookassa_ip.json 2>/dev/null; then
+        echo "⚠️  ВНИМАНИЕ: yookassa_ip.json содержит loopback (127.0.0.1 / ::1)," >&2
+        echo "   а TRUSTED_PROXY_IPS пуст при DEBUG=false." >&2
+        echo "" >&2
+        echo "   config.py автоматически УДАЛИТ loopback из доверенных IP." >&2
+        echo "   Если loopback — единственный IP в файле, бот НЕ СТАРТУЕТ." >&2
+        echo "" >&2
+        echo "   Варианты:" >&2
+        echo "   1) Удалите loopback из yookassa_ip.json (продакшен)." >&2
+        echo "   2) Задайте TRUSTED_PROXY_IPS (CIDR вашего nginx) в .env." >&2
+        echo "   3) Для localtunnel-отладки выставьте DEBUG=true в .env." >&2
+        echo "" >&2
+    fi
+fi
+
 # 2. Проверяем .venv
 if [ ! -d ".venv" ] || [ ! -f ".venv/bin/activate" ]; then
     echo "❌ Виртуальное окружение .venv не найдено или повреждено." >&2
@@ -56,8 +91,6 @@ if [ ! -f "$ENTRYPOINT" ]; then
 fi
 
 # 4. Останавливаем старый процесс
-# BUGFIX: раньше `pgrep -f run_all.py` матчил редакторы, grep и т.п.
-# Теперь требуем именно `python ... run_all.py`.
 PROC_PATTERN="python[0-9.]* .*${ENTRYPOINT}"
 if pgrep -f "$PROC_PATTERN" >/dev/null 2>&1; then
     echo "⏹  Останавливаем старый процесс ($ENTRYPOINT)..."
@@ -80,9 +113,11 @@ if command -v lsof >/dev/null 2>&1; then
         if [ -n "$pids" ]; then
             echo "🔌 Освобождаем порт $PORT (PID: $pids)..."
             if ! echo "$pids" | xargs -r kill -9 2>/dev/null; then
-                echo "❌ Не удалось освободить порт $PORT (нужны права root)." >&2
-                echo "   Выполните вручную: sudo kill -9 $pids" >&2
-                exit 1
+                if lsof -ti:"$PORT" >/dev/null 2>&1; then
+                    echo "❌ Не удалось освободить порт $PORT (нужны права root)." >&2
+                    echo "   Выполните вручную: sudo kill -9 $pids" >&2
+                    exit 1
+                fi
             fi
             sleep 1
         fi
