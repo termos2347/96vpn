@@ -46,17 +46,16 @@ async def activate_subscription(
     payment_id: str | None = None,
     user: BotUser | None = None,
 ) -> bool:
-    if product_type not in ("vpn", "bypass"):
-        logger.error(f"Invalid product_type: {product_type}")
+    """Активирует/продлевает VPN-подписку.
+
+    Bypass-режим не реализован — принимается только product_type="vpn".
+    """
+    if product_type != "vpn":
+        logger.error(f"Unsupported product_type: {product_type}")
         return False
 
     if period not in settings.PERIOD_DAYS:
         logger.error(f"Invalid period: {period}")
-        return False
-
-    # Защита в глубину: bypass поддерживает только 1m/3m.
-    if product_type == "bypass" and period not in ("1m", "3m"):
-        logger.error(f"bypass does not support period={period}")
         return False
 
     if user is None:
@@ -65,21 +64,12 @@ async def activate_subscription(
     days = settings.PERIOD_DAYS[period]
     now = datetime.now(timezone.utc)
 
-    if product_type == "vpn":
-        if user.vpn_subscription_end and user.vpn_subscription_end > now:
-            new_end = user.vpn_subscription_end + timedelta(days=days)
-        else:
-            new_end = now + timedelta(days=days)
-        user.vpn_subscription_end = new_end
-        logger.info(f"VPN subscription activated for {telegram_id} until {new_end}")
-
-    elif product_type == "bypass":
-        if user.bypass_subscription_end and user.bypass_subscription_end > now:
-            new_end = user.bypass_subscription_end + timedelta(days=days)
-        else:
-            new_end = now + timedelta(days=days)
-        user.bypass_subscription_end = new_end
-        logger.info(f"Bypass subscription activated for {telegram_id} until {new_end}")
+    if user.vpn_subscription_end and user.vpn_subscription_end > now:
+        new_end = user.vpn_subscription_end + timedelta(days=days)
+    else:
+        new_end = now + timedelta(days=days)
+    user.vpn_subscription_end = new_end
+    logger.info(f"VPN subscription activated for {telegram_id} until {new_end}")
 
     if payment_id:
         stmt = select(BotPayment).where(BotPayment.payment_id == payment_id)
@@ -211,32 +201,6 @@ async def update_vpn_subscription(
     return True
 
 
-async def update_bypass_subscription(
-    session: AsyncSession,
-    telegram_id: int,
-    days: int,
-) -> bool:
-    stmt = (
-        select(BotUser)
-        .where(BotUser.telegram_id == telegram_id)
-        .with_for_update()
-    )
-    user = (await session.execute(stmt)).scalar_one_or_none()
-    if not user:
-        logger.error(f"User {telegram_id} not found for Bypass subscription update")
-        return False
-
-    now = datetime.now(timezone.utc)
-    if user.bypass_subscription_end and user.bypass_subscription_end > now:
-        new_end = user.bypass_subscription_end + timedelta(days=days)
-    else:
-        new_end = now + timedelta(days=days)
-
-    user.bypass_subscription_end = new_end
-    logger.info(f"Bypass subscription updated for {telegram_id} until {new_end}")
-    return True
-
-
 async def get_user_full_data(session: AsyncSession, telegram_id: int) -> dict | None:
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
@@ -248,7 +212,6 @@ async def get_user_full_data(session: AsyncSession, telegram_id: int) -> dict | 
         "username": user.username,
         "email": user.email,
         "vpn_subscription_end": user.vpn_subscription_end,
-        "bypass_subscription_end": user.bypass_subscription_end,
         "vpn_client_id": user.vpn_client_id,
         "last_reminder_sent": user.last_reminder_sent,
         "created_at": user.created_at,

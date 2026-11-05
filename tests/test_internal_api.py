@@ -75,3 +75,18 @@ async def test_activate_unauthorized(client):
     payload = {"telegram_id": 123, "product_type": "vpn", "period": "1m"}
     resp = await client.post("/activate", json=payload)
     assert resp.status == 401
+    
+@pytest.mark.asyncio
+async def test_activate_rejects_bypass(client):
+    """Bypass-режим не реализован — /activate должен вернуть 400."""
+    payload = {
+        "telegram_id": 123,
+        "product_type": "bypass",
+        "period": "1m",
+        "payment_id": "test_pay",
+    }
+    headers = {"Authorization": f"Bearer {INTERNAL_API_SECRET}"}
+    resp = await client.post("/activate", json=payload, headers=headers)
+    assert resp.status == 400
+    data = await resp.json()
+    assert "product_type" in data.get("error", "")

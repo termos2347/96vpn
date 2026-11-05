@@ -23,6 +23,9 @@ class BotUser(Base):
     vpn_subscription_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Reserved: bypass-режим (обход DPI) не реализован.
+    # Колонка оставлена в схеме, чтобы при добавлении режима
+    # не делать миграцию. В коде не используется.
     bypass_subscription_end: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

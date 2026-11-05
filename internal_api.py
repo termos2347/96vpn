@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request: web.Request) -> str:
-    """
-    Возвращает IP клиента.
+    """Возвращает IP клиента.
+
     X-Real-IP принимаем только если запрос пришёл с доверенного прокси —
     иначе любой внешний клиент мог бы подделать IP и обойти IP-фильтр ЮKassa.
     """
@@ -42,12 +42,10 @@ def ip_in_network(ip: str) -> bool:
         ip_obj = ipaddress.ip_address(ip)
         for net in trusted:
             try:
-                # strict=False — чтобы "1.2.3.4/24" в конфиге не падал
                 net_obj = ipaddress.ip_network(net, strict=False)
             except ValueError:
                 logger.warning(f"Invalid CIDR in YOOKASSA_TRUSTED_IPS: {net!r}")
                 continue
-            # Сравнение IPv4 с IPv6-сетью даёт TypeError — пропускаем чужие семейства
             if ip_obj.version != net_obj.version:
                 continue
             if ip_obj in net_obj:
@@ -82,14 +80,15 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
 
         if not isinstance(telegram_id, int) or telegram_id <= 0:
             return web.json_response({"error": "invalid telegram_id"}, status=400)
-        if product_type not in ("vpn", "bypass"):
-            return web.json_response({"error": "invalid product_type"}, status=400)
+
+        # Bypass-режим не реализован — принимаем только VPN.
+        if product_type != "vpn":
+            return web.json_response(
+                {"error": "unsupported product_type (only 'vpn')"}, status=400
+            )
+
         if period not in settings.PERIOD_DAYS:
             return web.json_response({"error": "invalid period"}, status=400)
-        if product_type == "bypass" and period not in ("1m", "3m"):
-            return web.json_response(
-                {"error": "bypass supports only 1m and 3m periods"}, status=400
-            )
 
         try:
             async with AsyncSessionLocal() as session, session.begin():
@@ -110,9 +109,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                     )
                     user = (await session.execute(stmt_user)).scalar_one()
 
-                # Защита от двойной активации по одному payment_id —
-                # если платёж уже обработан, повторный /activate
-                # не должен продлевать подписку ещё раз.
+                # Защита от двойной активации по одному payment_id.
                 if payment_id:
                     stmt_payment = (
                         select(BotPayment)
@@ -140,56 +137,52 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                 )
 
             if success:
-                if product_type == "vpn":
-                    vpn_manager = get_vpn_manager()
-                    if vpn_manager:
-                        days = settings.PERIOD_DAYS[period]
-                        link = await vpn_manager.create_vpn_key(telegram_id)
-                        if link and main_bot:
+                # Только VPN — создаём ключ и отправляем ссылку
+                vpn_manager = get_vpn_manager()
+                if vpn_manager:
+                    days = settings.PERIOD_DAYS[period]
+                    link = await vpn_manager.create_vpn_key(telegram_id)
+                    if link and main_bot:
+                        try:
+                            await main_bot.send_message(
+                                telegram_id,
+                                f"🔗 Ваша ссылка: {link}\n\n"
+                                f"Подписка активирована на {days} дней.",
+                            )
+                        except TelegramForbiddenError:
+                            logger.info(
+                                f"User {telegram_id} blocked bot, "
+                                f"cannot send link from API"
+                            )
+                        except TelegramRetryAfter as e:
+                            logger.warning(
+                                f"Flood limit for {telegram_id} (API), "
+                                f"waiting {e.retry_after}s"
+                            )
+                            await asyncio.sleep(e.retry_after)
                             try:
                                 await main_bot.send_message(
                                     telegram_id,
                                     f"🔗 Ваша ссылка: {link}\n\n"
                                     f"Подписка активирована на {days} дней.",
                                 )
-                            except TelegramForbiddenError:
-                                logger.info(
-                                    f"User {telegram_id} blocked bot, "
-                                    f"cannot send link from API"
-                                )
-                            except TelegramRetryAfter as e:
-                                logger.warning(
-                                    f"Flood limit for {telegram_id} (API), "
-                                    f"waiting {e.retry_after}s"
-                                )
-                                await asyncio.sleep(e.retry_after)
-                                try:
-                                    await main_bot.send_message(
-                                        telegram_id,
-                                        f"🔗 Ваша ссылка: {link}\n\n"
-                                        f"Подписка активирована на {days} дней.",
-                                    )
-                                except TelegramAPIError as send_error:
-                                    logger.error(
-                                        f"Failed to send link to {telegram_id} "
-                                        f"after retry: {send_error}"
-                                    )
-                            except (TelegramNetworkError, ClientError) as e:
-                                logger.warning(
-                                    f"Network error sending link to "
-                                    f"{telegram_id} from API: {e}"
-                                )
-                            except Exception as e:
+                            except TelegramAPIError as send_error:
                                 logger.error(
-                                    f"Unexpected error sending link to "
-                                    f"{telegram_id} from API: {e}"
+                                    f"Failed to send link to {telegram_id} "
+                                    f"after retry: {send_error}"
                                 )
+                        except (TelegramNetworkError, ClientError) as e:
+                            logger.warning(
+                                f"Network error sending link to "
+                                f"{telegram_id} from API: {e}"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Unexpected error sending link to "
+                                f"{telegram_id} from API: {e}"
+                            )
                 return web.json_response({"status": "ok"})
 
-            # activate_subscription вернул False, а аргументы уже
-            # провалидированы выше — значит это внутренняя ошибка
-            # (например, гонка при валидации). Отвечаем 400, а не
-            # вводим в заблуждение как "already_activated".
             logger.error(
                 f"/activate: activate_subscription returned False for "
                 f"telegram_id={telegram_id}, product={product_type}, "

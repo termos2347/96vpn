@@ -746,15 +746,11 @@ async def cmd_userinfo(message: types.Message):
 
     now = datetime.now(timezone.utc)
     vpn_end = data["vpn_subscription_end"]
-    bypass_end = data["bypass_subscription_end"]
 
     vpn_left = (vpn_end - now).days if vpn_end and vpn_end > now else 0
-    bypass_left = (bypass_end - now).days if bypass_end and bypass_end > now else 0
     vpn_active = vpn_left > 0
-    bypass_active = bypass_left > 0
 
     vpn_end_str = vpn_end.strftime("%d.%m.%Y %H:%M") if vpn_end else "—"
-    bypass_end_str = bypass_end.strftime("%d.%m.%Y %H:%M") if bypass_end else "—"
     created_str = (
         data["created_at"].strftime("%d.%m.%Y %H:%M") if data["created_at"] else "—"
     )
@@ -769,10 +765,7 @@ async def cmd_userinfo(message: types.Message):
         f"🚀 **VPN-подписка**: {'✅ активна' if vpn_active else '❌ неактивна'}\n"
         f"   Окончание: {vpn_end_str}\n"
         f"   Осталось: {vpn_left} дн.\n"
-        f"   Ключ: `{vpn_key}`\n\n"
-        f"🛡️ **Обход DPI**: {'✅ активен' if bypass_active else '❌ не активен'}\n"
-        f"   Окончание: {bypass_end_str}\n"
-        f"   Осталось: {bypass_left} дн."
+        f"   Ключ: `{vpn_key}`"
     )
     await message.answer(text_msg, parse_mode="Markdown")
 
@@ -927,12 +920,6 @@ async def cmd_stats(message: Message):
                 .where(BotUser.vpn_subscription_end > now)
             )
 
-            active_bypass = await session.scalar(
-                select(func.count())
-                .select_from(BotUser)
-                .where(BotUser.bypass_subscription_end > now)
-            )
-
             payments_today = await session.scalar(
                 select(func.count())
                 .select_from(BotPayment)
@@ -949,7 +936,6 @@ async def cmd_stats(message: Message):
                 "📊 **Статистика бота**\n\n"
                 f"👥 Всего пользователей: **{total_users}**\n"
                 f"🟢 Активных VPN: **{active_vpn}**\n"
-                f"🟡 Активных обход DPI: **{active_bypass}**\n"
                 f"💰 Платежей сегодня: **{payments_today}**\n"
                 f"💳 Всего успешных платежей: **{total_payments}**\n"
             )

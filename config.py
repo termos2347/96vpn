@@ -20,10 +20,9 @@ def clean_db_url(url: str) -> str:
 
     asyncpg не понимает `sslmode`/`ssl` как строковые параметры в URL —
     их наличие приводит к ошибке `connect() got an unexpected keyword
-    argument 'sslmode'`. Поэтому полностью убираем SSL-параметры из URL,
-    полагаясь на asyncpg-дефолт ("prefer": сначала попытаться SSL,
-    затем fallback). Для строгого SSL задавайте его через connect_args
-    в db/base.py (ssl=True / ssl.SSLContext).
+    argument 'sslmode'`. Поэтому полностью убираем SSL-параметры из URL.
+    Для строгого SSL задавайте его через connect_args в db/base.py
+    (см. get_asyncpg_ssl).
     """
     parsed = urlparse(url)
     query_params = parse_qs(parsed.query)
@@ -42,9 +41,6 @@ def get_asyncpg_ssl(url: str):
     None         — использовать asyncpg-дефолт ("prefer").
     False        — SSL отключён (sslmode=disable).
     SSLContext   — явная проверка (require/verify-ca/verify-full).
-
-    Парсим sslmode из СЫРОГО DATABASE_URL (settings.DATABASE_URL),
-    а не из очищенного clean_db_url(), где sslmode уже удалён.
     """
     import ssl as ssl_module
 
@@ -72,9 +68,8 @@ def get_asyncpg_ssl(url: str):
         ctx.check_hostname = False
         ctx.verify_mode = ssl_module.CERT_REQUIRED
     elif sslmode == "verify-full":
-        pass  # дефолт: CERT_REQUIRED + check_hostname=True
+        pass
     else:
-        # Неизвестное значение — не рискуем, оставляем asyncpg-дефолт
         return None
     return ctx
 
@@ -115,7 +110,6 @@ class Settings(BaseSettings):
     YOOKASSA_TRUSTED_IPS: list[str] = Field(..., min_length=1)
 
     # ---------- Прокси, от которых принимаем X-Real-IP ----------
-    # Если nginx на другой машине — переопределите через .env (JSON-массив).
     TRUSTED_PROXY_IPS: list[str] = Field(
         default_factory=lambda: ["127.0.0.1", "::1"]
     )
@@ -161,9 +155,6 @@ class Settings(BaseSettings):
     VPN_PRICE_RUB_1M: float = 199.0
     VPN_PRICE_RUB_3M: float = 499.0
     VPN_PRICE_RUB_6M: float = 899.0
-
-    BYPASS_PRICE_RUB_1M: float = 150.0
-    BYPASS_PRICE_RUB_3M: float = 400.0
 
     INTERNAL_API_HOST: str = "127.0.0.1"
     INTERNAL_API_PORT: int = 5001
@@ -246,7 +237,8 @@ class Settings(BaseSettings):
                 allowed_local = ("http://localhost", "http://127.0.0.1")
                 if not any(v.startswith(prefix) for prefix in allowed_local):
                     raise ValueError(
-                        "In DEBUG mode, HTTP webhook URL must be localhost or 127.0.0.1"
+                        "In DEBUG mode, HTTP webhook URL must be "
+                        "localhost or 127.0.0.1"
                     )
         return v
 
@@ -264,15 +256,6 @@ class Settings(BaseSettings):
                 "1m": self.VPN_PRICE_RUB_1M,
                 "3m": self.VPN_PRICE_RUB_3M,
                 "6m": self.VPN_PRICE_RUB_6M,
-            },
-        }
-
-    @property
-    def BYPASS_PRICES(self) -> dict:
-        return {
-            "rub": {
-                "1m": self.BYPASS_PRICE_RUB_1M,
-                "3m": self.BYPASS_PRICE_RUB_3M,
             },
         }
 
@@ -298,7 +281,6 @@ TOKEN = settings.BOT_TOKEN
 ADMIN_BOT_TOKEN = settings.ADMIN_BOT_TOKEN
 ADMIN_CHAT_ID = settings.ADMIN_CHAT_ID
 VPN_PRICES = settings.VPN_PRICES
-BYPASS_PRICES = settings.BYPASS_PRICES
 INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 INTERNAL_API_HOST = settings.INTERNAL_API_HOST
 INTERNAL_API_PORT = settings.INTERNAL_API_PORT
@@ -306,8 +288,6 @@ INTERNAL_API_URL = settings.INTERNAL_API_URL
 
 DATABASE_URL = clean_db_url(settings.DATABASE_URL)
 
-# Путь к файлу — от __file__, а не от CWD. Иначе при запуске через
-# systemd/другой рабочий каталог файл создастся/прочитается не там.
 IPS_FILE = Path(__file__).resolve().parent / "yookassa_ip.json"
 
 
@@ -319,11 +299,10 @@ def load_trusted_ips() -> list[str] | None:
             data = json.load(f)
         if isinstance(data, list) and all(isinstance(x, str) for x in data):
             return data
-        else:
-            logger.warning(
-                "yookassa_ip.json has invalid format, expected list of strings"
-            )
-            return None
+        logger.warning(
+            "yookassa_ip.json has invalid format, expected list of strings"
+        )
+        return None
     except (json.JSONDecodeError, OSError, TypeError) as e:
         logger.error(f"Failed to load yookassa_ip.json: {e}")
         return None
@@ -339,8 +318,6 @@ def save_trusted_ips(ips: list[str]) -> bool:
         return False
 
 
-# ВАЖНО: файл НЕ создаётся при импорте config — это делает on_startup
-# в run_all.py. Импорт модуля не должен иметь side-эффектов на FS.
 _loaded_ips = load_trusted_ips()
 if _loaded_ips is not None:
     if _loaded_ips:
@@ -351,7 +328,8 @@ if _loaded_ips is not None:
         )
     else:
         logger.warning(
-            "⚠️ yookassa_ip.json contains an empty list. Keeping value from .env."
+            "⚠️ yookassa_ip.json contains an empty list. "
+            "Keeping value from .env."
         )
 else:
     logger.info(
