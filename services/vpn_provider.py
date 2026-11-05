@@ -97,11 +97,16 @@ class XUIVPNProvider:
         while attempt < self.MAX_RETRIES:
             try:
                 session = await self._get_session()
-                kwargs.setdefault("headers", {})["Authorization"] = (
-                    f"Bearer {self.api_token}"
-                )
+                # BUGFIX: не мутируем kwargs вызывающего кода. Раньше
+                # `kwargs.setdefault("headers", {})["Authorization"] = ...`
+                # менял переданный извне dict (побочный эффект).
+                call_kwargs = dict(kwargs)
+                call_headers = dict(call_kwargs.get("headers") or {})
+                call_headers["Authorization"] = f"Bearer {self.api_token}"
+                call_kwargs["headers"] = call_headers
+
                 method_func = getattr(session, method.lower())
-                async with method_func(url, **kwargs) as resp:
+                async with method_func(url, **call_kwargs) as resp:
                     if resp.status == 200:
                         try:
                             return await resp.json()

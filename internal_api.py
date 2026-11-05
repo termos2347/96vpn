@@ -16,10 +16,28 @@ from config import INTERNAL_API_SECRET, settings
 from db.base import AsyncSessionLocal, retry_db_operation
 from db.crud import activate_subscription
 from db.models import BotPayment, BotUser
-from services.payment_yookassa import yookassa_service
+from services.payment_yookassa import YookassaTransientError, yookassa_service
 from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _is_trusted_proxy(ip: str) -> bool:
+    """Проверяет, что ip входит в TRUSTED_PROXY_IPS (с поддержкой CIDR)."""
+    if not ip:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for net in settings.TRUSTED_PROXY_IPS:
+        try:
+            net_obj = ipaddress.ip_network(net, strict=False)
+        except ValueError:
+            continue
+        if ip_obj.version == net_obj.version and ip_obj in net_obj:
+            return True
+    return False
 
 
 def get_client_ip(request: web.Request) -> str:
@@ -27,12 +45,33 @@ def get_client_ip(request: web.Request) -> str:
 
     X-Real-IP принимаем только если запрос пришёл с доверенного прокси —
     иначе любой внешний клиент мог бы подделать IP и обойти IP-фильтр ЮKassa.
+
+    BUGFIX: используем CIDR-aware проверку и явно логируем подозрительные
+    случаи (X-Real-IP от недоверенного источника, отсутствие X-Real-IP
+    от доверенного прокси) — это помогает оператору найти misconfig nginx.
     """
     remote = request.remote or ""
     real_ip = request.headers.get("X-Real-IP")
+    remote_trusted = _is_trusted_proxy(remote)
 
-    if real_ip and remote in settings.TRUSTED_PROXY_IPS:
+    if real_ip and remote_trusted:
         return real_ip
+
+    if real_ip and not remote_trusted:
+        logger.warning(
+            f"X-Real-IP={real_ip!r} ignored: remote {remote!r} is not in "
+            f"TRUSTED_PROXY_IPS. Using remote IP. "
+            f"Проверьте, что nginx переписывает X-Real-IP и добавлен в "
+            f"TRUSTED_PROXY_IPS."
+        )
+
+    if not real_ip and remote_trusted:
+        logger.warning(
+            f"Request from trusted proxy {remote!r} has no X-Real-IP header. "
+            f"Прокси должен выставлять X-Real-IP для корректной работы "
+            f"IP-фильтра."
+        )
+
     return remote
 
 
@@ -174,12 +213,14 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
             days = settings.PERIOD_DAYS[period]
             link = await vpn_manager.create_vpn_key(telegram_id)
             if link and main_bot:
+                # BUGFIX: нейтральная формулировка, работает и при первой
+                # активации, и при продлении (раньше всегда было "активирована").
+                text = (
+                    f"🔗 Ваша ссылка:\n{link}\n\n"
+                    f"Подписка активна на {days} дней."
+                )
                 try:
-                    await main_bot.send_message(
-                        telegram_id,
-                        f"🔗 Ваша ссылка: {link}\n\n"
-                        f"Подписка активирована на {days} дней.",
-                    )
+                    await main_bot.send_message(telegram_id, text)
                 except TelegramForbiddenError:
                     logger.info(
                         f"User {telegram_id} blocked bot, "
@@ -192,11 +233,7 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                     )
                     await asyncio.sleep(e.retry_after)
                     try:
-                        await main_bot.send_message(
-                            telegram_id,
-                            f"🔗 Ваша ссылка: {link}\n\n"
-                            f"Подписка активирована на {days} дней.",
-                        )
+                        await main_bot.send_message(telegram_id, text)
                     except TelegramAPIError as send_error:
                         logger.error(
                             f"Failed to send link to {telegram_id} "
@@ -246,6 +283,12 @@ def create_internal_app(main_bot, main_dp, admin_bot, admin_dp):
                 logger.warning("❌ Yookassa webhook processing failed")
                 return web.json_response({"status": "error"}, status=400)
 
+        except YookassaTransientError as e:
+            # BUGFIX: 500 → ЮKassa повторит вебхук автоматически.
+            logger.warning(
+                f"⏳ Yookassa webhook transient error, will retry: {e}"
+            )
+            return web.json_response({"status": "retry"}, status=500)
         except Exception:
             logger.exception("❌ Yookassa webhook error")
             return web.json_response({"status": "error"}, status=500)

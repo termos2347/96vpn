@@ -40,6 +40,10 @@ error_log: list[str] = []
 _broadcast_cancel_flags: dict[int, bool] = {}
 _router_attached = False
 
+# BUGFIX: трекаем fire-and-forget задачи алертов, чтобы не терять их
+# при завершении процесса и не получать "Task was destroyed but pending".
+_alert_tasks: set[asyncio.Task] = set()
+
 
 # ========== Авторизация ==========
 def _is_admin(message: types.Message) -> bool:
@@ -57,7 +61,17 @@ def log_error(message: str, notify_admin: bool = False):
     if len(error_log) > 100:
         error_log.pop(0)
     if notify_admin:
-        asyncio.create_task(send_admin_alert(message))
+        # BUGFIX: трекаем задачу. Раньше был fire-and-forget без ссылки,
+        # при shutdown задача могла быть уничтожена сборщиком мусора
+        # ("Task was destroyed but it is pending"). Также безопасно
+        # работаем без запущенного event loop.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = loop.create_task(send_admin_alert(message))
+        _alert_tasks.add(task)
+        task.add_done_callback(_alert_tasks.discard)
 
 
 async def send_admin_alert(message: str):
@@ -375,6 +389,13 @@ async def broadcast_confirm_callback(callback: CallbackQuery):
 
         if callback.from_user is None:
             await callback.answer()
+            return
+
+        # BUGFIX: проверка админа отсутствовала. Раньше защита строилась
+        # только на том, что pending_broadcasts ключуется по admin_id
+        # (defense-by-obscurity). Явная проверка — как в остальных хендлерах.
+        if str(callback.from_user.id) != ADMIN_CHAT_ID:
+            await callback.answer("Нет доступа", show_alert=True)
             return
 
         if callback.bot is None:

@@ -24,12 +24,13 @@ async def cmd_start(message: Message):
     user = message.from_user
     user_id = user.id
 
-    async with AsyncSessionLocal() as session:
+    # BUGFIX: оборачиваем в session.begin() — иначе новый пользователь
+    # без username не сохранялся (условие апдейта ложно → commit не
+    # вызывался, INSERT откатывался при session.close()).
+    async with AsyncSessionLocal() as session, session.begin():
         db_user = await get_or_create_bot_user(session, user_id)
-        # Обновляем username, если юзер сменил его (или он появился позже).
         if db_user.username != user.username:
             db_user.username = user.username
-            await session.commit()
         vpn_end = db_user.vpn_subscription_end
 
     await message.answer(
@@ -80,8 +81,13 @@ async def back_to_main(callback: CallbackQuery):
     await callback.message.delete()
 
     user_id = callback.from_user.id
-    async with AsyncSessionLocal() as session:
+    # BUGFIX: явный begin() — гарантирует сохранение нового пользователя
+    # и обновление username. Раньше commit не вызывался вообще, поэтому
+    # новый пользователь не сохранялся, а смена username не применялась.
+    async with AsyncSessionLocal() as session, session.begin():
         db_user = await get_or_create_bot_user(session, user_id)
+        if db_user.username != callback.from_user.username:
+            db_user.username = callback.from_user.username
         vpn_end = db_user.vpn_subscription_end
 
     await callback.message.answer(

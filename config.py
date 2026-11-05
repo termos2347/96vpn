@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import sys
@@ -158,7 +159,9 @@ class Settings(BaseSettings):
 
     INTERNAL_API_HOST: str = "127.0.0.1"
     INTERNAL_API_PORT: int = 5001
-    INTERNAL_API_URL: str = "http://localhost:5001"
+    # BUGFIX: по умолчанию пусто, заполняется в model_post_init из host+port,
+    # чтобы значение не рассинхронизировалось при смене порта в .env.
+    INTERNAL_API_URL: str = ""
 
     # ---------- Валидаторы ----------
     @field_validator(
@@ -185,6 +188,23 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 pass
         raise ValueError("IP list must be a JSON array of IP/CIDR strings")
+
+    @field_validator("TRUSTED_PROXY_IPS")
+    @classmethod
+    def validate_proxy_ips(cls, v: list[str]) -> list[str]:
+        """BUGFIX: проверяем, что каждый элемент — валидный IP/CIDR.
+
+        Раньше опечатка в TRUSTED_PROXY_IPS молча ломала проверку
+        X-Real-IP (все прокси становились «недоверенными»).
+        """
+        for item in v:
+            try:
+                ipaddress.ip_network(item, strict=False)
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid IP/CIDR in TRUSTED_PROXY_IPS: {item!r} ({e})"
+                )
+        return v
 
     @field_validator("DATABASE_URL")
     @classmethod
@@ -249,6 +269,17 @@ class Settings(BaseSettings):
             raise ValueError("XUI_MASTER_URL must start with http:// or https://")
         return v
 
+    def model_post_init(self, __context) -> None:
+        """BUGFIX: если INTERNAL_API_URL не задан в .env — вычисляем из
+        host+port, чтобы значение не рассинхронизировалось при смене
+        INTERNAL_API_PORT."""
+        if not self.INTERNAL_API_URL:
+            object.__setattr__(
+                self,
+                "INTERNAL_API_URL",
+                f"http://{self.INTERNAL_API_HOST}:{self.INTERNAL_API_PORT}",
+            )
+
     @property
     def VPN_PRICES(self) -> dict:
         return {
@@ -292,17 +323,40 @@ IPS_FILE = Path(__file__).resolve().parent / "yookassa_ip.json"
 
 
 def load_trusted_ips() -> list[str] | None:
+    """Загружает yookassa_ip.json с валидацией каждого элемента.
+
+    BUGFIX: раньше мусор в файле (опечатки, не-CIDR строки) молча
+    попадал в settings.YOOKASSA_TRUSTED_IPS. Теперь невалидные
+    элементы пропускаются с warning, а если валидных нет — возвращаем
+    None и оставляем значение из .env.
+    """
     if not IPS_FILE.exists():
         return None
     try:
         with open(IPS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, list) and all(isinstance(x, str) for x in data):
-            return data
-        logger.warning(
-            "yookassa_ip.json has invalid format, expected list of strings"
-        )
-        return None
+        if not isinstance(data, list):
+            logger.warning(
+                "yookassa_ip.json: expected JSON array, got %r",
+                type(data).__name__,
+            )
+            return None
+        validated: list[str] = []
+        for item in data:
+            if not isinstance(item, str):
+                logger.warning(
+                    f"yookassa_ip.json: skipping non-string item {item!r}"
+                )
+                continue
+            try:
+                ipaddress.ip_network(item, strict=False)
+            except ValueError:
+                logger.warning(
+                    f"yookassa_ip.json: skipping invalid IP/CIDR {item!r}"
+                )
+                continue
+            validated.append(item)
+        return validated if validated else None
     except (json.JSONDecodeError, OSError, TypeError) as e:
         logger.error(f"Failed to load yookassa_ip.json: {e}")
         return None

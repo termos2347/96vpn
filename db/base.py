@@ -40,7 +40,27 @@ AsyncSessionLocal = async_sessionmaker(
 
 T = TypeVar("T")
 
-_RETRYABLE_DB_ERRORS = (OperationalError, InterfaceError)
+# BUGFIX: добавляем asyncpg-исключения к retryable.
+# SQLAlchemy OperationalError/InterfaceError не всегда оборачивают
+# connection-level сбои asyncpg (ConnectionDoesNotExistError,
+# TooManyConnectionsError) — часть транзиентных сбоев не ретраилась.
+try:
+    from asyncpg.exceptions import (
+        PostgresConnectionError,
+        TooManyConnectionsError,
+    )
+
+    _ASYNC_PG_RETRYABLE: tuple[type[BaseException], ...] = (
+        PostgresConnectionError,
+        TooManyConnectionsError,
+    )
+except ImportError:  # asyncpg не установлен (напр. при сборке docs)
+    _ASYNC_PG_RETRYABLE = ()
+
+_RETRYABLE_DB_ERRORS = (
+    OperationalError,
+    InterfaceError,
+) + _ASYNC_PG_RETRYABLE
 
 
 def retry_db_operation(max_retries=3, delay=1, backoff=2):

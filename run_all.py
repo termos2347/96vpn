@@ -3,6 +3,7 @@ import asyncio
 import logging
 import signal
 import sys
+import time
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
@@ -33,17 +34,32 @@ except ImportError:
     HAS_PYFIGLET = False
 
 
+# BUGFIX: дедупликация алертов по asyncio-исключениям — не спамим админа
+# одинаковыми ошибками чаще раза в минуту.
+_last_asyncio_alert: dict[str, float] = {}
+
+
 def handle_asyncio_exception(loop, context):
     logger = logging.getLogger(__name__)
-    logger.error(f"Asyncio exception: {context.get('message')}")
     exception = context.get("exception")
-    if exception:
-        logger.exception("Exception details", exc_info=exception)
-        error_text = f"Asyncio exception: {exception}"
-    else:
-        error_text = f"Asyncio exception: {context.get('message')}"
+    message = context.get("message", "")
+
+    if exception is None:
+        # BUGFIX: cleanup-сообщения (напр. "Task was destroyed but it is
+        # pending") — это НЕ исключения. Не алертим админа, только лог.
+        logger.warning(f"Asyncio event: {message}")
+        return
+
+    logger.error(f"Asyncio exception: {message}", exc_info=exception)
+
+    key = f"asyncio:{type(exception).__name__}"
+    now = time.monotonic()
+    if now - _last_asyncio_alert.get(key, 0.0) < 60.0:
+        return
+    _last_asyncio_alert[key] = now
+
     from admin.bot import log_error
-    log_error(error_text, notify_admin=True)
+    log_error(f"Asyncio exception: {exception}", notify_admin=True)
 
 
 setup_logger()
@@ -251,7 +267,6 @@ async def on_startup():
 
     # 6. Internal API
     try:
-        # Проверка вместо assert — под `python -O` assert отключается.
         if main_bot is None:
             raise RuntimeError("main_bot must be initialized before API")
         internal_app = create_internal_app(
@@ -377,16 +392,9 @@ async def on_shutdown():
         except Exception as e:
             logger.warning(f"Error closing main bot session: {e}")
 
-    if admin.bot.admin_bot:
-        try:
-            await admin.bot.admin_bot.delete_webhook()
-        except Exception as e:
-            logger.warning(f"Error deleting admin webhook: {e}")
-        try:
-            await admin.bot.admin_bot.session.close()
-        except Exception as e:
-            logger.warning(f"Error closing admin bot session: {e}")
-
+    # BUGFIX: убран дублирующий ручной cleanup admin_bot — admin.bot.shutdown()
+    # сам делает delete_webhook + session.close(). Раньше было двойное
+    # закрытие, маскировавшее ошибки в try/except.
     await admin.bot.shutdown()
 
     if internal_runner:

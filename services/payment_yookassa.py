@@ -31,6 +31,17 @@ from services.vpn_manager import get_vpn_manager
 
 logger = logging.getLogger(__name__)
 
+
+class YookassaTransientError(Exception):
+    """Транзиентная ошибка при обработке вебхука.
+
+    Вызывающий код (internal_api.yookassa_webhook) должен вернуть 5xx,
+    чтобы ЮKassa повторила вебхук. НЕ использовать для окончательных
+    бизнес-ошибок (mismatch суммы, неполные метаданные) — те не должны
+    триггерить ретраи.
+    """
+
+
 # --- Трекинг fire-and-forget задач ---
 _pending_key_tasks: set[asyncio.Task] = set()
 
@@ -68,6 +79,21 @@ class YookassaService:
         Configuration.secret_key = settings.YOOKASSA_API_KEY
         logger.info("✅ YookassaService инициализирован")
 
+    async def create_payment(
+        self, amount: float, description: str, metadata: dict
+    ) -> dict[str, Any] | None:
+        """Создаёт платёж в ЮKassa.
+
+        BUGFIX: idempotency_key генерируется ОДИН раз до retry-обёртки.
+        Раньше он создавался внутри retry-функции, поэтому каждая повторная
+        попытка создавала новый платёж (при потере ответа после успешного
+        создания — двойное списание и «висящий» pending).
+        """
+        idempotency_key = str(uuid.uuid4())
+        return await self._create_payment_with_retry(
+            amount, description, metadata, idempotency_key
+        )
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -76,12 +102,16 @@ class YookassaService:
         ),
         retry_error_callback=lambda _: None,
     )
-    async def create_payment(
-        self, amount: float, description: str, metadata: dict
+    async def _create_payment_with_retry(
+        self,
+        amount: float,
+        description: str,
+        metadata: dict,
+        idempotency_key: str,
     ) -> dict[str, Any] | None:
         logger.info(
             f"💳 Создание платежа: amount={amount}, "
-            f"description={description}, metadata={metadata}"
+            f"description={description}, idempotency_key={idempotency_key}"
         )
 
         return_url = settings.YOOKASSA_RETURN_URL
@@ -89,7 +119,6 @@ class YookassaService:
             logger.error("❌ YOOKASSA_RETURN_URL не задан в .env")
             return None
 
-        idempotency_key = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
 
         try:
@@ -221,35 +250,34 @@ class YookassaService:
             return True
 
         # === 2. Double-check через API ЮKassa ===
+        # BUGFIX: timeout увеличен с 3.0 до 15.0 с. При 3с синхронный SDK
+        # через executor часто не укладывается — вебхук отбивался с 400, а
+        # ЮKassa не ретраит 4xx → платёж «зависал», подписка не активировалась.
+        # Теперь при таймауте/сетевой ошибке бросаем YookassaTransientError
+        # → handler вернёт 500 → ЮKassa повторит.
         loop = asyncio.get_running_loop()
         try:
             verified = await asyncio.wait_for(
                 loop.run_in_executor(None, lambda: Payment.find_one(payment_id)),
-                timeout=3.0,
+                timeout=15.0,
             )
         except Exception as e:
             logger.error(f"❌ Webhook {payment_id}: double-check failed: {e}")
-            if bot and db_payment:
-                try:
-                    await bot.send_message(
-                        db_payment.telegram_id,
-                        "✅ Платёж получен, идёт проверка. Если через 10 минут ключ "
-                        "не придёт – напишите в поддержку.",
-                    )
-                except TelegramForbiddenError:
-                    logger.info(
-                        f"Webhook {payment_id}: user {db_payment.telegram_id} "
-                        f"blocked bot"
-                    )
-                except TelegramAPIError as send_err:
-                    logger.warning(
-                        f"Webhook {payment_id}: send failed: {send_err}"
-                    )
-            return False
+            await send_admin_alert(
+                f"⚠️ ЮKassa API недоступен при double-check платежа "
+                f"{payment_id}: {e}. Вебхук будет повторён автоматически."
+            )
+            raise YookassaTransientError(
+                f"YooKassa API unavailable for {payment_id}: {e}"
+            ) from e
 
         if verified.status != "succeeded":
             logger.warning(
                 f"⚠️ Webhook {payment_id}: status mismatch (API={verified.status})"
+            )
+            await send_admin_alert(
+                f"⚠️ Статус API={verified.status} для платежа {payment_id} "
+                f"(вебхук: payment.succeeded)"
             )
             return False
 

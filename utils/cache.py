@@ -10,15 +10,41 @@
 настоящий Redis.
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# BUGFIX: ограничение размера in-memory кэша. Раньше просроченные ключи
+# удалялись только при повторном обращении — при редком использовании
+# большого числа ключей была утечка. Теперь при превышении лимита
+# принудительно чистим просроченные и (при необходимости) самые старые.
+_MAX_CACHE_SIZE = 10_000
 
 _cache: dict[str, tuple[Any, datetime]] = {}
 
 
+def _cleanup_expired(now: datetime) -> None:
+    expired = [k for k, (_, exp) in _cache.items() if now >= exp]
+    for k in expired:
+        _cache.pop(k, None)
+
+
 def set_cache(key: str, value: Any, ttl_seconds: int = 300) -> None:
     """Сохранить значение в кэш на указанное количество секунд."""
-    _cache[key] = (value, datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds))
+    now = datetime.now(timezone.utc)
+    if len(_cache) >= _MAX_CACHE_SIZE:
+        _cleanup_expired(now)
+        if len(_cache) >= _MAX_CACHE_SIZE:
+            logger.warning(
+                f"Memory cache exceeded {_MAX_CACHE_SIZE} entries "
+                f"({len(_cache)}), dropping oldest ~10%"
+            )
+            drop = max(1, _MAX_CACHE_SIZE // 10)
+            for k in list(_cache.keys())[:drop]:
+                _cache.pop(k, None)
+    _cache[key] = (value, now + timedelta(seconds=ttl_seconds))
 
 
 def get_cache(key: str) -> Any | None:

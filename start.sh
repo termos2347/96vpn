@@ -11,7 +11,27 @@ ENTRYPOINT="run_all.py"
 if [ ! -f ".env" ]; then
     echo "❌ Файл .env не найден." >&2
     echo "   Скопируйте шаблон:  cp .env.example .env" >&2
-    echo "   И заполните SECRET_KEY и ADMIN_PASSWORD." >&2
+    echo "   И заполните обязательные переменные (см. .env.example)." >&2
+    exit 1
+fi
+
+# 1a. BUGFIX: проверяем, что ключевые переменные заданы. Раньше проверяли
+# только наличие файла — бот падал с невнятной ошибкой на пустом .env.
+_missing=()
+for var in \
+    BOT_TOKEN ADMIN_BOT_TOKEN \
+    ENCRYPTION_KEY INTERNAL_API_SECRET \
+    DATABASE_URL \
+    WEBHOOK_URL WEBHOOK_SECRET ADMIN_WEBHOOK_URL ADMIN_WEBHOOK_SECRET \
+    YOOKASSA_SHOP_ID YOOKASSA_API_KEY YOOKASSA_TRUSTED_IPS \
+    XUI_MASTER_URL XUI_API_TOKEN XUI_INBOUND_ID XUI_SUB_PORT; do
+    if ! grep -qE "^${var}=.+" .env; then
+        _missing+=("$var")
+    fi
+done
+if [ ${#_missing[@]} -gt 0 ]; then
+    echo "❌ В .env не заданы обязательные переменные:" >&2
+    printf '   - %s\n' "${_missing[@]}" >&2
     exit 1
 fi
 
@@ -35,17 +55,20 @@ if [ ! -f "$ENTRYPOINT" ]; then
     exit 1
 fi
 
-# 4. Останавливаем старый процесс (если запущен)
-if pgrep -f "$ENTRYPOINT" >/dev/null 2>&1; then
+# 4. Останавливаем старый процесс
+# BUGFIX: раньше `pgrep -f run_all.py` матчил редакторы, grep и т.п.
+# Теперь требуем именно `python ... run_all.py`.
+PROC_PATTERN="python[0-9.]* .*${ENTRYPOINT}"
+if pgrep -f "$PROC_PATTERN" >/dev/null 2>&1; then
     echo "⏹  Останавливаем старый процесс ($ENTRYPOINT)..."
-    pkill -f "$ENTRYPOINT" 2>/dev/null || true
+    pkill -f "$PROC_PATTERN" 2>/dev/null || true
     for _ in {1..10}; do
-        pgrep -f "$ENTRYPOINT" >/dev/null 2>&1 || break
+        pgrep -f "$PROC_PATTERN" >/dev/null 2>&1 || break
         sleep 0.5
     done
-    if pgrep -f "$ENTRYPOINT" >/dev/null 2>&1; then
+    if pgrep -f "$PROC_PATTERN" >/dev/null 2>&1; then
         echo "⚠️  Процесс не завершился — SIGKILL..."
-        pkill -9 -f "$ENTRYPOINT" 2>/dev/null || true
+        pkill -9 -f "$PROC_PATTERN" 2>/dev/null || true
         sleep 0.5
     fi
 fi
